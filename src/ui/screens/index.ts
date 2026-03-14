@@ -6,3 +6,4 @@ export { default as DebriefScreen } from './DebriefScreen';
 export { default as PreGameSurvey } from './PreGameSurvey';
 export { default as PostGameSurvey } from './PostGameSurvey';
 export { default as ExportScreen } from './ExportScreen';
+// HowToPlay is lazy-loaded from TitleScreen, not exported here

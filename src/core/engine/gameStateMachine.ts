@@ -21,6 +21,12 @@ export type GameAction =
   | 'BRIEF_FACILITATOR'
   | 'PLACE_STANDEES'
   | 'READY_TO_PLAY'
+  // Setup backward navigation
+  | 'BACK_TO_SITE_SELECTION'
+  | 'BACK_TO_ROLE_ASSIGNMENT'
+  | 'BACK_TO_CHARACTER_CREATION'
+  | 'BACK_TO_FACILITATOR_BRIEFING'
+  | 'BACK_TO_STANDEE_PLACEMENT'
   // Gameplay
   | 'BEGIN_ROUND'
   | 'RESOLVE_EVENT'
@@ -48,21 +54,32 @@ const validTransitions: Record<string, Partial<Record<GameAction, GameState>>> =
   },
   setup_site_selection: {
     SELECT_SITE: 'setup_role_assignment',
+    RETURN_TO_TITLE: 'title_screen',
   },
   setup_role_assignment: {
     ASSIGN_ROLES: 'setup_character_creation',
+    BACK_TO_SITE_SELECTION: 'setup_site_selection',
+    RETURN_TO_TITLE: 'title_screen',
   },
   setup_character_creation: {
     CREATE_CHARACTERS: 'setup_facilitator_briefing',
+    BACK_TO_ROLE_ASSIGNMENT: 'setup_role_assignment',
+    RETURN_TO_TITLE: 'title_screen',
   },
   setup_facilitator_briefing: {
     BRIEF_FACILITATOR: 'setup_standee_placement',
+    BACK_TO_CHARACTER_CREATION: 'setup_character_creation',
+    RETURN_TO_TITLE: 'title_screen',
   },
   setup_standee_placement: {
     PLACE_STANDEES: 'setup_ready',
+    BACK_TO_FACILITATOR_BRIEFING: 'setup_facilitator_briefing',
+    RETURN_TO_TITLE: 'title_screen',
   },
   setup_ready: {
     READY_TO_PLAY: 'phase_1_event',
+    BACK_TO_STANDEE_PLACEMENT: 'setup_standee_placement',
+    RETURN_TO_TITLE: 'title_screen',
   },
   phase_1_event: {
     RESOLVE_EVENT: 'phase_2_challenge',

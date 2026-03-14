@@ -33,7 +33,7 @@ import {
   advanceToNextPlayer,
   haveAllPlayersActed,
 } from '../core/engine/turnManager';
-import { GameStateMachine } from '../core/engine/gameStateMachine';
+import { GameStateMachine, GameAction } from '../core/engine/gameStateMachine';
 import { TelemetryRecorder } from '../core/telemetry/telemetryRecorder';
 import { TelemetryExporter } from '../core/telemetry/telemetryExporter';
 import {
@@ -111,6 +111,10 @@ interface GameStoreState {
   toggleMusic: () => void;
   toggleHighContrast: () => void;
 
+  // Navigation actions
+  returnToTitle: () => void;
+  goBackSetup: () => void;
+
   // Save/Load actions
   saveGame: () => void;
   loadGame: (data: string) => void;
@@ -153,6 +157,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const recorder = new TelemetryRecorder(session.id);
     const sm = new GameStateMachine('title_screen');
 
+    // Advance state machine from title_screen into setup
+    sm.transition('START_GAME'); // title_screen -> setup_site_selection
+
     recorder.record(
       session.currentRound,
       session.currentPhase,
@@ -163,7 +170,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     );
 
     set({
-      session,
+      session: {
+        ...session,
+        currentPhase: 'setup_site_selection',
+      },
       stateMachine: sm,
       telemetryRecorder: recorder,
       deliberationTimer: null,
@@ -181,7 +191,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, stateMachine } = get();
     if (!session) return;
 
-    stateMachine.transition('SELECT_SITE');
+    if (stateMachine.canTransition('SELECT_SITE')) {
+      stateMachine.transition('SELECT_SITE');
+    }
 
     set({
       session: {
@@ -196,7 +208,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, stateMachine } = get();
     if (!session) return;
 
-    stateMachine.transition('ASSIGN_ROLES');
+    if (stateMachine.canTransition('ASSIGN_ROLES')) {
+      stateMachine.transition('ASSIGN_ROLES');
+    }
 
     set({
       session: {
@@ -213,7 +227,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     if (stateMachine.canTransition('CREATE_CHARACTERS')) {
       stateMachine.transition('CREATE_CHARACTERS');
     }
-    stateMachine.transition('BRIEF_FACILITATOR');
+    if (stateMachine.canTransition('BRIEF_FACILITATOR')) {
+      stateMachine.transition('BRIEF_FACILITATOR');
+    }
 
     set({
       session: {
@@ -237,10 +253,21 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, stateMachine, telemetryRecorder } = get();
     if (!session) return;
 
-    if (stateMachine.canTransition('PLACE_STANDEES')) {
-      stateMachine.transition('PLACE_STANDEES');
+    // Walk the state machine through any remaining setup states to reach setup_ready
+    const setupActions: Array<{ action: import('../core/engine/gameStateMachine').GameAction }> = [
+      { action: 'SELECT_SITE' },
+      { action: 'ASSIGN_ROLES' },
+      { action: 'CREATE_CHARACTERS' },
+      { action: 'BRIEF_FACILITATOR' },
+      { action: 'PLACE_STANDEES' },
+      { action: 'READY_TO_PLAY' },
+    ];
+
+    for (const { action } of setupActions) {
+      if (stateMachine.canTransition(action)) {
+        stateMachine.transition(action);
+      }
     }
-    stateMachine.transition('READY_TO_PLAY');
 
     const updatedSession = startPhase(session, 'phase_1_event');
 
@@ -880,6 +907,60 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   toggleHighContrast: () => {
     set((state) => ({ highContrastMode: !state.highContrastMode }));
+  },
+
+  // ── Navigation Actions ──────────────────────────────────────
+
+  returnToTitle: () => {
+    const { deliberationTimer } = get();
+    if (deliberationTimer) {
+      deliberationTimer.stop();
+    }
+    set({
+      session: null,
+      stateMachine: new GameStateMachine('title_screen'),
+      telemetryRecorder: null,
+      deliberationTimer: null,
+      selectedCardId: null,
+      selectedZoneId: null,
+      showHandoff: false,
+      showTradeModal: false,
+      showVoteModal: false,
+      deliberationTimeRemaining: 0,
+      animationQueue: [],
+    });
+  },
+
+  goBackSetup: () => {
+    const { session, stateMachine } = get();
+    if (!session) return;
+
+    const phase = session.currentPhase;
+    const backMap: Record<string, { action: GameAction; phase: GamePhase }> = {
+      'setup_role_assignment': { action: 'BACK_TO_SITE_SELECTION', phase: 'setup_site_selection' },
+      'setup_character_creation': { action: 'BACK_TO_ROLE_ASSIGNMENT', phase: 'setup_role_assignment' },
+      'setup_facilitator_briefing': { action: 'BACK_TO_CHARACTER_CREATION', phase: 'setup_character_creation' },
+      'setup_standee_placement': { action: 'BACK_TO_FACILITATOR_BRIEFING', phase: 'setup_facilitator_briefing' },
+    };
+
+    const back = backMap[phase];
+    if (back) {
+      if (stateMachine.canTransition(back.action)) {
+        stateMachine.transition(back.action);
+      } else {
+        // Fallback: force state machine to target state
+        stateMachine.setState(back.phase);
+      }
+      set({
+        session: {
+          ...session,
+          currentPhase: back.phase,
+        },
+      });
+    } else if (phase === 'setup_site_selection') {
+      // From the first setup step, go back to title
+      get().returnToTitle();
+    }
   },
 
   // ── Save/Load Actions ────────────────────────────────────────

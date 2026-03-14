@@ -237,7 +237,7 @@ export default function SetupScreen() {
   // Step 5 state
   const [placedStandees, setPlacedStandees] = useState<Record<number, string>>({});
 
-  const { initializeGame, placeStandee, startGame, session } = useGameStore();
+  const { initializeGame, selectSite, assignRoles, completeFacilitatorBriefing, placeStandee, startGame, goBackSetup, returnToTitle, session } = useGameStore();
 
   // ── Step Navigation ────────────────────────────────────────────
 
@@ -263,8 +263,11 @@ export default function SetupScreen() {
   }, [step, assignments, readyPlayers, briefingSegment, placedStandees]);
 
   const handleNext = useCallback(() => {
+    if (step === 0) {
+      // Step 0 → 1: Site config collected, actual state machine advance happens at step 1
+    }
     if (step === 1) {
-      // Initialize the game when moving past role assignment
+      // Step 1 → 2: Roles assigned, initialize the game session
       const config: GameConfig = {
         totalRounds,
         deliberationTimerSeconds: timerLength * 60,
@@ -279,9 +282,21 @@ export default function SetupScreen() {
         .filter((a): a is { name: string; roleId: RoleId } => a.roleId !== null && a.name.trim() !== '')
         .map((a) => ({ name: a.name, roleId: a.roleId }));
       initializeGame(config, playerAssignments);
+      // initializeGame creates SM at setup_site_selection; now advance through
+      // SELECT_SITE → setup_role_assignment, then ASSIGN_ROLES → setup_character_creation
+      selectSite('corporation-eco-park');
+      assignRoles(playerAssignments);
+    }
+    if (step === 2) {
+      // Step 2 → 3: Characters created, advance to facilitator briefing
+      // (Character creation is automated, just advance state machine)
+    }
+    if (step === 3) {
+      // Step 3 → 4: Briefing complete, advance to standee placement
+      completeFacilitatorBriefing();
     }
     if (step === 4) {
-      // Place standees and start game
+      // Step 4 → start game: Place standees and launch
       if (session) {
         const playerIds = Object.keys(session.players);
         for (const [indexStr, zoneId] of Object.entries(placedStandees)) {
@@ -293,11 +308,18 @@ export default function SetupScreen() {
       return;
     }
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
-  }, [step, totalRounds, timerLength, facilitatorMode, difficulty, assignments, initializeGame, session, placedStandees, placeStandee, startGame]);
+  }, [step, totalRounds, timerLength, facilitatorMode, difficulty, assignments, initializeGame, selectSite, assignRoles, completeFacilitatorBriefing, session, placedStandees, placeStandee, startGame]);
 
   const handleBack = useCallback(() => {
+    if (step === 0) {
+      // From first setup step, return to title screen
+      returnToTitle();
+      return;
+    }
+    // Go back one step in local state AND update store/state machine
+    goBackSetup();
     setStep((s) => Math.max(s - 1, 0));
-  }, []);
+  }, [step, goBackSetup, returnToTitle]);
 
   // ── Empathy Mode ────────────────────────────────────────────────
 
@@ -1210,11 +1232,10 @@ export default function SetupScreen() {
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <button
             className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-stone-700 text-stone-300
-                       hover:bg-stone-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            disabled={step === 0}
+                       hover:bg-stone-600 transition-colors"
             onClick={handleBack}
           >
-            Back
+            {step === 0 ? '\u2190 Back to Title' : '\u2190 Back'}
           </button>
           <span className="text-stone-500 text-sm">
             Step {step + 1} of {STEPS.length}

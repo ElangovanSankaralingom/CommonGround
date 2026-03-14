@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useGameStore } from './store';
 import {
   TitleScreen,
@@ -13,10 +13,9 @@ import {
 function App() {
   const session = useGameStore((state) => state.session);
   const highContrastMode = useGameStore((state) => state.highContrastMode);
-  const initializeGame = useGameStore((state) => state.initializeGame);
-  const loadGame = useGameStore((state) => state.loadGame);
   const advancePhase = useGameStore((state) => state.advancePhase);
   const exportTelemetry = useGameStore((state) => state.exportTelemetry);
+  const returnToTitle = useGameStore((state) => state.returnToTitle);
 
   // Global keyboard shortcuts
   const handleKeyDown = useCallback(
@@ -35,30 +34,7 @@ function App() {
 
   const renderScreen = () => {
     if (!session) {
-      return (
-        <TitleScreen
-          onNewGame={() => {
-            // Initialize with default config; SetupScreen will collect details
-            initializeGame(
-              {
-                siteId: '',
-                totalRounds: 4,
-                deliberationTimerSeconds: 180,
-                facilitatorMode: 'human',
-                cwsTarget: 100,
-                equityBandK: 0.3,
-                difficultyEscalation: 1,
-                enableTutorial: false,
-              },
-              []
-            );
-          }}
-          onLoadGame={(data: string) => loadGame(data)}
-          onHowToPlay={() => {
-            // Could open a how-to-play modal in the future
-          }}
-        />
-      );
+      return <TitleScreen />;
     }
 
     const phase = session.currentPhase;
@@ -73,14 +49,7 @@ function App() {
       return (
         <DebriefScreen
           onExportData={() => exportTelemetry()}
-          onNewGame={() => {
-            // Reset by clearing the session
-            useGameStore.setState({
-              session: null,
-              telemetryRecorder: null,
-              deliberationTimer: null,
-            });
-          }}
+          onNewGame={() => returnToTitle()}
           onDetailedStats={() => {
             // Advance to export phase for detailed stats
             advancePhase();
