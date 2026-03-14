@@ -1,0 +1,135 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Wood tones */
+  --color-wood-dark: #8B6F47;
+  --color-wood-light: #D4A574;
+  --color-wood-bg: #F5E6D3;
+
+  /* UI chrome */
+  --color-chrome: #2C3E50;
+  --color-text: #1A1A2E;
+
+  /* CWS gold */
+  --color-gold: #F4D03F;
+
+  /* Role colors */
+  --color-administrator: #C0392B;
+  --color-designer: #2E86AB;
+  --color-citizen: #27AE60;
+  --color-investor: #E67E22;
+  --color-advocate: #8E44AD;
+
+  /* Resource colors */
+  --color-budget: #F4D03F;
+  --color-influence: #3498DB;
+  --color-volunteer: #27AE60;
+  --color-material: #95A5A6;
+  --color-knowledge: #8E44AD;
+}
+
+body {
+  margin: 0;
+  font-family: 'DM Sans', sans-serif;
+  color: var(--color-text);
+  background: var(--color-wood-bg);
+}
+
+/* Display headings */
+h1, h2, h3, .font-display {
+  font-family: 'DM Serif Display', serif;
+}
+
+/* Monospace for numbers/scores */
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Subtle paper/parchment texture for cards */
+.texture-paper {
+  background-image:
+    repeating-linear-gradient(
+      0deg, transparent, transparent 2px, rgba(0,0,0,0.02) 2px, rgba(0,0,0,0.02) 4px
+    ),
+    repeating-linear-gradient(
+      90deg, transparent, transparent 2px, rgba(0,0,0,0.01) 2px, rgba(0,0,0,0.01) 4px
+    );
+}
+
+/* Wood grain texture for board */
+.texture-wood {
+  background:
+    linear-gradient(135deg, #D4A574 0%, #C49A6C 25%, #D4A574 50%, #B8895D 75%, #D4A574 100%),
+    repeating-linear-gradient(
+      90deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 11px
+    );
+}
+
+/* Linen texture for character sheets */
+.texture-linen {
+  background-image:
+    repeating-linear-gradient(
+      45deg, transparent, transparent 5px, rgba(0,0,0,0.015) 5px, rgba(0,0,0,0.015) 6px
+    ),
+    repeating-linear-gradient(
+      -45deg, transparent, transparent 5px, rgba(0,0,0,0.015) 5px, rgba(0,0,0,0.015) 6px
+    );
+}
+
+/* High contrast mode */
+.high-contrast {
+  --color-wood-bg: #FFFFFF;
+  --color-text: #000000;
+  --color-chrome: #000000;
+}
+
+.high-contrast .texture-paper,
+.high-contrast .texture-wood,
+.high-contrast .texture-linen {
+  background-image: none;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Card hover micro-interaction */
+.card-hover {
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+.card-hover:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+}
+
+/* Button micro-interaction */
+.btn-press {
+  transition: transform 150ms ease;
+}
+.btn-press:hover {
+  transform: scale(1.02);
+}
+.btn-press:active {
+  transform: scale(0.98);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-wood-light);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-wood-dark);
+  border-radius: 4px;
+}
