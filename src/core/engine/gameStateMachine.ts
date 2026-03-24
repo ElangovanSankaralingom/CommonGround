@@ -27,19 +27,26 @@ export type GameAction =
   | 'BACK_TO_CHARACTER_CREATION'
   | 'BACK_TO_FACILITATOR_BRIEFING'
   | 'BACK_TO_STANDEE_PLACEMENT'
-  // Gameplay
+  // Gameplay — 7-phase round (Fix 5)
   | 'BEGIN_ROUND'
-  | 'RESOLVE_EVENT'
-  | 'PRESENT_CHALLENGE'
-  | 'CONFIRM_CHALLENGE'
+  | 'COMPLETE_PAYMENT_DAY'
+  | 'COMPLETE_EVENT_ROLL'
+  | 'COMPLETE_INDIVIDUAL_ACTION'
   | 'START_DELIBERATION'
+  | 'SKIP_DELIBERATION'
   | 'END_DELIBERATION'
   | 'ALL_PLAYERS_READY'
+  | 'COMPLETE_ACTION_RESOLUTION'
+  | 'COMPLETE_ROUND_END_ACCOUNTING'
+  | 'COMPLETE_LEVEL_CHECK'
+  | 'NEXT_ROUND'
+  | 'END_GAME'
+  // Legacy actions for backwards compat
+  | 'RESOLVE_EVENT'
+  | 'CONFIRM_CHALLENGE'
   | 'START_ACTION_RESOLUTION'
   | 'ALL_PLAYERS_ACTED'
   | 'SCORING_DISPLAYED'
-  | 'NEXT_ROUND'
-  | 'END_GAME'
   // Post-game
   | 'START_DEBRIEF'
   | 'START_EXPORT'
@@ -77,30 +84,40 @@ const validTransitions: Record<string, Partial<Record<GameAction, GameState>>> =
     RETURN_TO_TITLE: 'title_screen',
   },
   setup_ready: {
-    READY_TO_PLAY: 'phase_1_event',
+    READY_TO_PLAY: 'payment_day',
     BACK_TO_STANDEE_PLACEMENT: 'setup_standee_placement',
     RETURN_TO_TITLE: 'title_screen',
   },
-  phase_1_event: {
-    RESOLVE_EVENT: 'phase_2_challenge',
+
+  // ─── 7-Phase Round Structure (Fix 5) ──────────────────────
+  payment_day: {
+    COMPLETE_PAYMENT_DAY: 'event_roll',
   },
-  phase_2_challenge: {
-    CONFIRM_CHALLENGE: 'phase_3_deliberation',
+  event_roll: {
+    COMPLETE_EVENT_ROLL: 'individual_action',
   },
-  phase_3_deliberation: {
-    END_DELIBERATION: 'phase_4_action',
-    ALL_PLAYERS_READY: 'phase_4_action',
+  individual_action: {
+    COMPLETE_INDIVIDUAL_ACTION: 'deliberation',
+    SKIP_DELIBERATION: 'action_resolution',
   },
-  phase_4_action: {
-    ALL_PLAYERS_ACTED: 'phase_5_scoring',
+  deliberation: {
+    END_DELIBERATION: 'action_resolution',
+    ALL_PLAYERS_READY: 'action_resolution',
   },
-  phase_5_scoring: {
-    SCORING_DISPLAYED: 'round_end',
+  action_resolution: {
+    COMPLETE_ACTION_RESOLUTION: 'round_end_accounting',
+  },
+  round_end_accounting: {
+    COMPLETE_ROUND_END_ACCOUNTING: 'level_check',
+  },
+  level_check: {
+    COMPLETE_LEVEL_CHECK: 'round_end',
   },
   round_end: {
-    NEXT_ROUND: 'phase_1_event',
+    NEXT_ROUND: 'payment_day',
     END_GAME: 'game_end',
   },
+
   game_end: {
     START_DEBRIEF: 'debrief',
   },
@@ -123,19 +140,12 @@ export class GameStateMachine {
     return this._currentState;
   }
 
-  /**
-   * Check whether a given action is valid from the current state.
-   */
   canTransition(action: GameAction): boolean {
     const transitions = validTransitions[this._currentState];
     if (!transitions) return false;
     return action in transitions;
   }
 
-  /**
-   * Attempt to transition to the next state via an action.
-   * Throws if the transition is not valid.
-   */
   transition(action: GameAction): GameState {
     const transitions = validTransitions[this._currentState];
     if (!transitions || !(action in transitions)) {
@@ -148,25 +158,16 @@ export class GameStateMachine {
     return nextState;
   }
 
-  /**
-   * Returns all actions available from the current state.
-   */
   getAvailableActions(): GameAction[] {
     const transitions = validTransitions[this._currentState];
     if (!transitions) return [];
     return Object.keys(transitions) as GameAction[];
   }
 
-  /**
-   * Force the state machine to a specific state (e.g., for loading saved games).
-   */
   setState(state: GameState): void {
     this._currentState = state;
   }
 
-  /**
-   * Expose the full valid transitions map for external inspection.
-   */
   static getValidTransitions(): Record<string, Partial<Record<GameAction, GameState>>> {
     return { ...validTransitions };
   }

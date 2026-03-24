@@ -18,6 +18,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'administrative',
     specialProperties: {},
     primaryResourceType: 'budget',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   fountain_plaza: {
     id: 'fountain_plaza',
@@ -36,6 +38,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'cultural',
     specialProperties: {},
     primaryResourceType: 'budget',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   boating_pond: {
     id: 'boating_pond',
@@ -54,6 +58,17 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'ecological',
     specialProperties: {},
     primaryResourceType: 'volunteer',
+    // Fix 1: Common Pool Zone
+    poolType: 'common',
+    commonPoolConfig: {
+      resourceType: 'volunteer',
+      tokenName: 'Aqua Credits',
+      generatedBy: ['advocate', 'citizen'],
+      consumedBy: ['designer', 'investor'],
+      autoIncomePerRound: 1,
+      decayPerRoundIfNeglected: 1,
+    },
+    investedThisRound: false,
   },
   playground: {
     id: 'playground',
@@ -72,6 +87,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'recreation',
     specialProperties: {},
     primaryResourceType: 'volunteer',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   walking_track: {
     id: 'walking_track',
@@ -90,6 +107,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'recreation',
     specialProperties: {},
     primaryResourceType: 'volunteer',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   herbal_garden: {
     id: 'herbal_garden',
@@ -108,6 +127,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'ecological',
     specialProperties: {},
     primaryResourceType: 'knowledge',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   open_lawn: {
     id: 'open_lawn',
@@ -126,6 +147,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'recreation',
     specialProperties: {},
     primaryResourceType: 'volunteer',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   exercise_zone: {
     id: 'exercise_zone',
@@ -144,6 +167,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'recreation',
     specialProperties: {},
     primaryResourceType: 'material',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   sculpture_garden: {
     id: 'sculpture_garden',
@@ -162,6 +187,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'cultural',
     specialProperties: {},
     primaryResourceType: 'knowledge',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   vendor_hub: {
     id: 'vendor_hub',
@@ -180,6 +207,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'commercial',
     specialProperties: {},
     primaryResourceType: 'budget',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   restroom_block: {
     id: 'restroom_block',
@@ -198,6 +227,17 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'utility',
     specialProperties: {},
     primaryResourceType: 'material',
+    // Fix 1: Common Pool Zone
+    poolType: 'common',
+    commonPoolConfig: {
+      resourceType: 'material',
+      tokenName: 'Civic Tokens',
+      generatedBy: ['administrator'],
+      consumedBy: ['citizen', 'designer'],
+      autoIncomePerRound: 1,
+      decayPerRoundIfNeglected: 1,
+    },
+    investedThisRound: false,
   },
   fiber_optic_lane: {
     id: 'fiber_optic_lane',
@@ -216,6 +256,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'cultural',
     specialProperties: {},
     primaryResourceType: 'material',
+    poolType: 'owned',
+    investedThisRound: false,
   },
   ppp_zone: {
     id: 'ppp_zone',
@@ -234,6 +276,17 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'development',
     specialProperties: {},
     primaryResourceType: 'budget',
+    // Fix 1: Common Pool Zone
+    poolType: 'common',
+    commonPoolConfig: {
+      resourceType: 'budget',
+      tokenName: 'Bond Chips',
+      generatedBy: ['investor'],
+      consumedBy: ['administrator', 'designer'],
+      autoIncomePerRound: 1,
+      decayPerRoundIfNeglected: 1,
+    },
+    investedThisRound: false,
   },
   maintenance_depot: {
     id: 'maintenance_depot',
@@ -252,6 +305,8 @@ export const ZONES: Record<string, Zone> = {
     zoneType: 'administrative',
     specialProperties: {},
     primaryResourceType: 'material',
+    poolType: 'owned',
+    investedThisRound: false,
   },
 };
 

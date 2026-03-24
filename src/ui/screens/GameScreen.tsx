@@ -6,7 +6,9 @@ import { HexGrid } from '../board';
 import CardHand from '../cards/CardHand';
 import ChallengeDisplay from '../cards/ChallengeDisplay';
 import StagingArea from '../cards/StagingArea';
+import { GameGraphView } from '../components/GameGraphView';
 import type { RoleId, ResourcePool, ResourceType, Player } from '../../core/models/types';
+import { CHALLENGE_CATEGORY_COLORS } from '../../core/models/constants';
 
 // ── Role metadata ────────────────────────────────────────────────
 
@@ -175,25 +177,54 @@ function ActionBar({
 }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {phase === 'phase_1_event' && (
+      {phase === 'payment_day' && (
         <button
-          className="px-4 py-2 rounded-lg bg-amber-500 text-stone-900 text-sm font-bold
-                     hover:bg-amber-400 transition-colors shadow-md"
-          onClick={onRollDie}
+          className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold
+                     hover:bg-emerald-500 transition-colors shadow-md"
+          onClick={onAdvancePhase}
         >
-          Roll Event Die
+          Continue to Event Roll
         </button>
       )}
-      {phase === 'phase_2_challenge' && (
-        <button
-          className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-bold
-                     hover:bg-red-400 transition-colors shadow-md"
-          onClick={onDrawChallenge}
-        >
-          Draw Challenge
-        </button>
+      {phase === 'event_roll' && (
+        <>
+          <button
+            className="px-4 py-2 rounded-lg bg-amber-500 text-stone-900 text-sm font-bold
+                       hover:bg-amber-400 transition-colors shadow-md"
+            onClick={onRollDie}
+          >
+            Roll 2d6 Event Die
+          </button>
+          <button
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold
+                       hover:bg-emerald-500 transition-colors shadow-md ml-auto"
+            onClick={onAdvancePhase}
+          >
+            Next Phase
+          </button>
+        </>
       )}
-      {phase === 'phase_3_deliberation' && (
+      {(phase === 'individual_action' || phase === 'action_resolution') && canAct && (
+        <>
+          {abilityUsesRemaining > 0 && (
+            <button
+              className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-bold
+                         hover:bg-purple-500 transition-colors shadow-md"
+              onClick={onUseAbility}
+            >
+              Use Ability ({abilityUsesRemaining})
+            </button>
+          )}
+          <button
+            className="px-4 py-2 rounded-lg bg-stone-600 text-stone-300 text-sm font-semibold
+                       hover:bg-stone-500 transition-colors"
+            onClick={onPass}
+          >
+            {phase === 'individual_action' ? 'Pass (Draw 2)' : 'Pass Turn'}
+          </button>
+        </>
+      )}
+      {phase === 'deliberation' && (
         <>
           <button
             className="px-4 py-2 rounded-lg bg-blue-500 text-white text-sm font-bold
@@ -201,6 +232,13 @@ function ActionBar({
             onClick={onTrade}
           >
             Propose Trade
+          </button>
+          <button
+            className="px-4 py-2 rounded-lg bg-indigo-500 text-white text-sm font-bold
+                       hover:bg-indigo-400 transition-colors shadow-md"
+            onClick={() => useGameStore.setState({ showCoalitionModal: true })}
+          >
+            Form Coalition
           </button>
           <button
             className="px-4 py-2 rounded-lg bg-purple-500 text-white text-sm font-bold
@@ -218,27 +256,7 @@ function ActionBar({
           </button>
         </>
       )}
-      {phase === 'phase_4_action' && canAct && (
-        <>
-          {abilityUsesRemaining > 0 && (
-            <button
-              className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-bold
-                         hover:bg-purple-500 transition-colors shadow-md"
-              onClick={onUseAbility}
-            >
-              Use Ability ({abilityUsesRemaining})
-            </button>
-          )}
-          <button
-            className="px-4 py-2 rounded-lg bg-stone-600 text-stone-300 text-sm font-semibold
-                       hover:bg-stone-500 transition-colors"
-            onClick={onPass}
-          >
-            Pass Turn
-          </button>
-        </>
-      )}
-      {(phase === 'phase_1_event' || phase === 'phase_2_challenge' || phase === 'phase_5_scoring') && (
+      {(phase === 'round_end_accounting' || phase === 'level_check') && (
         <button
           className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold
                      hover:bg-emerald-500 transition-colors shadow-md ml-auto"
@@ -567,35 +585,72 @@ function VoteModal({
   );
 }
 
-function EventDieDisplay({ value, outcome }: { value: number; outcome: string }) {
+function EventDieDisplay({ value, outcome, dice, eventName, phaseTriggered, affectedPlayers }: {
+  value: number;
+  outcome: string;
+  dice?: [number, number];
+  eventName?: string;
+  phaseTriggered?: string;
+  affectedPlayers?: string[];
+}) {
   const color =
-    outcome === 'positive_event'
-      ? 'text-emerald-400'
-      : outcome === 'negative_event'
-      ? 'text-red-400'
-      : 'text-stone-300';
-
-  const label =
-    outcome === 'positive_event'
-      ? 'Positive Event!'
-      : outcome === 'negative_event'
-      ? 'Negative Event!'
-      : 'No Event';
+    value <= 4 ? 'text-red-400'
+    : value >= 9 ? 'text-emerald-400'
+    : 'text-stone-300';
 
   return (
     <motion.div
-      className="bg-stone-700/80 rounded-xl p-4 text-center"
+      className="bg-stone-700/80 rounded-xl p-4 text-center max-w-sm"
       initial={{ scale: 0, rotate: -180 }}
       animate={{ scale: 1, rotate: 0 }}
       transition={{ type: 'spring', damping: 15 }}
     >
-      <div
-        className="w-16 h-16 mx-auto rounded-xl bg-stone-600 flex items-center justify-center
-                   text-3xl font-black border-2 border-stone-500 shadow-inner"
-      >
-        {value}
+      {/* Two dice display (Fix 3) */}
+      <div className="flex items-center justify-center gap-3 mb-2">
+        {dice ? (
+          <>
+            <motion.div
+              className="w-12 h-12 rounded-lg bg-stone-600 flex items-center justify-center text-2xl font-black border-2 border-stone-500"
+              initial={{ rotateZ: -360 }}
+              animate={{ rotateZ: 0 }}
+              transition={{ duration: 0.6, type: 'spring' }}
+            >
+              {dice[0]}
+            </motion.div>
+            <span className="text-stone-400 text-lg">+</span>
+            <motion.div
+              className="w-12 h-12 rounded-lg bg-stone-600 flex items-center justify-center text-2xl font-black border-2 border-stone-500"
+              initial={{ rotateZ: 360 }}
+              animate={{ rotateZ: 0 }}
+              transition={{ duration: 0.6, type: 'spring', delay: 0.15 }}
+            >
+              {dice[1]}
+            </motion.div>
+            <span className="text-stone-400 text-lg">=</span>
+            <div className="w-12 h-12 rounded-lg bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center text-2xl font-black text-amber-300">
+              {value}
+            </div>
+          </>
+        ) : (
+          <div className="w-16 h-16 rounded-xl bg-stone-600 flex items-center justify-center text-3xl font-black border-2 border-stone-500 shadow-inner">
+            {value}
+          </div>
+        )}
       </div>
-      <p className={`mt-2 text-sm font-bold ${color}`}>{label}</p>
+
+      {/* Event name */}
+      {eventName && (
+        <p className={`text-base font-bold ${color} mt-2`}>{eventName}</p>
+      )}
+
+      {/* Deliberation indicator */}
+      {phaseTriggered && phaseTriggered !== 'individual_only' && (
+        <div className="mt-2 px-3 py-1 rounded-full bg-purple-900/40 border border-purple-700/50 inline-block">
+          <span className="text-purple-300 text-xs font-semibold">
+            {phaseTriggered === 'deliberation_all' ? 'All Players Deliberate' : 'Partial Deliberation'}
+          </span>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -610,10 +665,15 @@ export default function GameScreen() {
     showHandoff,
     showTradeModal,
     showVoteModal,
+    showGameGraph,
+    showPaymentDay,
+    showLevelUp,
     deliberationTimeRemaining,
     selectCard,
     selectZone,
     dismissHandoff,
+    dismissPaymentDay,
+    dismissLevelUp,
     advancePhase,
     rollEventDie,
     drawChallenge,
@@ -624,6 +684,7 @@ export default function GameScreen() {
     proposeTrade,
     castVote,
     useUniqueAbility,
+    toggleGameGraph,
     getCurrentPlayer,
     getActiveChallenge,
   } = useGameStore();
@@ -637,8 +698,8 @@ export default function GameScreen() {
   const players = Object.values(session.players);
   const zones = Object.values(session.board.zones);
   const activeChallenge = getActiveChallenge();
-  const isActionPhase = currentPhase === 'phase_4_action';
-  const isDelibPhase = currentPhase === 'phase_3_deliberation';
+  const isActionPhase = currentPhase === 'individual_action' || currentPhase === 'action_resolution';
+  const isDelibPhase = currentPhase === 'deliberation';
 
   // Build standee map for HexGrid
   const playerStandees = useMemo(() => {
@@ -684,11 +745,12 @@ export default function GameScreen() {
         currentPhase={currentPhase}
         currentRound={session.currentRound}
         totalRounds={session.totalRounds}
+        gameLevel={session.gameLevel}
       />
 
-      {/* Event Die Result (Phase 1) */}
+      {/* Event Die Result (Fix 3: 2d6) */}
       <AnimatePresence>
-        {currentPhase === 'phase_1_event' && session.eventDieResult && (
+        {currentPhase === 'event_roll' && session.eventRollResult && (
           <motion.div
             className="absolute top-20 left-1/2 -translate-x-1/2 z-30"
             initial={{ opacity: 0 }}
@@ -696,12 +758,32 @@ export default function GameScreen() {
             exit={{ opacity: 0 }}
           >
             <EventDieDisplay
-              value={session.eventDieResult.value}
-              outcome={session.eventDieResult.outcome}
+              value={session.eventRollResult.total}
+              outcome={session.eventDieResult?.outcome || 'no_event'}
+              dice={session.eventRollResult.dice}
+              eventName={session.eventRollResult.eventEntry.name}
+              phaseTriggered={session.eventRollResult.phaseTriggered}
             />
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Game Graph Button (Fix 6) */}
+      <button
+        className="absolute top-16 right-4 z-20 w-10 h-10 rounded-full bg-stone-700/80 border border-stone-600
+                   flex items-center justify-center hover:bg-stone-600 transition-colors"
+        onClick={toggleGameGraph}
+        title="Game Graph (V, E, VO)"
+      >
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#9CA3AF" strokeWidth="1.5">
+          <circle cx="4" cy="4" r="2" />
+          <circle cx="14" cy="4" r="2" />
+          <circle cx="9" cy="14" r="2" />
+          <line x1="6" y1="4" x2="12" y2="4" />
+          <line x1="4" y1="6" x2="9" y2="12" />
+          <line x1="14" y1="6" x2="9" y2="12" />
+        </svg>
+      </button>
 
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
@@ -872,9 +954,118 @@ export default function GameScreen() {
         )}
       </AnimatePresence>
 
-      {/* Phase 5: Scoring Summary Overlay */}
+      {/* Payment Day Overlay (Fix 5) */}
       <AnimatePresence>
-        {currentPhase === 'phase_5_scoring' && (
+        {showPaymentDay && currentPhase === 'payment_day' && (
+          <motion.div
+            className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="bg-stone-800 rounded-2xl p-8 max-w-2xl w-full border border-emerald-400/30 shadow-2xl"
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+            >
+              <h2 className="text-2xl font-serif font-bold text-emerald-300 text-center mb-6">
+                Payment Day — Round {session.currentRound}
+              </h2>
+              <p className="text-stone-400 text-xs text-center mb-4">Profession income distributed to all players</p>
+              <div className="grid grid-cols-5 gap-3 mb-6">
+                {players.map((p, i) => (
+                  <motion.div
+                    key={p.id}
+                    className="text-center bg-stone-700/50 rounded-lg p-3"
+                    initial={{ y: -30, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: i * 0.15 }}
+                  >
+                    <div
+                      className="w-10 h-10 mx-auto rounded-full flex items-center justify-center text-lg mb-2"
+                      style={{ backgroundColor: ROLE_COLORS[p.roleId] }}
+                    >
+                      {ROLE_ICONS[p.roleId]}
+                    </div>
+                    <p className="text-stone-200 text-xs font-semibold">{p.name}</p>
+                    <p className="text-[10px]" style={{ color: ROLE_COLORS[p.roleId] }}>{ROLE_NAMES[p.roleId]}</p>
+                    <div className="mt-2 grid grid-cols-5 gap-0.5">
+                      {(Object.entries(p.resources) as [ResourceType, number][]).map(([res, amt]) => (
+                        <div key={res} className="text-center">
+                          <div className="text-[8px]" style={{ color: RESOURCE_COLOR_MAP[res] }}>{RESOURCE_ICONS[res]}</div>
+                          <span className="text-[9px] text-stone-300 font-bold">{amt}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+              <button
+                className="w-full py-3 rounded-xl bg-emerald-500 text-stone-900 font-bold text-sm
+                           hover:bg-emerald-400 transition-colors"
+                onClick={() => { dismissPaymentDay(); advancePhase(); }}
+              >
+                Continue
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Level Up Overlay (Fix 5) */}
+      <AnimatePresence>
+        {showLevelUp && (
+          <motion.div
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="text-center"
+              initial={{ scale: 0.5 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', damping: 10 }}
+            >
+              <motion.h1
+                className="text-6xl font-serif font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500"
+                animate={{ scale: [1, 1.1, 1] }}
+                transition={{ duration: 1, repeat: 2 }}
+              >
+                LEVEL UP!
+              </motion.h1>
+              <p className="text-stone-300 text-lg mt-4">
+                The community&apos;s efforts are bearing fruit. New challenges and opportunities emerge.
+              </p>
+              <p className="text-amber-400 text-xl font-bold mt-2">
+                Game Level {session.gameLevel}
+              </p>
+              <button
+                className="mt-8 px-10 py-3 rounded-xl bg-amber-400 text-stone-900 font-bold
+                           hover:bg-amber-300 transition-colors"
+                onClick={dismissLevelUp}
+              >
+                Continue
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Game Graph View (Fix 6) */}
+      <AnimatePresence>
+        {showGameGraph && session.gameGraph && (
+          <GameGraphView
+            graph={session.gameGraph}
+            currentRound={session.currentRound}
+            onClose={toggleGameGraph}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Round-End Accounting / Scoring Summary */}
+      <AnimatePresence>
+        {(currentPhase === 'round_end_accounting' || currentPhase === 'level_check') && (
           <motion.div
             className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm"
             initial={{ opacity: 0 }}

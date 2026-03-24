@@ -123,15 +123,16 @@ export const HexTile: React.FC<HexTileProps> = React.memo(({
         opacity={0.3}
       />
 
-      {/* Border */}
+      {/* Border — dashed for Common Pool Zones (Fix 1) */}
       <motion.polygon
         points={hexPoints}
         fill="none"
-        stroke={isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.4)'}
-        strokeWidth={isSelected ? 3 : 1.5}
+        stroke={isSelected ? '#FFFFFF' : zone.poolType === 'common' ? '#60A5FA' : 'rgba(255,255,255,0.4)'}
+        strokeWidth={isSelected ? 3 : zone.poolType === 'common' ? 2.5 : 1.5}
+        strokeDasharray={zone.poolType === 'common' ? `${size * 0.15},${size * 0.08}` : 'none'}
         animate={{
-          stroke: isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.4)',
-          strokeWidth: isSelected ? 3 : 1.5,
+          stroke: isSelected ? '#FFFFFF' : zone.poolType === 'common' ? '#60A5FA' : 'rgba(255,255,255,0.4)',
+          strokeWidth: isSelected ? 3 : zone.poolType === 'common' ? 2.5 : 1.5,
         }}
         whileHover={{
           stroke: '#FFFFFF',
@@ -311,6 +312,40 @@ export const HexTile: React.FC<HexTileProps> = React.memo(({
             );
           })}
         </g>
+      )}
+
+      {/* Common Pool Zone indicator (Fix 1) */}
+      {zone.poolType === 'common' && zone.commonPoolConfig && (
+        <g transform={`translate(${-size * 0.52}, ${size * 0.18})`}>
+          <circle r={size * 0.09} fill="#60A5FA" stroke="#1a1a2e" strokeWidth={0.5} opacity={0.9} />
+          <text
+            x={0}
+            y={0}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize={size * 0.09}
+            style={{ pointerEvents: 'none' }}
+          >
+            🤝
+          </text>
+        </g>
+      )}
+
+      {/* Common Pool token name */}
+      {zone.poolType === 'common' && zone.commonPoolConfig && (
+        <text
+          x={0}
+          y={size * 0.55}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fill="#60A5FA"
+          fontSize={size * 0.09}
+          fontWeight={600}
+          opacity={0.8}
+          style={{ pointerEvents: 'none', fontFamily: 'system-ui, sans-serif' }}
+        >
+          {zone.commonPoolConfig.tokenName}
+        </text>
       )}
 
       {/* Locked overlay */}

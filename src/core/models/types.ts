@@ -14,16 +14,27 @@ export interface GameSession {
   decks: DeckState;
   cwsTracker: CWSTracker;
   eventDieResult: EventDieResult | null;
+  eventRollResult: EventRollResult | null;
   activeChallenge: ChallengeCard[] | null;
   activeSeries: SeriesInProgress | null;
   activeCombination: CombinationInProgress | null;
+  activeCoalitions: CoalitionCombination[];
   tradeOffers: TradeOffer[];
+  promises: Promise[];
   roundLog: RoundLogEntry[];
   gameLog: GameLogEntry[];
   telemetry: TelemetryLog;
   status: 'setup' | 'playing' | 'deliberation' | 'resolution' | 'scoring' | 'ended';
   endResult: EndGameResult | null;
   rngSeed: number;
+  gameLevel: number;
+  gameGraph: GameGraph;
+  // Tracks which zones were targeted/invested in this round (for common pool decay)
+  zonesInvestedThisRound: Set<string> | string[];
+  // Tracks whether a full coalition has ever been resolved
+  fullCoalitionAchieved: boolean;
+  // Once-per-game Call Deliberation tracking per player
+  callDeliberationUsed: Record<string, boolean>;
 }
 
 export interface GameConfig {
@@ -58,6 +69,17 @@ export interface Player {
   crisisState: boolean;
   uniqueAbilityUsesRemaining: number;
   statusEffects: StatusEffect[];
+  // Revenue tokens placed on zones (investor mechanic)
+  revenueTokens: string[];
+  // Whether this player resolved a challenge last round (for designer bonus)
+  resolvedChallengeLastRound: boolean;
+  // Community trust modifier from broken promises
+  communityTrustPenalty: number;
+  communityTrustPenaltyRoundsLeft: number;
+  // Cards played this round in individual action phase
+  cardsPlayedThisRound: number;
+  // Whether player passed individual action
+  passedIndividualAction: boolean;
 }
 
 export interface AbilityScores {
@@ -147,6 +169,19 @@ export interface Zone {
   zoneType: ZoneType;
   specialProperties: Record<string, any>;
   primaryResourceType: ResourceType;
+  // Fix 1: Common Pool Zone fields
+  poolType: 'common' | 'owned';
+  commonPoolConfig?: CommonPoolConfig;
+  investedThisRound: boolean;
+}
+
+export interface CommonPoolConfig {
+  resourceType: ResourceType;
+  tokenName: string;
+  generatedBy: RoleId[];
+  consumedBy: RoleId[];
+  autoIncomePerRound: number;
+  decayPerRoundIfNeglected: number;
 }
 
 export type ZoneCondition = 'good' | 'fair' | 'poor' | 'critical' | 'locked';
@@ -196,6 +231,7 @@ export interface CardEffect {
   params: Record<string, any>;
 }
 
+// Fix 2: Challenge Card with front/back system
 export interface ChallengeCard {
   id: string;
   name: string;
@@ -208,9 +244,38 @@ export interface ChallengeCard {
   successRewards: ChallengeReward[];
   escalationPerRound: number;
   roundsActive: number;
-  category: 'maintenance' | 'ecological' | 'social' | 'infrastructure' |
-            'commercial' | 'safety' | 'political';
+  category: ChallengeCategory;
   artworkId: string;
+  // Fix 2: Public face (visible to all players)
+  publicFace: ChallengePublicFace;
+  // Fix 2: Hidden back (only facilitator sees)
+  hiddenBack: ChallengeHiddenBack;
+}
+
+export type ChallengeCategory = 'crisis' | 'opportunity' | 'tension' |
+  'maintenance' | 'ecological' | 'social' | 'infrastructure' | 'commercial' | 'safety' | 'political';
+
+export interface ChallengePublicFace {
+  zoneName: string;
+  zoneId: string;
+  difficultyRating: 1 | 2 | 3 | 4 | 5;
+  problemDescription: string;
+  flavorText: string;
+  resourcesRequired: { type: ResourceType; amount: number; displayName: string }[];
+  category: 'crisis' | 'opportunity' | 'tension';
+  categoryColor: string;
+  layerIcon: string;
+}
+
+export interface ChallengeHiddenBack {
+  resolutionCriteria: string;
+  outcomes: {
+    full: { description: string; cwsBonus: number; zoneEffect: string };
+    partial: { description: string; cwsBonus: number; zoneEffect: string };
+    fail: { description: string; cwsPenalty: number; zoneEffect: string };
+  };
+  dmNotes: string;
+  researchTag: string;
 }
 
 export interface ChallengeRequirement {
@@ -338,22 +403,108 @@ export type TelemetryEventType =
   | 'event_die_rolled' | 'event_card_drawn' | 'event_applied'
   | 'equity_prompt_triggered' | 'equity_prompt_responded'
   | 'facilitator_adjudication' | 'facilitator_override'
-  | 'game_started' | 'game_ended' | 'vote_called' | 'vote_result';
+  | 'game_started' | 'game_ended' | 'vote_called' | 'vote_result'
+  // New telemetry events for fixes
+  | 'payment_day_income' | 'payment_day_bonus' | 'payment_day_penalty'
+  | 'common_pool_auto_income' | 'common_pool_decay'
+  | 'event_roll_2d6' | 'event_table_result'
+  | 'coalition_formed' | 'coalition_reveal' | 'coalition_success' | 'coalition_failure'
+  | 'full_coalition_resolved'
+  | 'promise_made' | 'promise_fulfilled' | 'promise_broken'
+  | 'zone_auto_degradation'
+  | 'revenue_token_collected'
+  | 'game_level_up' | 'game_level_check'
+  | 'game_graph_snapshot';
 
 export type TelemetryLog = TelemetryEvent[];
 
-// Game Phase
+// Game Phase — Fix 5: 7 phases
 export type GamePhase =
   | 'setup_site_selection' | 'setup_role_assignment' | 'setup_character_creation'
   | 'setup_facilitator_briefing' | 'setup_standee_placement' | 'setup_ready'
-  | 'phase_1_event' | 'phase_2_challenge' | 'phase_3_deliberation'
-  | 'phase_4_action' | 'phase_5_scoring'
+  | 'payment_day'           // Phase 1: Profession income
+  | 'event_roll'            // Phase 2: 2d6 roll + event resolution
+  | 'individual_action'     // Phase 3: Solo series plays
+  | 'deliberation'          // Phase 4: Negotiation (if triggered by event)
+  | 'action_resolution'     // Phase 5: Coalition combinations resolve
+  | 'round_end_accounting'  // Phase 6: Bookkeeping, decay, scoring
+  | 'level_check'           // Phase 7: Check level advancement
   | 'round_end' | 'game_end' | 'debrief' | 'export';
 
-// Event Die
+// Event Die — Fix 3: 2d6 system
 export interface EventDieResult {
   value: number;
   outcome: 'negative_event' | 'no_event' | 'positive_event';
+}
+
+export interface EventRollResult {
+  dice: [number, number];
+  total: number;
+  eventEntry: EventTableEntry;
+  affectedZones: string[];
+  affectedPlayers: string[];
+  phaseTriggered: 'deliberation_all' | 'deliberation_partial' | 'individual_only';
+  deliberationPlayerCount: number;
+}
+
+export interface EventTableEntry {
+  roll: number;
+  name: string;
+  zoneEffect: string;
+  playerEffect: string;
+  phaseTriggered: 'deliberation_all' | 'deliberation_partial' | 'individual_only';
+  requiredPlayers: RoleId[] | 'all';
+}
+
+// Fix 4: Coalition system
+export type ActionLevel = 'individual_series' | 'coalition_combination' | 'full_coalition';
+
+export interface ActionDeclaration {
+  level: ActionLevel;
+  playerId: string;
+  targetZoneId: string;
+  cards: ActionCard[];
+  resourcesContributed: Partial<ResourcePool>;
+  coalitionPartners?: string[];
+}
+
+export interface CoalitionCombination {
+  id: string;
+  participants: {
+    playerId: string;
+    roleId: RoleId;
+    cardsPlayed: ActionCard[];
+    resourcesContributed: Partial<ResourcePool>;
+    confirmed: boolean;
+    cardsRevealed: boolean;
+  }[];
+  targetZoneId: string;
+  combinationType: 'pair' | 'trio' | 'quad' | 'full';
+  bonusOutcome: string;
+  resolved: boolean;
+  success: boolean;
+}
+
+export interface CombinationEntry {
+  roles: RoleId[];
+  requiredTags: string[][];
+  bonusDescription: string;
+  bonusEffects: {
+    type: string;
+    target?: string;
+    params: Record<string, any>;
+  }[];
+}
+
+// Fix 4: Promise tracking
+export interface Promise {
+  id: string;
+  fromPlayerId: string;
+  toPlayerId: string;
+  promisedResource: { type: ResourceType; amount: number };
+  promisedRound: number;
+  fulfilled: boolean;
+  broken: boolean;
 }
 
 // Series/Combination in progress
@@ -420,6 +571,15 @@ export interface LevelEntry {
   uniqueAbilityUses: number;
 }
 
+// Fix 5: Game level thresholds
+export interface GameLevelThreshold {
+  from: number;
+  to: number | 'end';
+  condition: string;
+  check: (gameState: GameSession) => boolean;
+  changes: string[];
+}
+
 // Survey
 export interface SurveyResponse {
   playerId: string;
@@ -429,6 +589,70 @@ export interface SurveyResponse {
   likertResponses: Record<string, number>;
   openText?: string;
   timestamp: string;
+}
+
+// Fix 6: Game Graph
+export interface GameGraph {
+  vertices: GameVertex[];
+  edges: GameEdge[];
+  objectiveFunction: ObjectiveFunction;
+  snapshots: GraphSnapshot[];
+}
+
+export interface GameVertex {
+  id: string;
+  zoneId: string;
+  round: number;
+  configuration: {
+    welfareScore: number;
+    activeLayer: number;
+    activeCrisis: string | null;
+    resourcesInvested: number;
+    condition: ZoneCondition;
+    isCommonPool: boolean;
+  };
+}
+
+export interface GameEdge {
+  id: string;
+  fromVertexId: string;
+  toVertexId: string;
+  edgeType: 'negotiation' | 'crisis_propagation' | 'resource_dependency' | 'stakeholder_shared';
+  sharedStakeholder: RoleId | null;
+  weight: number;
+  description: string;
+  wasActivated: boolean;
+  activatedInRound: number | null;
+}
+
+export interface ObjectiveFunction {
+  formula: string;
+  currentVO: number;
+  maxPossibleVO: number;
+  zoneContributions: {
+    zoneId: string;
+    weight: number;
+    welfareScore: number;
+    contribution: number;
+  }[];
+  thresholdVO: number;
+}
+
+export interface GraphSnapshot {
+  round: number;
+  vertices: GameVertex[];
+  edges: GameEdge[];
+  vo: number;
+  timestamp: string;
+}
+
+// Fix 5: Profession income
+export interface ProfessionIncome {
+  base: ResourcePool;
+  bonusCondition: string;
+  bonusAmount: Partial<ResourcePool>;
+  penaltyCondition?: string;
+  penaltyAmount?: Partial<ResourcePool>;
 }
 
 // Helper function

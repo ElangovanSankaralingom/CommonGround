@@ -9,6 +9,9 @@ import {
   Zone,
   ResourcePool,
   RoleId,
+  CoalitionCombination,
+  Promise as GamePromise,
+  ResourceType,
 } from '../core/models/types';
 import {
   initializeGame as engineInitializeGame,
@@ -27,6 +30,7 @@ import {
 import {
   startPhase,
   endPhase,
+  resolveCoalitions,
 } from '../core/engine/phaseController';
 import {
   getCurrentPlayer as engineGetCurrentPlayer,
@@ -47,7 +51,9 @@ import { TimerService } from '../services/timer/timerService';
 
 export interface AnimationEvent {
   id: string;
-  type: 'card_played' | 'dice_roll' | 'resource_change' | 'zone_update' | 'trade' | 'level_up' | 'phase_change';
+  type: 'card_played' | 'dice_roll' | 'resource_change' | 'zone_update' | 'trade'
+    | 'level_up' | 'phase_change' | 'payment_day' | 'coalition_reveal'
+    | 'game_level_up' | 'zone_decay' | 'two_dice_roll';
   data: Record<string, unknown>;
   timestamp: number;
 }
@@ -67,6 +73,11 @@ interface GameStoreState {
   showHandoff: boolean;
   showTradeModal: boolean;
   showVoteModal: boolean;
+  showCoalitionModal: boolean;
+  showPromiseModal: boolean;
+  showGameGraph: boolean;
+  showPaymentDay: boolean;
+  showLevelUp: boolean;
   deliberationTimeRemaining: number;
   animationQueue: AnimationEvent[];
   audioEnabled: boolean;
@@ -99,6 +110,15 @@ interface GameStoreState {
   rejectTrade: (tradeId: string) => void;
   castVote: (vote: boolean) => void;
 
+  // Fix 4: Coalition actions
+  formCoalition: (partnerIds: string[], targetZoneId: string) => void;
+  confirmCoalitionCards: (coalitionId: string, playerId: string, cards: ActionCard[]) => void;
+  revealCoalition: (coalitionId: string) => void;
+  makePromise: (toPlayerId: string, resource: ResourceType, amount: number, round: number) => void;
+
+  // Fix 6: Game Graph
+  toggleGameGraph: () => void;
+
   // Scoring actions
   calculateRoundScoring: () => void;
   checkLevelUps: () => void;
@@ -107,6 +127,8 @@ interface GameStoreState {
   selectCard: (cardId: string | null) => void;
   selectZone: (zoneId: string | null) => void;
   dismissHandoff: () => void;
+  dismissPaymentDay: () => void;
+  dismissLevelUp: () => void;
   toggleAudio: () => void;
   toggleMusic: () => void;
   toggleHighContrast: () => void;
@@ -144,6 +166,11 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   showHandoff: false,
   showTradeModal: false,
   showVoteModal: false,
+  showCoalitionModal: false,
+  showPromiseModal: false,
+  showGameGraph: false,
+  showPaymentDay: false,
+  showLevelUp: false,
   deliberationTimeRemaining: 0,
   animationQueue: [],
   audioEnabled: true,
@@ -156,9 +183,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const session = engineInitializeGame(config, playerAssignments);
     const recorder = new TelemetryRecorder(session.id);
     const sm = new GameStateMachine('title_screen');
-
-    // Advance state machine from title_screen into setup
-    sm.transition('START_GAME'); // title_screen -> setup_site_selection
+    sm.transition('START_GAME');
 
     recorder.record(
       session.currentRound,
@@ -170,10 +195,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     );
 
     set({
-      session: {
-        ...session,
-        currentPhase: 'setup_site_selection',
-      },
+      session: { ...session, currentPhase: 'setup_site_selection' },
       stateMachine: sm,
       telemetryRecorder: recorder,
       deliberationTimer: null,
@@ -182,6 +204,11 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       showHandoff: false,
       showTradeModal: false,
       showVoteModal: false,
+      showCoalitionModal: false,
+      showPromiseModal: false,
+      showGameGraph: false,
+      showPaymentDay: false,
+      showLevelUp: false,
       deliberationTimeRemaining: config.deliberationTimerSeconds,
       animationQueue: [],
     });
@@ -190,59 +217,38 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   selectSite: (siteId) => {
     const { session, stateMachine } = get();
     if (!session) return;
-
     if (stateMachine.canTransition('SELECT_SITE')) {
       stateMachine.transition('SELECT_SITE');
     }
-
     set({
-      session: {
-        ...session,
-        config: { ...session.config, siteId },
-        currentPhase: 'setup_role_assignment',
-      },
+      session: { ...session, config: { ...session.config, siteId }, currentPhase: 'setup_role_assignment' },
     });
   },
 
   assignRoles: (_assignments) => {
     const { session, stateMachine } = get();
     if (!session) return;
-
     if (stateMachine.canTransition('ASSIGN_ROLES')) {
       stateMachine.transition('ASSIGN_ROLES');
     }
-
-    set({
-      session: {
-        ...session,
-        currentPhase: 'setup_character_creation',
-      },
-    });
+    set({ session: { ...session, currentPhase: 'setup_character_creation' } });
   },
 
   completeFacilitatorBriefing: () => {
     const { session, stateMachine } = get();
     if (!session) return;
-
     if (stateMachine.canTransition('CREATE_CHARACTERS')) {
       stateMachine.transition('CREATE_CHARACTERS');
     }
     if (stateMachine.canTransition('BRIEF_FACILITATOR')) {
       stateMachine.transition('BRIEF_FACILITATOR');
     }
-
-    set({
-      session: {
-        ...session,
-        currentPhase: 'setup_standee_placement',
-      },
-    });
+    set({ session: { ...session, currentPhase: 'setup_standee_placement' } });
   },
 
   placeStandee: (playerId, zoneId) => {
     const { session } = get();
     if (!session) return;
-
     const result = engineMoveStandee(session, playerId, zoneId);
     if (result.success) {
       set({ session: result.gameState });
@@ -253,23 +259,19 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, stateMachine, telemetryRecorder } = get();
     if (!session) return;
 
-    // Walk the state machine through any remaining setup states to reach setup_ready
-    const setupActions: Array<{ action: import('../core/engine/gameStateMachine').GameAction }> = [
-      { action: 'SELECT_SITE' },
-      { action: 'ASSIGN_ROLES' },
-      { action: 'CREATE_CHARACTERS' },
-      { action: 'BRIEF_FACILITATOR' },
-      { action: 'PLACE_STANDEES' },
-      { action: 'READY_TO_PLAY' },
+    const setupActions: GameAction[] = [
+      'SELECT_SITE', 'ASSIGN_ROLES', 'CREATE_CHARACTERS',
+      'BRIEF_FACILITATOR', 'PLACE_STANDEES', 'READY_TO_PLAY',
     ];
 
-    for (const { action } of setupActions) {
+    for (const action of setupActions) {
       if (stateMachine.canTransition(action)) {
         stateMachine.transition(action);
       }
     }
 
-    const updatedSession = startPhase(session, 'phase_1_event');
+    // Start with Payment Day (Phase 1 of new 7-phase system)
+    const updatedSession = startPhase(session, 'payment_day');
 
     if (telemetryRecorder) {
       telemetryRecorder.record(
@@ -283,11 +285,17 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
 
     set({
-      session: {
-        ...updatedSession,
-        status: 'playing',
-      },
-      showHandoff: true,
+      session: { ...updatedSession, status: 'playing' },
+      showPaymentDay: true,
+      animationQueue: [
+        ...get().animationQueue,
+        {
+          id: `payment_day_${Date.now()}`,
+          type: 'payment_day',
+          data: { round: updatedSession.currentRound },
+          timestamp: Date.now(),
+        },
+      ],
     });
   },
 
@@ -297,22 +305,30 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, stateMachine, telemetryRecorder } = get();
     if (!session) return;
 
-    const { nextPhase, gameState: transitionedState } = endPhase(session);
+    // Resolve coalitions before leaving action_resolution
+    let preState = session;
+    if (session.currentPhase === 'action_resolution' && session.activeCoalitions.length > 0) {
+      preState = resolveCoalitions(session);
+    }
+
+    const { nextPhase, gameState: transitionedState } = endPhase(preState);
 
     // Map phase transitions to state machine actions
-    const phaseActionMap: Partial<Record<GamePhase, string>> = {
-      'phase_2_challenge': 'RESOLVE_EVENT',
-      'phase_3_deliberation': 'CONFIRM_CHALLENGE',
-      'phase_4_action': 'END_DELIBERATION',
-      'phase_5_scoring': 'ALL_PLAYERS_ACTED',
-      'round_end': 'SCORING_DISPLAYED',
-      'phase_1_event': 'NEXT_ROUND',
+    const phaseActionMap: Partial<Record<GamePhase, GameAction>> = {
+      'event_roll': 'COMPLETE_PAYMENT_DAY',
+      'individual_action': 'COMPLETE_EVENT_ROLL',
+      'deliberation': 'COMPLETE_INDIVIDUAL_ACTION',
+      'action_resolution': 'END_DELIBERATION',
+      'round_end_accounting': 'COMPLETE_ACTION_RESOLUTION',
+      'level_check': 'COMPLETE_ROUND_END_ACCOUNTING',
+      'round_end': 'COMPLETE_LEVEL_CHECK',
+      'payment_day': 'NEXT_ROUND',
       'game_end': 'END_GAME',
     };
 
     const action = phaseActionMap[nextPhase];
-    if (action && stateMachine.canTransition(action as any)) {
-      stateMachine.transition(action as any);
+    if (action && stateMachine.canTransition(action)) {
+      stateMachine.transition(action);
     }
 
     if (telemetryRecorder) {
@@ -328,9 +344,15 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     const updatedSession = startPhase(transitionedState, nextPhase);
 
+    // Show Payment Day overlay at start of new round
+    const isPaymentDay = nextPhase === 'payment_day';
+    const isLevelCheck = nextPhase === 'level_check' && updatedSession.gameLevel > (session.gameLevel || 1);
+
     set({
       session: updatedSession,
-      showHandoff: true,
+      showHandoff: nextPhase === 'individual_action' || nextPhase === 'action_resolution',
+      showPaymentDay: isPaymentDay,
+      showLevelUp: isLevelCheck,
       selectedCardId: null,
       selectedZoneId: null,
     });
@@ -340,16 +362,21 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, telemetryRecorder } = get();
     if (!session) return;
 
-    const updatedSession = startPhase(session, 'phase_1_event');
+    const updatedSession = startPhase(session, 'event_roll');
 
-    if (telemetryRecorder && updatedSession.eventDieResult) {
+    if (telemetryRecorder && updatedSession.eventRollResult) {
       telemetryRecorder.record(
         updatedSession.currentRound,
         updatedSession.currentPhase,
-        'event_die_rolled',
+        'event_roll_2d6',
         'system',
         'system',
-        { result: updatedSession.eventDieResult }
+        {
+          dice: updatedSession.eventRollResult.dice,
+          total: updatedSession.eventRollResult.total,
+          eventName: updatedSession.eventRollResult.eventEntry.name,
+          phaseTriggered: updatedSession.eventRollResult.phaseTriggered,
+        }
       );
     }
 
@@ -359,8 +386,12 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         ...get().animationQueue,
         {
           id: `die_roll_${Date.now()}`,
-          type: 'dice_roll',
-          data: { result: updatedSession.eventDieResult },
+          type: 'two_dice_roll',
+          data: {
+            dice: updatedSession.eventRollResult?.dice,
+            total: updatedSession.eventRollResult?.total,
+            eventName: updatedSession.eventRollResult?.eventEntry.name,
+          },
           timestamp: Date.now(),
         },
       ],
@@ -371,7 +402,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, telemetryRecorder } = get();
     if (!session) return;
 
-    const updatedSession = startPhase(session, 'phase_2_challenge');
+    const updatedSession = startPhase(session, 'event_roll');
 
     if (telemetryRecorder && updatedSession.activeChallenge) {
       const challenge = updatedSession.activeChallenge[0];
@@ -381,11 +412,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         'challenge_drawn',
         'system',
         'system',
-        {
-          challengeId: challenge.id,
-          challengeName: challenge.name,
-          difficulty: challenge.difficulty,
-        }
+        { challengeId: challenge.id, challengeName: challenge.name, difficulty: challenge.difficulty }
       );
     }
 
@@ -396,7 +423,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, telemetryRecorder } = get();
     if (!session) return;
 
-    const updatedSession = startPhase(session, 'phase_3_deliberation');
+    const updatedSession = startPhase(session, 'deliberation');
 
     if (telemetryRecorder) {
       telemetryRecorder.record(
@@ -405,18 +432,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         'phase_start',
         'system',
         'system',
-        { phase: 'phase_3_deliberation' }
+        { phase: 'deliberation' }
       );
     }
 
     const timer = new TimerService(
       session.config.deliberationTimerSeconds,
-      (remaining) => {
-        set({ deliberationTimeRemaining: remaining });
-      },
-      () => {
-        get().endDeliberation();
-      }
+      (remaining) => { set({ deliberationTimeRemaining: remaining }); },
+      () => { get().endDeliberation(); }
     );
     timer.start();
 
@@ -431,9 +454,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, deliberationTimer, telemetryRecorder } = get();
     if (!session) return;
 
-    if (deliberationTimer) {
-      deliberationTimer.stop();
-    }
+    if (deliberationTimer) deliberationTimer.stop();
 
     if (telemetryRecorder) {
       telemetryRecorder.record(
@@ -442,17 +463,19 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         'phase_end',
         'system',
         'system',
-        { phase: 'phase_3_deliberation' }
+        { phase: 'deliberation' }
       );
     }
 
-    const updatedSession = startPhase(session, 'phase_4_action');
+    const updatedSession = startPhase(session, 'action_resolution');
 
     set({
       session: updatedSession,
       deliberationTimer: null,
       deliberationTimeRemaining: 0,
       showTradeModal: false,
+      showCoalitionModal: false,
+      showPromiseModal: false,
     });
   },
 
@@ -479,11 +502,34 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     let updatedSession = result.gameState;
 
-    // Auto-advance to next player after playing a card
+    // Mark zone as invested
+    if (result.success && zoneId) {
+      const invested = [...(updatedSession.zonesInvestedThisRound as string[])];
+      if (!invested.includes(zoneId)) invested.push(zoneId);
+      const zones = { ...updatedSession.board.zones };
+      if (zones[zoneId]) {
+        zones[zoneId] = { ...zones[zoneId], investedThisRound: true };
+      }
+      updatedSession = {
+        ...updatedSession,
+        zonesInvestedThisRound: invested,
+        board: { ...updatedSession.board, zones },
+      };
+    }
+
     if (result.success) {
+      // Track cards played this round
+      if (currentPlayer) {
+        const players = { ...updatedSession.players };
+        const p = players[currentPlayer.id];
+        if (p) {
+          players[currentPlayer.id] = { ...p, cardsPlayedThisRound: (p.cardsPlayedThisRound || 0) + 1 };
+          updatedSession = { ...updatedSession, players };
+        }
+      }
+
       updatedSession = advanceToNextPlayer(updatedSession);
 
-      // Check if all players have acted
       if (haveAllPlayersActed(updatedSession)) {
         set({
           session: updatedSession,
@@ -491,12 +537,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
           showHandoff: false,
           animationQueue: [
             ...get().animationQueue,
-            {
-              id: `card_${Date.now()}`,
-              type: 'card_played',
-              data: { cardId, zoneId, success: true, message: result.message },
-              timestamp: Date.now(),
-            },
+            { id: `card_${Date.now()}`, type: 'card_played', data: { cardId, zoneId, success: true }, timestamp: Date.now() },
           ],
         });
         return;
@@ -508,12 +549,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         showHandoff: true,
         animationQueue: [
           ...get().animationQueue,
-          {
-            id: `card_${Date.now()}`,
-            type: 'card_played',
-            data: { cardId, zoneId, success: true, message: result.message },
-            timestamp: Date.now(),
-          },
+          { id: `card_${Date.now()}`, type: 'card_played', data: { cardId, zoneId, success: true }, timestamp: Date.now() },
         ],
       });
     } else {
@@ -524,56 +560,47 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   startSeries: (cardId, challengeId) => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
-
     const currentPlayer = getCurrentPlayerSafe(session);
     if (!currentPlayer) return;
-
     const result = engineStartSeries(session, currentPlayer.id, cardId, challengeId);
-
     if (telemetryRecorder && result.telemetryEvent) {
       telemetryRecorder.record(
-        result.gameState.currentRound,
-        result.gameState.currentPhase,
-        result.telemetryEvent.eventType,
-        result.telemetryEvent.actorId,
-        result.telemetryEvent.actorRole,
-        result.telemetryEvent.data
+        result.gameState.currentRound, result.gameState.currentPhase,
+        result.telemetryEvent.eventType, result.telemetryEvent.actorId,
+        result.telemetryEvent.actorRole, result.telemetryEvent.data
       );
     }
-
     set({ session: result.gameState });
   },
 
   contributeToSeries: (cardId) => {
     const { session, telemetryRecorder } = get();
     if (!session || !session.activeSeries) return;
-
     const currentPlayer = getCurrentPlayerSafe(session);
     if (!currentPlayer) return;
 
     const card = currentPlayer.hand.find((c) => c.id === cardId);
     if (!card) return;
-
     if (!canAddCardToSeries(session.activeSeries, card, currentPlayer)) return;
 
-    // Remove card from hand and add to series
     const newHand = currentPlayer.hand.filter((c) => c.id !== cardId);
     const updatedPlayer = { ...currentPlayer, hand: newHand };
+
+    // Series escalation bonus (Fix 4)
+    const cardCount = session.activeSeries.cards.length + 1;
+    const seriesBonus = cardCount === 2 ? 2 : cardCount === 3 ? 5 : 0;
 
     const updatedSeries = {
       ...session.activeSeries,
       cards: [...session.activeSeries.cards, { card, playerId: currentPlayer.id }],
-      currentValue: session.activeSeries.currentValue + card.baseValue,
+      currentValue: session.activeSeries.currentValue + card.baseValue + seriesBonus,
     };
 
     if (telemetryRecorder) {
       telemetryRecorder.record(
-        session.currentRound,
-        session.currentPhase,
-        'series_contributed',
-        currentPlayer.id,
-        currentPlayer.roleId,
-        { cardId, cardName: card.name }
+        session.currentRound, session.currentPhase,
+        'series_contributed', currentPlayer.id, currentPlayer.roleId,
+        { cardId, cardName: card.name, seriesBonus }
       );
     }
 
@@ -590,81 +617,55 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   contributeToCombination: (resources) => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
-
     const currentPlayer = getCurrentPlayerSafe(session);
     if (!currentPlayer) return;
-
     const result = engineContributeToCombination(session, currentPlayer.id, resources);
-
     if (telemetryRecorder && result.telemetryEvent) {
       telemetryRecorder.record(
-        result.gameState.currentRound,
-        result.gameState.currentPhase,
-        result.telemetryEvent.eventType,
-        result.telemetryEvent.actorId,
-        result.telemetryEvent.actorRole,
-        result.telemetryEvent.data
+        result.gameState.currentRound, result.gameState.currentPhase,
+        result.telemetryEvent.eventType, result.telemetryEvent.actorId,
+        result.telemetryEvent.actorRole, result.telemetryEvent.data
       );
     }
-
     set({ session: result.gameState });
   },
 
   useUniqueAbility: (params) => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
-
     const currentPlayer = getCurrentPlayerSafe(session);
     if (!currentPlayer) return;
-
     const result = engineUseUniqueAbility(session, currentPlayer.id, params || {});
-
     if (telemetryRecorder && result.telemetryEvent) {
       telemetryRecorder.record(
-        result.gameState.currentRound,
-        result.gameState.currentPhase,
-        result.telemetryEvent.eventType,
-        result.telemetryEvent.actorId,
-        result.telemetryEvent.actorRole,
-        result.telemetryEvent.data
+        result.gameState.currentRound, result.gameState.currentPhase,
+        result.telemetryEvent.eventType, result.telemetryEvent.actorId,
+        result.telemetryEvent.actorRole, result.telemetryEvent.data
       );
     }
-
     set({ session: result.gameState });
   },
 
   moveStandee: (targetZoneId) => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
-
     const currentPlayer = getCurrentPlayerSafe(session);
     if (!currentPlayer) return;
-
     const result = engineMoveStandee(session, currentPlayer.id, targetZoneId);
-
     if (telemetryRecorder && result.telemetryEvent) {
       telemetryRecorder.record(
-        result.gameState.currentRound,
-        result.gameState.currentPhase,
-        result.telemetryEvent.eventType,
-        result.telemetryEvent.actorId,
-        result.telemetryEvent.actorRole,
-        result.telemetryEvent.data
+        result.gameState.currentRound, result.gameState.currentPhase,
+        result.telemetryEvent.eventType, result.telemetryEvent.actorId,
+        result.telemetryEvent.actorRole, result.telemetryEvent.data
       );
     }
-
     if (result.success) {
       set({
         session: result.gameState,
         selectedZoneId: null,
         animationQueue: [
           ...get().animationQueue,
-          {
-            id: `move_${Date.now()}`,
-            type: 'zone_update',
-            data: { targetZoneId, message: result.message },
-            timestamp: Date.now(),
-          },
+          { id: `move_${Date.now()}`, type: 'zone_update', data: { targetZoneId }, timestamp: Date.now() },
         ],
       });
     } else {
@@ -675,24 +676,36 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   passTurn: () => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
-
     const currentPlayer = getCurrentPlayerSafe(session);
     if (!currentPlayer) return;
-
     const result = enginePass(session, currentPlayer.id);
-
     if (telemetryRecorder && result.telemetryEvent) {
       telemetryRecorder.record(
-        result.gameState.currentRound,
-        result.gameState.currentPhase,
-        result.telemetryEvent.eventType,
-        result.telemetryEvent.actorId,
-        result.telemetryEvent.actorRole,
-        result.telemetryEvent.data
+        result.gameState.currentRound, result.gameState.currentPhase,
+        result.telemetryEvent.eventType, result.telemetryEvent.actorId,
+        result.telemetryEvent.actorRole, result.telemetryEvent.data
       );
     }
 
-    let updatedSession = advanceToNextPlayer(result.gameState);
+    // If passing in individual action, player draws 2 cards
+    let updatedSession = result.gameState;
+    if (session.currentPhase === 'individual_action') {
+      const players = { ...updatedSession.players };
+      const p = players[currentPlayer.id];
+      if (p && p.drawPile.length >= 2) {
+        const drawPile = [...p.drawPile];
+        const drawn = drawPile.splice(0, 2);
+        players[currentPlayer.id] = {
+          ...p,
+          hand: [...p.hand, ...drawn],
+          drawPile,
+          passedIndividualAction: true,
+        };
+        updatedSession = { ...updatedSession, players };
+      }
+    }
+
+    updatedSession = advanceToNextPlayer(updatedSession);
 
     if (haveAllPlayersActed(updatedSession)) {
       set({ session: updatedSession, showHandoff: false });
@@ -704,58 +717,35 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   proposeTrade: (targetId, offering, requesting) => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
-
     const currentPlayer = getCurrentPlayerSafe(session);
     if (!currentPlayer) return;
-
-    const result = engineProposeTrade(session, {
-      proposerId: currentPlayer.id,
-      targetId,
-      offering,
-      requesting,
-    });
-
+    const result = engineProposeTrade(session, { proposerId: currentPlayer.id, targetId, offering, requesting });
     if (telemetryRecorder && result.telemetryEvent) {
       telemetryRecorder.record(
-        result.gameState.currentRound,
-        result.gameState.currentPhase,
-        result.telemetryEvent.eventType,
-        result.telemetryEvent.actorId,
-        result.telemetryEvent.actorRole,
-        result.telemetryEvent.data
+        result.gameState.currentRound, result.gameState.currentPhase,
+        result.telemetryEvent.eventType, result.telemetryEvent.actorId,
+        result.telemetryEvent.actorRole, result.telemetryEvent.data
       );
     }
-
     set({ session: result.gameState, showTradeModal: false });
   },
 
   acceptTrade: (tradeId) => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
-
     const result = engineAcceptTrade(session, tradeId);
-
     if (telemetryRecorder && result.telemetryEvent) {
       telemetryRecorder.record(
-        result.gameState.currentRound,
-        result.gameState.currentPhase,
-        result.telemetryEvent.eventType,
-        result.telemetryEvent.actorId,
-        result.telemetryEvent.actorRole,
-        result.telemetryEvent.data
+        result.gameState.currentRound, result.gameState.currentPhase,
+        result.telemetryEvent.eventType, result.telemetryEvent.actorId,
+        result.telemetryEvent.actorRole, result.telemetryEvent.data
       );
     }
-
     set({
       session: result.gameState,
       animationQueue: [
         ...get().animationQueue,
-        {
-          id: `trade_${Date.now()}`,
-          type: 'trade',
-          data: { tradeId, accepted: true },
-          timestamp: Date.now(),
-        },
+        { id: `trade_${Date.now()}`, type: 'trade', data: { tradeId, accepted: true }, timestamp: Date.now() },
       ],
     });
   },
@@ -763,42 +753,174 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   rejectTrade: (tradeId) => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
-
     const result = engineRejectTrade(session, tradeId);
-
     if (telemetryRecorder && result.telemetryEvent) {
       telemetryRecorder.record(
-        result.gameState.currentRound,
-        result.gameState.currentPhase,
-        result.telemetryEvent.eventType,
-        result.telemetryEvent.actorId,
-        result.telemetryEvent.actorRole,
-        result.telemetryEvent.data
+        result.gameState.currentRound, result.gameState.currentPhase,
+        result.telemetryEvent.eventType, result.telemetryEvent.actorId,
+        result.telemetryEvent.actorRole, result.telemetryEvent.data
       );
     }
-
     set({ session: result.gameState });
   },
 
   castVote: (vote) => {
     const { session, telemetryRecorder } = get();
     if (!session) return;
+    const currentPlayer = getCurrentPlayerSafe(session);
+    if (!currentPlayer) return;
+    if (telemetryRecorder) {
+      telemetryRecorder.record(
+        session.currentRound, session.currentPhase,
+        'vote_called', currentPlayer.id, currentPlayer.roleId, { vote }
+      );
+    }
+    set({ showVoteModal: false });
+  },
 
+  // ── Fix 4: Coalition Actions ───────────────────────────────
+  formCoalition: (partnerIds, targetZoneId) => {
+    const { session, telemetryRecorder } = get();
+    if (!session) return;
     const currentPlayer = getCurrentPlayerSafe(session);
     if (!currentPlayer) return;
 
+    const allParticipantIds = [currentPlayer.id, ...partnerIds];
+    const participants = allParticipantIds.map(pid => {
+      const p = session.players[pid];
+      return {
+        playerId: pid,
+        roleId: p?.roleId || 'citizen' as RoleId,
+        cardsPlayed: [] as ActionCard[],
+        resourcesContributed: {} as Partial<ResourcePool>,
+        confirmed: pid === currentPlayer.id,
+        cardsRevealed: false,
+      };
+    });
+
+    const combinationType = allParticipantIds.length >= 5 ? 'full'
+      : allParticipantIds.length >= 4 ? 'quad'
+      : allParticipantIds.length >= 3 ? 'trio'
+      : 'pair';
+
+    const coalition: CoalitionCombination = {
+      id: `coalition_${Date.now()}`,
+      participants,
+      targetZoneId,
+      combinationType,
+      bonusOutcome: '',
+      resolved: false,
+      success: false,
+    };
+
     if (telemetryRecorder) {
       telemetryRecorder.record(
-        session.currentRound,
-        session.currentPhase,
-        'vote_called',
-        currentPlayer.id,
-        currentPlayer.roleId,
-        { vote }
+        session.currentRound, session.currentPhase,
+        'coalition_formed', currentPlayer.id, currentPlayer.roleId,
+        { coalitionId: coalition.id, partnerIds, targetZoneId, combinationType }
       );
     }
 
-    set({ showVoteModal: false });
+    set({
+      session: {
+        ...session,
+        activeCoalitions: [...session.activeCoalitions, coalition],
+      },
+      showCoalitionModal: false,
+    });
+  },
+
+  confirmCoalitionCards: (coalitionId, playerId, cards) => {
+    const { session } = get();
+    if (!session) return;
+
+    const coalitions = session.activeCoalitions.map(c => {
+      if (c.id !== coalitionId) return c;
+      return {
+        ...c,
+        participants: c.participants.map(p => {
+          if (p.playerId !== playerId) return p;
+          return { ...p, cardsPlayed: cards, confirmed: true };
+        }),
+      };
+    });
+
+    // Remove cards from player hand
+    const players = { ...session.players };
+    const player = players[playerId];
+    if (player) {
+      const cardIds = new Set(cards.map(c => c.id));
+      players[playerId] = {
+        ...player,
+        hand: player.hand.filter(c => !cardIds.has(c.id)),
+      };
+    }
+
+    set({ session: { ...session, activeCoalitions: coalitions, players } });
+  },
+
+  revealCoalition: (coalitionId) => {
+    const { session, telemetryRecorder } = get();
+    if (!session) return;
+
+    const coalitions = session.activeCoalitions.map(c => {
+      if (c.id !== coalitionId) return c;
+      return {
+        ...c,
+        participants: c.participants.map(p => ({ ...p, cardsRevealed: true })),
+      };
+    });
+
+    if (telemetryRecorder) {
+      telemetryRecorder.record(
+        session.currentRound, session.currentPhase,
+        'coalition_reveal', 'system', 'system',
+        { coalitionId }
+      );
+    }
+
+    set({
+      session: { ...session, activeCoalitions: coalitions },
+      animationQueue: [
+        ...get().animationQueue,
+        { id: `coalition_reveal_${Date.now()}`, type: 'coalition_reveal', data: { coalitionId }, timestamp: Date.now() },
+      ],
+    });
+  },
+
+  makePromise: (toPlayerId, resource, amount, round) => {
+    const { session, telemetryRecorder } = get();
+    if (!session) return;
+    const currentPlayer = getCurrentPlayerSafe(session);
+    if (!currentPlayer) return;
+
+    const promise: GamePromise = {
+      id: `promise_${Date.now()}`,
+      fromPlayerId: currentPlayer.id,
+      toPlayerId,
+      promisedResource: { type: resource, amount },
+      promisedRound: round,
+      fulfilled: false,
+      broken: false,
+    };
+
+    if (telemetryRecorder) {
+      telemetryRecorder.record(
+        session.currentRound, session.currentPhase,
+        'promise_made', currentPlayer.id, currentPlayer.roleId,
+        { promiseId: promise.id, toPlayerId, resource, amount, round }
+      );
+    }
+
+    set({
+      session: { ...session, promises: [...session.promises, promise] },
+      showPromiseModal: false,
+    });
+  },
+
+  // ── Fix 6: Game Graph ──────────────────────────────────────
+  toggleGameGraph: () => {
+    set(state => ({ showGameGraph: !state.showGameGraph }));
   },
 
   // ── Scoring Actions ───────────────────────────────────────────
@@ -807,19 +929,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, telemetryRecorder } = get();
     if (!session) return;
 
-    const scoredSession = startPhase(session, 'phase_5_scoring');
+    const scoredSession = startPhase(session, 'round_end_accounting');
 
     if (telemetryRecorder) {
       telemetryRecorder.record(
-        scoredSession.currentRound,
-        scoredSession.currentPhase,
-        'cws_updated',
-        'system',
-        'system',
-        {
-          cwsScore: scoredSession.cwsTracker.currentScore,
-          targetScore: scoredSession.cwsTracker.targetScore,
-        }
+        scoredSession.currentRound, scoredSession.currentPhase,
+        'cws_updated', 'system', 'system',
+        { cwsScore: scoredSession.cwsTracker.currentScore, targetScore: scoredSession.cwsTracker.targetScore }
       );
     }
 
@@ -827,12 +943,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       session: scoredSession,
       animationQueue: [
         ...get().animationQueue,
-        {
-          id: `scoring_${Date.now()}`,
-          type: 'resource_change',
-          data: { cwsScore: scoredSession.cwsTracker.currentScore },
-          timestamp: Date.now(),
-        },
+        { id: `scoring_${Date.now()}`, type: 'resource_change', data: { cwsScore: scoredSession.cwsTracker.currentScore }, timestamp: Date.now() },
       ],
     });
   },
@@ -852,16 +963,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
         if (telemetryRecorder) {
           telemetryRecorder.record(
-            session.currentRound,
-            session.currentPhase,
-            'level_up',
-            id,
-            player.roleId,
-            {
-              previousLevel: player.level,
-              newLevel: levelUpResult.newLevel,
-              perks: levelUpResult.perks,
-            }
+            session.currentRound, session.currentPhase,
+            'level_up', id, player.roleId,
+            { previousLevel: player.level, newLevel: levelUpResult.newLevel, perks: levelUpResult.perks }
           );
         }
       }
@@ -872,12 +976,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         session: { ...session, players: updatedPlayers },
         animationQueue: [
           ...get().animationQueue,
-          {
-            id: `levelup_${Date.now()}`,
-            type: 'level_up',
-            data: {},
-            timestamp: Date.now(),
-          },
+          { id: `levelup_${Date.now()}`, type: 'level_up', data: {}, timestamp: Date.now() },
         ],
       });
     }
@@ -885,37 +984,20 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   // ── UI Actions ────────────────────────────────────────────────
 
-  selectCard: (cardId) => {
-    set({ selectedCardId: cardId });
-  },
-
-  selectZone: (zoneId) => {
-    set({ selectedZoneId: zoneId });
-  },
-
-  dismissHandoff: () => {
-    set({ showHandoff: false });
-  },
-
-  toggleAudio: () => {
-    set((state) => ({ audioEnabled: !state.audioEnabled }));
-  },
-
-  toggleMusic: () => {
-    set((state) => ({ musicEnabled: !state.musicEnabled }));
-  },
-
-  toggleHighContrast: () => {
-    set((state) => ({ highContrastMode: !state.highContrastMode }));
-  },
+  selectCard: (cardId) => { set({ selectedCardId: cardId }); },
+  selectZone: (zoneId) => { set({ selectedZoneId: zoneId }); },
+  dismissHandoff: () => { set({ showHandoff: false }); },
+  dismissPaymentDay: () => { set({ showPaymentDay: false }); },
+  dismissLevelUp: () => { set({ showLevelUp: false }); },
+  toggleAudio: () => { set((state) => ({ audioEnabled: !state.audioEnabled })); },
+  toggleMusic: () => { set((state) => ({ musicEnabled: !state.musicEnabled })); },
+  toggleHighContrast: () => { set((state) => ({ highContrastMode: !state.highContrastMode })); },
 
   // ── Navigation Actions ──────────────────────────────────────
 
   returnToTitle: () => {
     const { deliberationTimer } = get();
-    if (deliberationTimer) {
-      deliberationTimer.stop();
-    }
+    if (deliberationTimer) deliberationTimer.stop();
     set({
       session: null,
       stateMachine: new GameStateMachine('title_screen'),
@@ -926,6 +1008,11 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       showHandoff: false,
       showTradeModal: false,
       showVoteModal: false,
+      showCoalitionModal: false,
+      showPromiseModal: false,
+      showGameGraph: false,
+      showPaymentDay: false,
+      showLevelUp: false,
       deliberationTimeRemaining: 0,
       animationQueue: [],
     });
@@ -948,17 +1035,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       if (stateMachine.canTransition(back.action)) {
         stateMachine.transition(back.action);
       } else {
-        // Fallback: force state machine to target state
         stateMachine.setState(back.phase);
       }
-      set({
-        session: {
-          ...session,
-          currentPhase: back.phase,
-        },
-      });
+      set({ session: { ...session, currentPhase: back.phase } });
     } else if (phase === 'setup_site_selection') {
-      // From the first setup step, go back to title
       get().returnToTitle();
     }
   },
@@ -968,13 +1048,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   saveGame: () => {
     const { session } = get();
     if (!session) return;
-
-    const saveData = JSON.stringify(session);
+    const saveData = JSON.stringify(session, (key, value) => {
+      if (value instanceof Set) return Array.from(value);
+      return value;
+    });
     try {
       localStorage.setItem(`commonground_save_${session.id}`, saveData);
-    } catch {
-      // Storage full or unavailable; caller should handle via UI
-    }
+    } catch { /* Storage full */ }
   },
 
   loadGame: (data) => {
@@ -982,7 +1062,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       const session: GameSession = JSON.parse(data);
       const recorder = new TelemetryRecorder(session.id);
       const sm = new GameStateMachine(session.currentPhase);
-
       set({
         session,
         stateMachine: sm,
@@ -993,18 +1072,20 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         showHandoff: false,
         showTradeModal: false,
         showVoteModal: false,
+        showCoalitionModal: false,
+        showPromiseModal: false,
+        showGameGraph: false,
+        showPaymentDay: false,
+        showLevelUp: false,
         deliberationTimeRemaining: session.config.deliberationTimerSeconds,
         animationQueue: [],
       });
-    } catch {
-      // Invalid JSON; caller should handle via UI
-    }
+    } catch { /* Invalid JSON */ }
   },
 
   exportTelemetry: () => {
     const { session } = get();
     if (!session) return;
-
     const exporter = new TelemetryExporter();
     exporter.downloadAllCSVs(session);
   },
@@ -1025,23 +1106,20 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   getPlayerHand: () => {
     const { session } = get();
     if (!session) return [];
-
     const player = getCurrentPlayerSafe(session);
     return player ? player.hand : [];
   },
 
   getActiveChallenge: () => {
     const { session } = get();
-    if (!session || !session.activeChallenge || session.activeChallenge.length === 0) {
-      return null;
-    }
+    if (!session || !session.activeChallenge || session.activeChallenge.length === 0) return null;
     return session.activeChallenge[0];
   },
 
   canPlayCard: (cardId) => {
     const { session } = get();
     if (!session) return false;
-    if (session.currentPhase !== 'phase_4_action') return false;
+    if (session.currentPhase !== 'individual_action' && session.currentPhase !== 'action_resolution') return false;
 
     const player = getCurrentPlayerSafe(session);
     if (!player) return false;
@@ -1049,17 +1127,21 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const card = player.hand.find((c) => c.id === cardId);
     if (!card) return false;
 
+    // Check max 2 cards in individual action
+    if (session.currentPhase === 'individual_action' && (player.cardsPlayedThisRound || 0) >= 2) return false;
+
     // Check resource cost
     if (card.cost) {
       for (const [resource, amount] of Object.entries(card.cost)) {
-        if (
-          amount &&
-          (amount as number) > 0 &&
-          player.resources[resource as keyof ResourcePool] < (amount as number)
-        ) {
+        if (amount && (amount as number) > 0 && player.resources[resource as keyof ResourcePool] < (amount as number)) {
           return false;
         }
       }
+    }
+
+    // Check budget cut restriction (Fix 3)
+    if (player.statusEffects.some(e => e.source === 'event_budget_cut') && card.tags.includes('funding')) {
+      return false;
     }
 
     return true;

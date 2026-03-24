@@ -5,17 +5,20 @@ interface PhaseIndicatorProps {
   currentPhase: GamePhase;
   currentRound: number;
   totalRounds: number;
+  gameLevel?: number;
 }
 
-const PLAY_PHASES: { key: GamePhase; label: string }[] = [
-  { key: 'phase_1_event', label: 'Event' },
-  { key: 'phase_2_challenge', label: 'Challenge' },
-  { key: 'phase_3_deliberation', label: 'Deliberation' },
-  { key: 'phase_4_action', label: 'Action' },
-  { key: 'phase_5_scoring', label: 'Scoring' },
+const PLAY_PHASES: { key: GamePhase; label: string; icon: string }[] = [
+  { key: 'payment_day', label: 'Payment Day', icon: '1' },
+  { key: 'event_roll', label: 'Event Roll', icon: '2' },
+  { key: 'individual_action', label: 'Individual', icon: '3' },
+  { key: 'deliberation', label: 'Deliberation', icon: '4' },
+  { key: 'action_resolution', label: 'Resolution', icon: '5' },
+  { key: 'round_end_accounting', label: 'Accounting', icon: '6' },
+  { key: 'level_check', label: 'Level Check', icon: '7' },
 ];
 
-const ROLE_COLORS: Record<string, string> = {
+export const ROLE_COLORS: Record<string, string> = {
   administrator: '#C0392B',
   designer: '#2E86AB',
   citizen: '#27AE60',
@@ -28,7 +31,6 @@ function getPhaseIndex(phase: GamePhase): number {
 }
 
 function getActiveRoleColor(): string {
-  // Default to a warm gold if no specific role context
   return '#D4A853';
 }
 
@@ -36,6 +38,7 @@ export function PhaseIndicator({
   currentPhase,
   currentRound,
   totalRounds,
+  gameLevel = 1,
 }: PhaseIndicatorProps) {
   const currentIndex = getPhaseIndex(currentPhase);
   const activeColor = getActiveRoleColor();
@@ -43,7 +46,7 @@ export function PhaseIndicator({
   return (
     <div className="flex items-center justify-between w-full bg-stone-900/90 backdrop-blur-sm border-b border-stone-700/50 px-4 py-2 rounded-b-lg shadow-lg">
       {/* Phase Steps */}
-      <div className="flex items-center gap-1 flex-1">
+      <div className="flex items-center gap-0.5 flex-1">
         {PLAY_PHASES.map((phase, index) => {
           const isActive = index === currentIndex;
           const isCompleted = currentIndex > index;
@@ -51,20 +54,18 @@ export function PhaseIndicator({
 
           return (
             <div key={phase.key} className="flex items-center">
-              {/* Connector line */}
               {index > 0 && (
                 <div
-                  className={`w-6 h-0.5 mx-0.5 transition-colors duration-500 ${
+                  className={`w-4 h-0.5 mx-0.5 transition-colors duration-500 ${
                     isCompleted ? 'bg-emerald-500' : 'bg-stone-600'
                   }`}
                 />
               )}
 
-              {/* Phase pill */}
               <AnimatePresence mode="wait">
                 <motion.div
                   key={`${phase.key}-${isActive}`}
-                  className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  className={`relative flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-all ${
                     isActive
                       ? 'text-white shadow-lg'
                       : isCompleted
@@ -73,56 +74,40 @@ export function PhaseIndicator({
                   }`}
                   style={
                     isActive
-                      ? {
-                          backgroundColor: activeColor,
-                          boxShadow: `0 0 16px ${activeColor}66`,
-                        }
+                      ? { backgroundColor: activeColor, boxShadow: `0 0 16px ${activeColor}66` }
                       : undefined
                   }
                   initial={{ scale: 0.95, opacity: 0.7 }}
-                  animate={{
-                    scale: isActive ? 1.05 : 1,
-                    opacity: isUpcoming ? 0.5 : 1,
-                  }}
+                  animate={{ scale: isActive ? 1.05 : 1, opacity: isUpcoming ? 0.5 : 1 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                 >
-                  {/* Pulse ring for active phase */}
                   {isActive && (
                     <motion.div
                       className="absolute inset-0 rounded-full"
                       style={{ border: `2px solid ${activeColor}` }}
-                      animate={{
-                        scale: [1, 1.15, 1],
-                        opacity: [0.6, 0, 0.6],
-                      }}
-                      transition={{
-                        duration: 2,
-                        repeat: Infinity,
-                        ease: 'easeInOut',
-                      }}
+                      animate={{ scale: [1, 1.15, 1], opacity: [0.6, 0, 0.6] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
                     />
                   )}
 
-                  {/* Checkmark for completed */}
                   {isCompleted && (
                     <motion.span
                       initial={{ scale: 0 }}
                       animate={{ scale: 1 }}
                       transition={{ type: 'spring', stiffness: 400, damping: 15 }}
-                      className="text-emerald-400 text-xs"
+                      className="text-emerald-400 text-[10px]"
                     >
                       ✓
                     </motion.span>
                   )}
 
-                  {/* Phase number for active */}
                   {isActive && (
-                    <span className="w-4 h-4 flex items-center justify-center bg-white/20 rounded-full text-[10px] font-bold">
-                      {index + 1}
+                    <span className="w-3.5 h-3.5 flex items-center justify-center bg-white/20 rounded-full text-[9px] font-bold">
+                      {phase.icon}
                     </span>
                   )}
 
-                  <span>{phase.label}</span>
+                  <span className="whitespace-nowrap">{phase.label}</span>
                 </motion.div>
               </AnimatePresence>
             </div>
@@ -130,17 +115,26 @@ export function PhaseIndicator({
         })}
       </div>
 
+      {/* Game Level indicator */}
+      <motion.div
+        className="flex items-center gap-1 mx-3 px-2 py-1 rounded-full bg-indigo-900/40 border border-indigo-700/50"
+        key={gameLevel}
+        initial={{ scale: 0.8 }}
+        animate={{ scale: 1 }}
+      >
+        <span className="text-indigo-400 text-[10px] uppercase tracking-wider font-semibold">Lv</span>
+        <span className="text-indigo-300 text-xs font-bold">{gameLevel}</span>
+      </motion.div>
+
       {/* Round indicator */}
       <motion.div
-        className="flex items-center gap-2 ml-4 pl-4 border-l border-stone-700/50"
+        className="flex items-center gap-2 pl-3 border-l border-stone-700/50"
         key={currentRound}
         initial={{ y: -8, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ type: 'spring', stiffness: 300, damping: 20 }}
       >
-        <div className="text-stone-400 text-xs uppercase tracking-wider font-semibold">
-          Round
-        </div>
+        <div className="text-stone-400 text-xs uppercase tracking-wider font-semibold">Round</div>
         <div className="flex items-baseline gap-0.5">
           <span className="text-lg font-bold text-amber-400">{currentRound}</span>
           <span className="text-stone-500 text-sm">/{totalRounds}</span>
@@ -149,5 +143,3 @@ export function PhaseIndicator({
     </div>
   );
 }
-
-export { ROLE_COLORS };

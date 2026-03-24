@@ -13,6 +13,7 @@ import {
   TradeCard,
   CWSTracker,
   ResourcePool,
+  GameGraph,
 } from '../models/types';
 import { LEVEL_TABLE } from '../models/constants';
 import {
@@ -63,9 +64,6 @@ function getCardsForRole(roleId: RoleId): ActionCard[] {
 
 // ─── Public API ───────────────────────────────────────────────
 
-/**
- * Create a single player from a name and role definition.
- */
 export function createPlayer(
   name: string,
   roleId: RoleId,
@@ -82,7 +80,6 @@ export function createPlayer(
   const hand = shuffled.slice(0, handSize);
   const drawPile = shuffled.slice(handSize);
 
-  // Pick focus zone: first zone in the zones list as default
   const zoneIds = Object.keys(ZONES);
   const focusZoneId = zoneIds[Math.floor(rng() * zoneIds.length)];
 
@@ -99,19 +96,23 @@ export function createPlayer(
     drawPile,
     discardPile: [],
     resources: { ...roleDefinition.startingResources },
-    goals: JSON.parse(JSON.stringify(roleDefinition.goals)), // deep clone
+    goals: JSON.parse(JSON.stringify(roleDefinition.goals)),
     utilityScore: 0,
     utilityHistory: [],
     focusZoneId,
     crisisState: false,
     uniqueAbilityUsesRemaining: levelEntry.uniqueAbilityUses,
     statusEffects: [],
+    // New fields for fixes
+    revenueTokens: [],
+    resolvedChallengeLastRound: false,
+    communityTrustPenalty: 0,
+    communityTrustPenaltyRoundsLeft: 0,
+    cardsPlayedThisRound: 0,
+    passedIndividualAction: false,
   };
 }
 
-/**
- * Initialize all decks (challenge, event, trade) with seeded shuffle.
- */
 export function initializeDecks(rng: () => number): DeckState {
   const challengeDeck = shuffleWithRng<ChallengeCard>([...ALL_CHALLENGES], rng);
   const eventDeck = shuffleWithRng<EventCard>([...EVENT_CARDS], rng);
@@ -126,12 +127,7 @@ export function initializeDecks(rng: () => number): DeckState {
   };
 }
 
-/**
- * Initialize the game board from a site ID.
- * Currently only supports the default eco-park site.
- */
 export function initializeBoard(siteId: string): Board {
-  // Deep clone zones so each game gets fresh state
   const zones: Record<string, typeof ZONES[keyof typeof ZONES]> = {};
   for (const [id, zone] of Object.entries(ZONES)) {
     zones[id] = {
@@ -141,10 +137,10 @@ export function initializeBoard(siteId: string): Board {
       activeProblems: [...zone.activeProblems],
       playerStandees: [],
       revealedTrigger: null,
+      investedThisRound: false,
     };
   }
 
-  // Deep clone trigger tiles
   const triggerTiles: Record<string, typeof TRIGGER_TILES[keyof typeof TRIGGER_TILES]> = {};
   for (const [id, tile] of Object.entries(TRIGGER_TILES)) {
     triggerTiles[id] = {
@@ -163,9 +159,21 @@ export function initializeBoard(siteId: string): Board {
   };
 }
 
-/**
- * Initialize a complete new game session.
- */
+function initializeGameGraph(): GameGraph {
+  return {
+    vertices: [],
+    edges: [],
+    objectiveFunction: {
+      formula: 'VO = Sum(Wi x Si) for all zones i',
+      currentVO: 0,
+      maxPossibleVO: 0,
+      zoneContributions: [],
+      thresholdVO: 0,
+    },
+    snapshots: [],
+  };
+}
+
 export function initializeGame(
   config: GameConfig,
   playerAssignments: { name: string; roleId: RoleId }[]
@@ -180,6 +188,7 @@ export function initializeGame(
   // Create players
   const players: Record<string, Player> = {};
   const turnOrder: string[] = [];
+  const callDeliberationUsed: Record<string, boolean> = {};
 
   for (const assignment of playerAssignments) {
     const roleDef = ROLES[assignment.roleId];
@@ -189,9 +198,9 @@ export function initializeGame(
     const player = createPlayer(assignment.name, assignment.roleId, roleDef, rng);
     players[player.id] = player;
     turnOrder.push(player.id);
+    callDeliberationUsed[player.id] = false;
   }
 
-  // Sort turn order by utility score (all 0 initially, so sort by role name)
   turnOrder.sort((a, b) => {
     const pa = players[a];
     const pb = players[b];
@@ -201,13 +210,9 @@ export function initializeGame(
     return pa.roleId.localeCompare(pb.roleId);
   });
 
-  // Initialize decks
   const decks = initializeDecks(rng);
-
-  // Initialize board
   const board = initializeBoard(config.siteId);
 
-  // Initialize CWS tracker
   const cwsTracker: CWSTracker = {
     currentScore: 0,
     targetScore: config.cwsTarget,
@@ -229,16 +234,24 @@ export function initializeGame(
     decks,
     cwsTracker,
     eventDieResult: null,
+    eventRollResult: null,
     activeChallenge: null,
     activeSeries: null,
     activeCombination: null,
+    activeCoalitions: [],
     tradeOffers: [],
+    promises: [],
     roundLog: [],
     gameLog: [],
     telemetry: [],
     status: 'setup',
     endResult: null,
     rngSeed: seed,
+    gameLevel: 1,
+    gameGraph: initializeGameGraph(),
+    zonesInvestedThisRound: [],
+    fullCoalitionAchieved: false,
+    callDeliberationUsed,
   };
 }
 
