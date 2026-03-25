@@ -89,7 +89,7 @@ function buildContextualPrompt(player: Player, gameState: GameSession): string {
   }
 
   // Check if in deliberation phase
-  if (phase === 'phase_3_deliberation') {
+  if (phase === 'deliberation') {
     return `${player.name}, the group is deliberating. As the ${roleName}, what priorities would you like to advocate for this round?`;
   }
 

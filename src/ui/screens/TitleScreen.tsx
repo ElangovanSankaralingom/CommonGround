@@ -14,26 +14,104 @@ const TAGLINES = [
 
 // ── Role data for icon strip ───────────────────────────────────
 const ROLES: { icon: string; label: string; color: string }[] = [
-  { icon: '🏛️', label: 'Administrator', color: '#C0392B' },
-  { icon: '📐', label: 'Designer', color: '#2E86AB' },
-  { icon: '🏘️', label: 'Citizen', color: '#27AE60' },
-  { icon: '💼', label: 'Investor', color: '#E67E22' },
-  { icon: '🌿', label: 'Advocate', color: '#8E44AD' },
+  { icon: '\u{1F3DB}\uFE0F', label: 'Administrator', color: '#C0392B' },
+  { icon: '\u{1F4D0}', label: 'Designer', color: '#2E86AB' },
+  { icon: '\u{1F3D8}\uFE0F', label: 'Citizen', color: '#27AE60' },
+  { icon: '\u{1F4BC}', label: 'Investor', color: '#E67E22' },
+  { icon: '\u{1F33F}', label: 'Advocate', color: '#8E44AD' },
 ];
 
-// ── Floating leaf particles ────────────────────────────────────
-const LEAVES = Array.from({ length: 18 }, (_, i) => ({
+// ── Tree data: geometric low-poly trees across bottom third ────
+interface TreeDef {
+  x: number; baseY: number; scale: number;
+  type: 'triangle' | 'round';
+  pulseOffset: number; // stagger for wave effect
+  entranceDelay: number;
+}
+
+const TREES: TreeDef[] = [
+  { x: 60,   baseY: 620, scale: 0.9,  type: 'triangle', pulseOffset: 0,    entranceDelay: 0.3 },
+  { x: 140,  baseY: 600, scale: 1.15, type: 'round',    pulseOffset: 0.8,  entranceDelay: 0.42 },
+  { x: 210,  baseY: 630, scale: 0.75, type: 'triangle', pulseOffset: 1.6,  entranceDelay: 0.54 },
+  { x: 320,  baseY: 640, scale: 0.65, type: 'round',    pulseOffset: 2.4,  entranceDelay: 0.66 },
+  { x: 440,  baseY: 625, scale: 1.0,  type: 'triangle', pulseOffset: 3.2,  entranceDelay: 0.78 },
+  { x: 560,  baseY: 650, scale: 0.55, type: 'round',    pulseOffset: 4.0,  entranceDelay: 0.9 },
+  { x: 700,  baseY: 620, scale: 1.1,  type: 'triangle', pulseOffset: 4.8,  entranceDelay: 1.02 },
+  { x: 810,  baseY: 635, scale: 0.8,  type: 'round',    pulseOffset: 5.6,  entranceDelay: 1.14 },
+  { x: 920,  baseY: 610, scale: 1.2,  type: 'triangle', pulseOffset: 6.4,  entranceDelay: 1.26 },
+  { x: 1020, baseY: 640, scale: 0.7,  type: 'round',    pulseOffset: 7.2,  entranceDelay: 1.38 },
+  { x: 1100, baseY: 625, scale: 0.95, type: 'triangle', pulseOffset: 0.4,  entranceDelay: 1.50 },
+  { x: 1160, baseY: 645, scale: 0.6,  type: 'round',    pulseOffset: 1.2,  entranceDelay: 1.62 },
+];
+
+// ── Hexagon zone markers ───────────────────────────────────────
+interface HexDef { cx: number; cy: number; r: number; color: string; spinDuration: number; entranceDelay: number; }
+const HEXAGONS: HexDef[] = [
+  { cx: 180,  cy: 160, r: 28, color: '#4CAF50', spinDuration: 55, entranceDelay: 1.5 },
+  { cx: 400,  cy: 100, r: 22, color: '#F4D03F', spinDuration: 65, entranceDelay: 1.6 },
+  { cx: 650,  cy: 140, r: 32, color: '#E67E22', spinDuration: 50, entranceDelay: 1.7 },
+  { cx: 880,  cy: 110, r: 20, color: '#C0392B', spinDuration: 70, entranceDelay: 1.8 },
+  { cx: 1050, cy: 170, r: 25, color: '#2E86AB', spinDuration: 60, entranceDelay: 1.9 },
+];
+
+// ── Firefly data (CSS animated) ────────────────────────────────
+interface FireflyDef {
+  id: number; left: number; top: number; size: number;
+  color: string; driftDuration: number; glowDuration: number;
+  glowDelay: number; driftDelay: number;
+  fx1: number; fy1: number; fx2: number; fy2: number; fx3: number; fy3: number;
+}
+
+const FIREFLY_COLORS = ['#F4D03F', '#7BA05B', '#87CEEB'];
+
+const FIREFLIES: FireflyDef[] = Array.from({ length: 25 }, (_, i) => ({
   id: i,
-  x: Math.random() * 100,
-  delay: Math.random() * 8,
-  duration: 10 + Math.random() * 8,
-  size: 8 + Math.random() * 12,
-  drift: (Math.random() - 0.5) * 60,
-  opacity: 0.15 + Math.random() * 0.2,
-  rotation: Math.random() * 360,
+  left: Math.random() * 100,
+  top: 5 + Math.random() * 80,
+  size: 2 + Math.random() * 2.5,
+  color: FIREFLY_COLORS[i % 3],
+  driftDuration: 15 + Math.random() * 12,
+  glowDuration: 3 + Math.random() * 2.5,
+  glowDelay: Math.random() * 5,
+  driftDelay: Math.random() * 8,
+  fx1: (Math.random() - 0.5) * 80,
+  fy1: (Math.random() - 0.5) * 60,
+  fx2: (Math.random() - 0.5) * 70,
+  fy2: (Math.random() - 0.5) * 50,
+  fx3: (Math.random() - 0.5) * 90,
+  fy3: (Math.random() - 0.5) * 40,
 }));
 
-// ── SVG background elements ───────────────────────────────────
+// ── Falling leaf data (CSS animated) ───────────────────────────
+interface LeafDef {
+  id: number; left: number; duration: number; delay: number;
+  sway: number; spin: number; opacity: number; color: string;
+}
+
+const LEAF_COLORS = ['#D4A017', '#C75B39', '#808000', '#B8860B', '#A0522D'];
+
+const FALLING_LEAVES: LeafDef[] = Array.from({ length: 7 }, (_, i) => ({
+  id: i,
+  left: 8 + Math.random() * 84,
+  duration: 20 + Math.random() * 12,
+  delay: 2.5 + Math.random() * 6,
+  sway: 40 + Math.random() * 80 * (i % 2 === 0 ? 1 : -1),
+  spin: 180 + Math.random() * 360 * (i % 2 === 0 ? 1 : -1),
+  opacity: 0.12 + Math.random() * 0.18,
+  color: LEAF_COLORS[i % LEAF_COLORS.length],
+}));
+
+// ── Hexagon SVG path helper ────────────────────────────────────
+function hexPath(cx: number, cy: number, r: number): string {
+  const pts: string[] = [];
+  for (let a = 0; a < 6; a++) {
+    const angle = (Math.PI / 3) * a - Math.PI / 6;
+    pts.push(`${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`);
+  }
+  return `M${pts.join('L')}Z`;
+}
+
+// ── Layer 2: Geometric Park SVG ────────────────────────────────
 function ParkScene() {
   return (
     <svg
@@ -41,109 +119,243 @@ function ParkScene() {
       viewBox="0 0 1200 800"
       preserveAspectRatio="xMidYMid slice"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
     >
       <defs>
-        <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1B3A5C" stopOpacity="0.9" />
-          <stop offset="50%" stopColor="#2C5F7C" stopOpacity="0.6" />
-          <stop offset="100%" stopColor="#D4A574" stopOpacity="0.3" />
+        <linearGradient id="treeGradMuted" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#5C7A5C" />
+          <stop offset="100%" stopColor="#4A6B3A" />
         </linearGradient>
-        <linearGradient id="groundGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#7BA05B" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="#4A6B3A" stopOpacity="0.6" />
-        </linearGradient>
+        <radialGradient id="fountainGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#2E86AB" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="#2E86AB" stopOpacity="0" />
+        </radialGradient>
       </defs>
 
-      {/* Sky */}
-      <rect width="1200" height="800" fill="url(#skyGrad)" />
-
-      {/* Ground/grass area */}
-      <ellipse cx="600" cy="750" rx="800" ry="200" fill="url(#groundGrad)" />
-
-      {/* Pathway */}
-      <motion.path
-        d="M200,700 Q400,650 600,680 Q800,710 1000,660"
+      {/* ── Pathways (draw-in animation via CSS) ────────── */}
+      <path
+        d="M-20,710 Q200,660 400,690 Q600,720 800,680 Q1000,650 1220,695"
         stroke="#D4A574"
-        strokeWidth="8"
+        strokeWidth="7"
         fill="none"
         strokeLinecap="round"
-        opacity="0.3"
-        initial={{ pathLength: 0 }}
-        animate={{ pathLength: 1 }}
-        transition={{ duration: 3, delay: 0.5, ease: 'easeInOut' }}
+        opacity="0.15"
+        strokeDasharray="2000"
+        strokeDashoffset="2000"
+        style={{ animation: 'pathDraw 2.5s ease-out 0.8s forwards' }}
+      />
+      <path
+        d="M100,740 Q300,700 500,730 Q700,755 900,720 Q1050,700 1200,740"
+        stroke="#D4A574"
+        strokeWidth="5"
+        fill="none"
+        strokeLinecap="round"
+        opacity="0.1"
+        strokeDasharray="1800"
+        strokeDashoffset="1800"
+        style={{ animation: 'pathDraw 2.8s ease-out 1.0s forwards' }}
       />
 
-      {/* Trees - left cluster */}
-      <motion.g
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 0.35, y: 0 }}
-        transition={{ duration: 1.5, delay: 0.8 }}
-      >
-        {/* Tree 1 */}
-        <rect x="140" y="520" width="8" height="80" fill="#6B4226" opacity="0.5" rx="2" />
-        <circle cx="144" cy="500" r="35" fill="#7BA05B" opacity="0.4" />
-        <circle cx="130" cy="510" r="25" fill="#5A8A3B" opacity="0.3" />
-        {/* Tree 2 */}
-        <rect x="80" y="540" width="7" height="70" fill="#6B4226" opacity="0.4" rx="2" />
-        <circle cx="83" cy="520" r="30" fill="#6B9A4B" opacity="0.35" />
-        {/* Tree 3 */}
-        <rect x="210" y="530" width="6" height="60" fill="#6B4226" opacity="0.4" rx="2" />
-        <circle cx="213" cy="515" r="28" fill="#7BA05B" opacity="0.3" />
-      </motion.g>
+      {/* ── Trees: geometric shapes that grow + pulse ───── */}
+      {TREES.map((t, i) => (
+        <g
+          key={i}
+          style={{
+            transformOrigin: `${t.x}px ${t.baseY}px`,
+            animation: `treeGrow 1.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${t.entranceDelay}s both`,
+          }}
+        >
+          {/* Trunk */}
+          <rect
+            x={t.x - 3 * t.scale}
+            y={t.baseY - 50 * t.scale}
+            width={6 * t.scale}
+            height={50 * t.scale}
+            fill="#6B4226"
+            opacity="0.5"
+            rx="2"
+          />
+          {/* Canopy — pulses muted ↔ vibrant in wave */}
+          <g
+            style={{
+              willChange: 'opacity, filter',
+              animation: `treePulse 8s ease-in-out ${t.pulseOffset}s infinite`,
+            }}
+          >
+            {t.type === 'triangle' ? (
+              <>
+                <polygon
+                  points={`${t.x},${t.baseY - 50 * t.scale - 45 * t.scale} ${t.x - 28 * t.scale},${t.baseY - 50 * t.scale + 10 * t.scale} ${t.x + 28 * t.scale},${t.baseY - 50 * t.scale + 10 * t.scale}`}
+                  fill="#5C7A5C"
+                />
+                <polygon
+                  points={`${t.x},${t.baseY - 50 * t.scale - 60 * t.scale} ${t.x - 20 * t.scale},${t.baseY - 50 * t.scale - 15 * t.scale} ${t.x + 20 * t.scale},${t.baseY - 50 * t.scale - 15 * t.scale}`}
+                  fill="#4CAF50"
+                  opacity="0.85"
+                />
+              </>
+            ) : (
+              <>
+                <circle
+                  cx={t.x}
+                  cy={t.baseY - 50 * t.scale - 15 * t.scale}
+                  r={30 * t.scale}
+                  fill="#5C7A5C"
+                />
+                <circle
+                  cx={t.x - 10 * t.scale}
+                  cy={t.baseY - 50 * t.scale - 25 * t.scale}
+                  r={20 * t.scale}
+                  fill="#4CAF50"
+                  opacity="0.75"
+                />
+              </>
+            )}
+          </g>
+        </g>
+      ))}
 
-      {/* Trees - right cluster */}
-      <motion.g
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 0.35, y: 0 }}
-        transition={{ duration: 1.5, delay: 1.0 }}
-      >
-        <rect x="950" y="510" width="8" height="85" fill="#6B4226" opacity="0.5" rx="2" />
-        <circle cx="954" cy="490" r="38" fill="#7BA05B" opacity="0.4" />
-        <circle cx="940" cy="505" r="26" fill="#5A8A3B" opacity="0.3" />
-        <rect x="1040" y="530" width="7" height="65" fill="#6B4226" opacity="0.4" rx="2" />
-        <circle cx="1043" cy="515" r="30" fill="#6B9A4B" opacity="0.3" />
-      </motion.g>
+      {/* ── Benches ─────────────────────────────────────── */}
+      <g opacity="0.25" style={{ animation: 'fadeInScale 1s ease-out 1.2s both' }}>
+        {/* Bench 1 — near left path */}
+        <rect x="310" y="685" width="40" height="3" fill="#8B6F47" rx="1.5" />
+        <rect x="314" y="688" width="3" height="10" fill="#8B6F47" rx="1" />
+        <rect x="343" y="688" width="3" height="10" fill="#8B6F47" rx="1" />
+        <rect x="310" y="678" width="40" height="2.5" fill="#8B6F47" rx="1" opacity="0.7" />
+        {/* Bench 2 — center right */}
+        <rect x="780" y="695" width="36" height="3" fill="#8B6F47" rx="1.5" />
+        <rect x="783" y="698" width="3" height="9" fill="#8B6F47" rx="1" />
+        <rect x="809" y="698" width="3" height="9" fill="#8B6F47" rx="1" />
+        <rect x="780" y="688" width="36" height="2.5" fill="#8B6F47" rx="1" opacity="0.7" />
+        {/* Bench 3 — far right */}
+        <rect x="1030" y="710" width="32" height="3" fill="#8B6F47" rx="1.5" />
+        <rect x="1033" y="713" width="3" height="8" fill="#8B6F47" rx="1" />
+        <rect x="1055" y="713" width="3" height="8" fill="#8B6F47" rx="1" />
+      </g>
 
-      {/* Bench */}
-      <motion.g
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 0.3 }}
-        transition={{ duration: 1.5, delay: 1.5 }}
-      >
-        <rect x="520" y="640" width="60" height="4" fill="#8B6F47" rx="2" />
-        <rect x="525" y="644" width="4" height="16" fill="#8B6F47" rx="1" />
-        <rect x="572" y="644" width="4" height="16" fill="#8B6F47" rx="1" />
-        <rect x="520" y="630" width="60" height="3" fill="#8B6F47" rx="1" opacity="0.7" />
-      </motion.g>
+      {/* ── Fountain — center-right with pulsing glow ─── */}
+      <g style={{ animation: 'fadeInScale 0.8s ease-out 3.0s both' }}>
+        {/* Water pool */}
+        <circle cx="850" cy="670" r="24" fill="#2E86AB" opacity="0.08" />
+        {/* Glow pulse */}
+        <circle
+          cx="850" cy="670" r="35"
+          fill="url(#fountainGlow)"
+          style={{
+            willChange: 'opacity, transform',
+            transformOrigin: '850px 670px',
+            animation: 'fountainPulse 4s ease-in-out infinite',
+          }}
+        />
+        {/* Basin ring */}
+        <circle cx="850" cy="670" r="18" fill="none" stroke="#2E86AB" strokeWidth="1.5" opacity="0.2" />
+        {/* Radiating water lines */}
+        {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
+          <line
+            key={angle}
+            x1={850 + 10 * Math.cos((angle * Math.PI) / 180)}
+            y1={670 + 10 * Math.sin((angle * Math.PI) / 180)}
+            x2={850 + 22 * Math.cos((angle * Math.PI) / 180)}
+            y2={670 + 22 * Math.sin((angle * Math.PI) / 180)}
+            stroke="#2E86AB"
+            strokeWidth="1"
+            opacity="0.15"
+            strokeLinecap="round"
+          />
+        ))}
+        {/* Center spout */}
+        <circle cx="850" cy="670" r="4" fill="#2E86AB" opacity="0.25" />
+      </g>
 
-      {/* People silhouettes */}
-      <motion.g
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 0.2, x: 0 }}
-        transition={{ duration: 2, delay: 2 }}
-      >
-        {/* Person 1 - walking */}
-        <circle cx="380" cy="650" r="6" fill="#1B3A5C" />
-        <rect x="377" y="656" width="6" height="18" fill="#1B3A5C" rx="2" />
-        {/* Person 2 */}
-        <circle cx="420" cy="645" r="5" fill="#1B3A5C" />
-        <rect x="417" y="650" width="6" height="16" fill="#1B3A5C" rx="2" />
-        {/* Person 3 - sitting on bench */}
-        <circle cx="540" cy="623" r="5" fill="#1B3A5C" />
-        <rect x="537" y="628" width="6" height="12" fill="#1B3A5C" rx="2" />
-      </motion.g>
-
-      {/* Lamp post */}
-      <motion.g
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 0.25 }}
-        transition={{ duration: 1.5, delay: 1.2 }}
-      >
-        <rect x="700" y="550" width="4" height="100" fill="#6B6B6B" rx="1" />
-        <ellipse cx="702" cy="545" rx="12" ry="6" fill="#F4D03F" opacity="0.4" />
-        <circle cx="702" cy="545" r="4" fill="#F4D03F" opacity="0.6" />
-      </motion.g>
+      {/* ── Hexagons — zone markers, slow spin ──────────── */}
+      {HEXAGONS.map((h, i) => (
+        <g
+          key={i}
+          style={{
+            transformOrigin: `${h.cx}px ${h.cy}px`,
+            willChange: 'transform',
+            animation: `hexSpin ${h.spinDuration}s linear infinite, fadeInScale 0.5s ease-out ${h.entranceDelay}s both`,
+          }}
+        >
+          <path
+            d={hexPath(h.cx, h.cy, h.r)}
+            fill="none"
+            stroke={h.color}
+            strokeWidth="1"
+            opacity="0.07"
+          />
+          <path
+            d={hexPath(h.cx, h.cy, h.r * 0.6)}
+            fill={h.color}
+            opacity="0.04"
+          />
+        </g>
+      ))}
     </svg>
+  );
+}
+
+// ── Layer 3a: Fireflies (pure CSS) ─────────────────────────────
+function Fireflies() {
+  return (
+    <>
+      {FIREFLIES.map((f) => (
+        <div
+          key={f.id}
+          className="absolute rounded-full pointer-events-none"
+          style={{
+            left: `${f.left}%`,
+            top: `${f.top}%`,
+            width: f.size,
+            height: f.size,
+            backgroundColor: f.color,
+            boxShadow: `0 0 ${f.size * 2}px ${f.color}, 0 0 ${f.size * 4}px ${f.color}44`,
+            willChange: 'transform, opacity',
+            '--fx1': `${f.fx1}px`,
+            '--fy1': `${f.fy1}px`,
+            '--fx2': `${f.fx2}px`,
+            '--fy2': `${f.fy2}px`,
+            '--fx3': `${f.fx3}px`,
+            '--fy3': `${f.fy3}px`,
+            animation: `fireflyDrift ${f.driftDuration}s ease-in-out ${f.driftDelay}s infinite, fireflyGlow ${f.glowDuration}s ease-in-out ${f.glowDelay}s infinite`,
+            opacity: 0,
+          } as React.CSSProperties}
+        />
+      ))}
+    </>
+  );
+}
+
+// ── Layer 3b: Falling leaves (pure CSS) ────────────────────────
+function FallingLeaves() {
+  return (
+    <>
+      {FALLING_LEAVES.map((l) => (
+        <svg
+          key={l.id}
+          className="absolute pointer-events-none"
+          style={{
+            left: `${l.left}%`,
+            top: '-3%',
+            width: 14,
+            height: 20,
+            willChange: 'transform, opacity',
+            '--leaf-sway': `${l.sway}px`,
+            '--leaf-spin': `${l.spin}deg`,
+            '--leaf-opacity': `${l.opacity}`,
+            animation: `leafFall ${l.duration}s ease-in ${l.delay}s infinite`,
+            opacity: 0,
+          } as React.CSSProperties}
+          viewBox="0 0 14 20"
+        >
+          <path
+            d="M7 0 C10 5, 13 10, 7 20 C1 10, 4 5, 7 0Z"
+            fill={l.color}
+          />
+          <line x1="7" y1="2" x2="7" y2="18" stroke={l.color} strokeWidth="0.5" opacity="0.5" />
+        </svg>
+      ))}
+    </>
   );
 }
 
@@ -268,92 +480,78 @@ export default function TitleScreen() {
       animate={{ opacity: isExiting ? 0 : 1 }}
       transition={{ duration: 0.6 }}
     >
-      {/* ── Background layers ─────────────────────────────── */}
-
-      {/* Base warm gradient */}
+      {/* ── Layer 1: Animated Base Gradient ────────────────── */}
       <div
         className="absolute inset-0"
         style={{
           background: `
-            radial-gradient(ellipse at 30% 20%, rgba(199, 91, 57, 0.15) 0%, transparent 50%),
-            radial-gradient(ellipse at 70% 80%, rgba(123, 160, 91, 0.12) 0%, transparent 50%),
-            linear-gradient(175deg, #1B3A5C 0%, #2C5F7C 30%, #D4A574 70%, #C75B39 100%)
+            linear-gradient(
+              180deg,
+              #0A1628 0%,
+              #1B3A5C 25%,
+              #4A2040 50%,
+              #2C1810 85%,
+              #1E0F08 100%
+            )
           `,
+          backgroundSize: '100% 110%',
+          animation: 'gradientShift 30s ease-in-out infinite',
         }}
       />
 
-      {/* Paper/linen texture noise */}
-      <div
-        className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-          backgroundSize: '200px 200px',
-        }}
-      />
-
-      {/* Park scene SVG illustration */}
+      {/* ── Layer 2: SVG Park Elements ─────────────────────── */}
       <motion.div
         className="absolute inset-0"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 1.5 }}
+        transition={{ duration: 0.8 }}
       >
         <ParkScene />
       </motion.div>
 
-      {/* Soft overlay for text readability */}
+      {/* ── Layer 3: Particle System ───────────────────────── */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <Fireflies />
+        <FallingLeaves />
+      </div>
+
+      {/* ── Layer 4: Noise/Grain Texture Overlay ───────────── */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E")`,
+          backgroundSize: '200px 200px',
+          opacity: 0.4,
+          zIndex: 4,
+        }}
+      />
+
+      {/* ── Readability overlay — soft radial behind content ── */}
       <div
         className="absolute inset-0"
         style={{
           background: `
-            radial-gradient(ellipse at center 40%, rgba(27, 58, 92, 0.5) 0%, rgba(27, 58, 92, 0.2) 40%, transparent 70%),
-            linear-gradient(to bottom, rgba(27, 58, 92, 0.3) 0%, transparent 30%, transparent 70%, rgba(27, 58, 92, 0.4) 100%)
+            radial-gradient(ellipse 60% 50% at 50% 45%, rgba(10, 10, 20, 0.55) 0%, transparent 70%),
+            linear-gradient(to bottom, rgba(10, 22, 40, 0.2) 0%, transparent 25%, transparent 75%, rgba(10, 22, 40, 0.3) 100%)
           `,
+          zIndex: 5,
         }}
       />
 
-      {/* ── Floating leaf particles ───────────────────────── */}
-      {LEAVES.map((leaf) => (
-        <motion.div
-          key={leaf.id}
-          className="absolute pointer-events-none select-none"
-          style={{
-            left: `${leaf.x}%`,
-            fontSize: leaf.size,
-            color: leaf.id % 3 === 0 ? '#7BA05B' : leaf.id % 3 === 1 ? '#D4A574' : '#C75B39',
-          }}
-          initial={{ y: '105vh', x: 0, rotate: leaf.rotation, opacity: 0 }}
-          animate={{
-            y: '-10vh',
-            x: [0, leaf.drift, leaf.drift * 0.5, leaf.drift * 1.2],
-            rotate: leaf.rotation + 360,
-            opacity: [0, leaf.opacity, leaf.opacity, 0],
-          }}
-          transition={{
-            duration: leaf.duration,
-            delay: leaf.delay,
-            repeat: Infinity,
-            ease: 'linear',
-          }}
-        >
-          {leaf.id % 4 === 0 ? '🍃' : leaf.id % 4 === 1 ? '🍂' : leaf.id % 4 === 2 ? '✦' : '·'}
-        </motion.div>
-      ))}
-
       {/* ── Main content ──────────────────────────────────── */}
-      <div className="relative z-10 flex flex-col items-center gap-6 px-4 max-w-2xl">
+      <div className="relative z-10 flex flex-col items-center gap-6 px-4 max-w-2xl" style={{ zIndex: 10 }}>
 
         {/* Title */}
         <motion.h1
           className="text-6xl sm:text-7xl md:text-8xl font-bold tracking-[0.12em] text-center"
           style={{
             fontFamily: "'Playfair Display', 'Georgia', serif",
-            color: '#F5E6D3',
-            textShadow: '0 0 40px rgba(244, 208, 63, 0.3), 0 4px 12px rgba(0,0,0,0.4)',
+            color: '#F5F0E8',
+            textShadow: '0 0 40px rgba(244, 208, 63, 0.15), 0 0 80px rgba(244, 208, 63, 0.05), 0 4px 16px rgba(0,0,0,0.5)',
           }}
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, duration: 0.8, ease: 'easeOut' }}
+          transition={{ delay: 1.0, duration: 0.8, ease: 'easeOut' }}
         >
           COMMONGROUND
         </motion.h1>
@@ -367,7 +565,7 @@ export default function TitleScreen() {
           }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.5, duration: 0.8 }}
+          transition={{ delay: 1.2, duration: 0.8 }}
         >
           A Collaborative Placemaking Game
         </motion.p>
@@ -377,7 +575,7 @@ export default function TitleScreen() {
           className="h-8 flex items-center justify-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.8, duration: 0.6 }}
+          transition={{ delay: 1.5, duration: 0.6 }}
         >
           <AnimatePresence mode="wait">
             <motion.p
@@ -399,7 +597,7 @@ export default function TitleScreen() {
           className="flex items-center gap-3 my-2"
           initial={{ opacity: 0, scaleX: 0 }}
           animate={{ opacity: 1, scaleX: 1 }}
-          transition={{ delay: 0.9, duration: 0.6 }}
+          transition={{ delay: 1.6, duration: 0.6 }}
         >
           <div className="h-px w-16 sm:w-24" style={{ background: 'linear-gradient(to right, transparent, rgba(212, 165, 116, 0.5))' }} />
           <div className="w-2 h-2 rotate-45" style={{ background: 'rgba(244, 208, 63, 0.5)' }} />
@@ -411,7 +609,7 @@ export default function TitleScreen() {
           className="flex items-center gap-6 sm:gap-8"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 1.0, duration: 0.5 }}
+          transition={{ delay: 1.7, duration: 0.5 }}
         >
           {ROLES.map((role, i) => (
             <motion.div
@@ -419,7 +617,7 @@ export default function TitleScreen() {
               className="flex flex-col items-center gap-1"
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 1.0 + i * 0.15, duration: 0.5 }}
+              transition={{ delay: 1.7 + i * 0.12, duration: 0.5 }}
             >
               <motion.span
                 className="text-2xl sm:text-3xl"
@@ -438,7 +636,7 @@ export default function TitleScreen() {
                 style={{ color: role.color }}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 0.8 }}
-                transition={{ delay: 1.3 + i * 0.15, duration: 0.5 }}
+                transition={{ delay: 2.0 + i * 0.12, duration: 0.5 }}
               >
                 {role.label}
               </motion.span>
@@ -451,7 +649,7 @@ export default function TitleScreen() {
           className="flex flex-col items-center gap-3 mt-4"
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 1.5, duration: 0.5, ease: 'easeOut' }}
+          transition={{ delay: 2.2, duration: 0.5, ease: 'easeOut' }}
         >
           {/* New Game button */}
           <motion.button
@@ -528,7 +726,7 @@ export default function TitleScreen() {
         className="absolute bottom-6 flex flex-col items-center gap-2 z-10"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 2, duration: 0.8 }}
+        transition={{ delay: 2.8, duration: 0.8 }}
       >
         <button
           onClick={() => setShowAbout(true)}

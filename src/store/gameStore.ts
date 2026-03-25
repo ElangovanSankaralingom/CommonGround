@@ -75,6 +75,7 @@ interface GameStoreState {
   showVoteModal: boolean;
   showCoalitionModal: boolean;
   showPromiseModal: boolean;
+  showNashDashboard: boolean;
   showGameGraph: boolean;
   showPaymentDay: boolean;
   showLevelUp: boolean;
@@ -168,6 +169,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   showVoteModal: false,
   showCoalitionModal: false,
   showPromiseModal: false,
+  showNashDashboard: false,
   showGameGraph: false,
   showPaymentDay: false,
   showLevelUp: false,

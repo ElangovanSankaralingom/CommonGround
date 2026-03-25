@@ -132,7 +132,7 @@ const EMPATHY_OPPOSITE_MAP: Record<RoleId, RoleId> = {
   investor: 'citizen',
 };
 
-const EMPATHY_EXPLANATIONS: Record<RoleId, Record<RoleId, string>> = {
+const EMPATHY_EXPLANATIONS: Partial<Record<RoleId, Partial<Record<RoleId, string>>>> = {
   administrator: {
     citizen: 'You identified as a government/admin professional, so you will play as The Community Organizer — to experience placemaking from the community perspective.',
   },

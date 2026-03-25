@@ -593,7 +593,7 @@ function EventResultsPanel({
   onContinue,
 }: {
   eventDieResult: { value: number; outcome: string } | null;
-  eventRollResult: NonNullable<typeof import('../../core/models/types').GameSession.prototype.eventRollResult>;
+  eventRollResult: import('../../core/models/types').EventRollResult;
   players: Player[];
   onContinue: () => void;
 }) {
@@ -838,7 +838,7 @@ export default function GameScreen() {
         {session.nashEngineOutput && (
           <button
             className="w-10 h-10 rounded-full bg-amber-700/80 border border-amber-600 flex items-center justify-center hover:bg-amber-600 transition-colors"
-            onClick={() => useGameStore.setState((s: any) => ({ showNashDashboard: !s.showNashDashboard }))}
+            onClick={() => useGameStore.setState((s) => ({ showNashDashboard: !s.showNashDashboard }))}
             title="Nash Equilibrium Dashboard"
           >
             <span className="text-amber-200 text-sm font-bold">NE</span>
@@ -1148,10 +1148,10 @@ export default function GameScreen() {
 
       {/* Nash Dashboard */}
       <AnimatePresence>
-        {(useGameStore.getState() as any).showNashDashboard && session.nashEngineOutput && (
+        {useGameStore.getState().showNashDashboard && session.nashEngineOutput && (
           <NashDashboard
             nashOutput={session.nashEngineOutput}
-            onClose={() => useGameStore.setState({ showNashDashboard: false } as any)}
+            onClose={() => useGameStore.setState({ showNashDashboard: false })}
           />
         )}
       </AnimatePresence>

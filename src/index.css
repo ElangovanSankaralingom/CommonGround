@@ -93,6 +93,72 @@ h1, h2, h3, .font-display {
   background-image: none;
 }
 
+/* ── Title Screen: Park Awakening Background ──────────────── */
+
+/* Layer 1: Slow gradient shift */
+@keyframes gradientShift {
+  0%, 100% { background-position: 50% 50%; }
+  33% { background-position: 48% 52%; }
+  66% { background-position: 52% 48%; }
+}
+
+/* Layer 2: Tree color pulse (muted ↔ vibrant) */
+@keyframes treePulse {
+  0%, 100% { opacity: 0.35; filter: saturate(0.5); }
+  50% { opacity: 0.6; filter: saturate(1.3); }
+}
+
+/* Layer 2: Hexagon slow spin */
+@keyframes hexSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Layer 2: Fountain glow pulse */
+@keyframes fountainPulse {
+  0%, 100% { opacity: 0.12; transform: scale(1); }
+  50% { opacity: 0.28; transform: scale(1.08); }
+}
+
+/* Layer 3: Firefly drift — each instance uses unique custom properties */
+@keyframes fireflyDrift {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(var(--fx1, 30px), var(--fy1, -20px)); }
+  50% { transform: translate(var(--fx2, -15px), var(--fy2, -40px)); }
+  75% { transform: translate(var(--fx3, 20px), var(--fy3, -10px)); }
+  100% { transform: translate(0, 0); }
+}
+
+@keyframes fireflyGlow {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.65; }
+}
+
+/* Layer 3: Leaf fall */
+@keyframes leafFall {
+  0% { transform: translate(0, -20px) rotate(0deg); opacity: 0; }
+  5% { opacity: var(--leaf-opacity, 0.2); }
+  90% { opacity: var(--leaf-opacity, 0.2); }
+  100% { transform: translate(var(--leaf-sway, 80px), calc(100vh + 20px)) rotate(var(--leaf-spin, 360deg)); opacity: 0; }
+}
+
+/* Layer 2: Path draw-in */
+@keyframes pathDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Layer entrance: grow tree from base */
+@keyframes treeGrow {
+  from { transform: scaleY(0); opacity: 0; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+
+/* Layer entrance: fade in and slight scale */
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

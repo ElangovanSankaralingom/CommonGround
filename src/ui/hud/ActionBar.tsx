@@ -76,7 +76,7 @@ const ACTION_BUTTONS: ActionButton[] = [
 
 export function ActionBar(props: ActionBarProps) {
   const { roleColor, onAction, currentPhase } = props;
-  const isActionPhase = currentPhase === 'phase_4_action';
+  const isActionPhase = currentPhase === 'individual_action';
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {

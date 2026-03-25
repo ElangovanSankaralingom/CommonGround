@@ -12,6 +12,7 @@ import {
   RoleId,
   ResourceType,
   CoalitionCombination,
+  EventTableEntry,
 } from '../models/types';
 import {
   runNashEngine,

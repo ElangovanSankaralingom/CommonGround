@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(timeout 10 npx vite --host)",
+      "Bash(node -e \":*)"
+    ]
+  }
+}

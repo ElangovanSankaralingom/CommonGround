@@ -121,7 +121,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
         totalWeight: 8,
       },
     },
-    welfareWeight: 1.5,
+    welfareWeight: 1.4,
   },
 
   investor: {
@@ -162,7 +162,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
         totalWeight: 8,
       },
     },
-    welfareWeight: 0.9,
+    welfareWeight: 0.8,
   },
 
   advocate: {
@@ -203,6 +203,6 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
         totalWeight: 8,
       },
     },
-    welfareWeight: 1.3,
+    welfareWeight: 1.2,
   },
 };
