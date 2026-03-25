@@ -476,8 +476,11 @@ export default function SetupScreen() {
     }
     if (step === 5) {
       // Survey complete → start game
-      console.log('Pre-game survey data (H4 baseline):', powerRankings);
+      console.log('TRANSITION CHAIN: handleNext step 5 → startGame()');
+      console.log('  Pre-game survey data (H4 baseline):', powerRankings);
+      console.log('  All rankings complete:', powerRankings.every(r => r.length === 5));
       startGame();
+      console.log('TRANSITION CHAIN: startGame() returned, session phase should be payment_day');
       return;
     }
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
@@ -1192,8 +1195,8 @@ export default function SetupScreen() {
                                 setPowerRankings(prev => {
                                   const next = [...prev];
                                   next[surveyPlayerIndex] = [...next[surveyPlayerIndex], roleId];
-                                  // Auto-advance to next player if all 5 ranked
-                                  if (next[surveyPlayerIndex].length === 5 && surveyPlayerIndex < validAssignments.length - 1) {
+                                  // Auto-advance: next player OR past-the-end to show completion screen
+                                  if (next[surveyPlayerIndex].length === 5) {
                                     setTimeout(() => setSurveyPlayerIndex(i => i + 1), 500);
                                   }
                                   return next;
@@ -1220,9 +1223,16 @@ export default function SetupScreen() {
                             </div>
                           ))}
                         </div>
-                        {surveyPlayerIndex < validAssignments.length - 1 && (
+                        {surveyPlayerIndex < validAssignments.length - 1 ? (
                           <button className="mt-4 px-6 py-2 rounded-lg bg-stone-600 text-stone-300 text-sm hover:bg-stone-500" onClick={() => setSurveyPlayerIndex(i => i + 1)}>
                             Next Player
+                          </button>
+                        ) : (
+                          <button
+                            className="mt-4 px-6 py-2 rounded-lg bg-amber-400 text-stone-900 text-sm font-bold hover:bg-amber-300 shadow-lg shadow-amber-400/20"
+                            onClick={() => setSurveyPlayerIndex(i => i + 1)}
+                          >
+                            Complete Survey
                           </button>
                         )}
                       </div>
@@ -1243,15 +1253,22 @@ export default function SetupScreen() {
               ) : (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-8">
                   <h3 className="text-2xl font-serif font-bold text-emerald-400 mb-4">All Rankings Complete</h3>
-                  <p className="text-stone-400">Pre-game power perceptions recorded. Ready to begin!</p>
+                  <p className="text-stone-400 mb-2">Pre-game power perceptions recorded. Ready to begin!</p>
+                  <p className="text-stone-500 text-xs mb-6">All {validAssignments.length} players have submitted their power rankings.</p>
                   <motion.button
-                    className="mt-6 px-10 py-3 rounded-xl text-sm font-bold bg-amber-400 text-stone-900 hover:bg-amber-300 shadow-lg"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
-                    onClick={handleNext}
+                    className="px-14 py-4 rounded-2xl text-lg font-bold bg-gradient-to-r from-amber-400 to-amber-500 text-stone-900 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-400/30 tracking-wide"
+                    initial={{ opacity: 0, y: 20, scale: 0.9 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ delay: 0.3, type: 'spring', stiffness: 200 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      console.log('TRANSITION CHAIN: Begin Round 1 clicked');
+                      console.log('  → calling handleNext at step:', step);
+                      handleNext();
+                    }}
                   >
-                    Begin Round 1
+                    Begin Round 1 {'\u2192'}
                   </motion.button>
                 </motion.div>
               )}

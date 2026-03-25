@@ -259,7 +259,12 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   startGame: () => {
     const { session, stateMachine, telemetryRecorder } = get();
-    if (!session) return;
+    if (!session) {
+      console.error('TRANSITION CHAIN BREAK: startGame called but session is null!');
+      return;
+    }
+
+    console.log('TRANSITION CHAIN: startGame() → stateMachine at:', stateMachine.currentState);
 
     const setupActions: GameAction[] = [
       'SELECT_SITE', 'ASSIGN_ROLES', 'CREATE_CHARACTERS',
@@ -268,14 +273,16 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     for (const action of setupActions) {
       if (stateMachine.canTransition(action)) {
-        stateMachine.transition(action);
+        const newState = stateMachine.transition(action);
+        console.log(`TRANSITION CHAIN: ${action} → ${newState}`);
       }
     }
 
+    console.log('TRANSITION CHAIN: stateMachine final state:', stateMachine.currentState);
+
     // Start with Payment Day (Phase 1 of new 7-phase system)
-    console.log('Starting game: Payment Day phase');
     const updatedSession = startPhase(session, 'payment_day');
-    console.log('Payment Day complete. Phase:', updatedSession.currentPhase);
+    console.log('TRANSITION CHAIN: startPhase complete → phase:', updatedSession.currentPhase, 'status:', updatedSession.status);
 
     if (telemetryRecorder) {
       telemetryRecorder.record(
@@ -301,6 +308,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         },
       ],
     });
+
+    console.log('TRANSITION CHAIN COMPLETE: button → handleNext → startGame → stateMachine(payment_day) → set(playing) → GameScreen renders');
+    console.log('  Final session phase:', get().session?.currentPhase, '| status:', get().session?.status);
   },
 
   // ── Gameplay Actions ──────────────────────────────────────────
