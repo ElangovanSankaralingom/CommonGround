@@ -4,6 +4,7 @@ import { useGameStore } from '../../store';
 import { GameSession, EventCard, ResourcePool, ResourceType } from '../../core/models/types';
 import { ROLE_COLORS, RESOURCE_COLORS } from '../../core/models/constants';
 import { EVENT_CARDS } from '../../core/content/events';
+import { PhaseNavigation } from '../effects/PhaseNavigation';
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -442,9 +443,11 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
                 stiffness: 80,
               } : {}}
               style={{ perspective: 600 }}
-              onClick={!isRolling && !eventDieResult ? handleRoll : undefined}
+              onClick={() => {
+                if (!isRolling && !eventDieResult) handleRoll();
+              }}
             >
-              <DieFace value={shownValue} size={80} />
+              <DieFace value={shownValue} size={120} />
             </motion.div>
 
             {!isRolling && !eventDieResult && (
@@ -766,6 +769,21 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
         )}
 
       </AnimatePresence>
+
+      {/* Universal bottom navigation */}
+      <PhaseNavigation
+        canContinue={stage === 'continue' || stage === 'impact' || stage === 'discard'}
+        continueLabel="Continue to Phase 2: Challenge \u2192"
+        onContinue={() => {
+          console.log('PHASE TRANSITION: Event Roll → Challenge');
+          onPhaseComplete();
+        }}
+        onSkip={() => {
+          console.log('PHASE SKIP: Skipping Event Roll');
+          onPhaseComplete();
+        }}
+        skipLabel="Skip Event Roll"
+      />
     </div>
   );
 }

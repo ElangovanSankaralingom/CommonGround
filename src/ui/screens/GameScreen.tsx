@@ -766,30 +766,55 @@ export default function GameScreen() {
   const [roundCPAwards, setRoundCPAwards] = useState<Record<string, { amount: number; reason: string }[]>>({});
 
   // Auto-activate gamified phases based on game phase
+  // This is the FALLBACK — showPhaseTransition is the primary mechanism
   React.useEffect(() => {
     if (!session) return;
+    // Don't interrupt phase transitions in progress
+    if (gamifiedPhase === 'phase_transition') return;
+
     const phase = session.currentPhase;
+    console.log('PHASE AUTO-ACTIVATE: session.currentPhase =', phase, '| gamifiedPhase =', gamifiedPhase);
+
     if (phase === 'payment_day') {
-      // Payment Day handled by existing overlay, then transitions to event_roll
-      // After payment day dismisses, start gamified event roll
-    } else if (phase === 'event_roll' && gamifiedPhase !== 'event_roll' && gamifiedPhase !== 'phase_transition') {
+      // Payment Day handled by existing overlay, then manually transitions to event_roll
+    } else if (phase === 'event_roll' && gamifiedPhase !== 'event_roll') {
+      console.log('PHASE TRANSITION: auto-activating event_roll');
       setGamifiedPhase('event_roll');
-    } else if ((phase === 'individual_action' || phase === 'action_resolution') && gamifiedPhase === null) {
-      // These phases are handled by basketball if we have a challenge
-      if (activeChallenge) {
+    } else if (phase === 'deliberation' && gamifiedPhase !== 'deliberation') {
+      console.log('PHASE TRANSITION: auto-activating deliberation');
+      setGamifiedPhase('deliberation');
+    } else if ((phase === 'individual_action' || phase === 'action_resolution') && gamifiedPhase !== 'basketball' && gamifiedPhase !== 'scoring') {
+      if (getActiveChallenge()) {
+        console.log('PHASE TRANSITION: auto-activating basketball');
         setGamifiedPhase('basketball');
+      } else {
+        console.log('PHASE TRANSITION: no challenge, skipping basketball → scoring');
+        advancePhase();
       }
-    } else if (phase === 'round_end_accounting' && gamifiedPhase !== 'scoring' && gamifiedPhase !== 'phase_transition') {
+    } else if (phase === 'round_end_accounting' && gamifiedPhase !== 'scoring') {
+      console.log('PHASE TRANSITION: auto-activating scoring');
       setGamifiedPhase('scoring');
+    } else if (phase === 'level_check' && gamifiedPhase !== 'scoring') {
+      console.log('PHASE TRANSITION: auto-activating scoring for level_check');
+      setGamifiedPhase('scoring');
+    } else if (phase === 'round_end' && gamifiedPhase !== 'round_transition') {
+      console.log('PHASE TRANSITION: auto-activating round_transition');
+      setGamifiedPhase('round_transition');
+    } else if (phase === 'game_end' && gamifiedPhase !== 'round_transition') {
+      console.log('PHASE TRANSITION: auto-activating round_transition for game_end');
+      setLastEndCondition('time_ends');
+      setGamifiedPhase('round_transition');
     }
-  }, [session?.currentPhase]);
+  }, [session?.currentPhase, gamifiedPhase]);
 
   // Phase transition helper
   const showPhaseTransition = useCallback((from: number, to: number, fromName: string, toName: string, nextPhase: typeof gamifiedPhase) => {
+    console.log(`PHASE TRANSITION: Phase ${from} (${fromName}) → Phase ${to} (${toName}) | next gamifiedPhase: ${nextPhase}`);
     setPhaseTransition({ from, to, fromName, toName });
     setGamifiedPhase('phase_transition');
     // After transition animation, switch to next phase
     setTimeout(() => {
+      console.log(`PHASE TRANSITION COMPLETE: Now activating ${nextPhase}`);
       setPhaseTransition(null);
       setGamifiedPhase(nextPhase);
     }, 2200);

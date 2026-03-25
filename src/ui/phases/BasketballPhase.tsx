@@ -8,6 +8,7 @@ import { getAbilityModifier } from '../../core/models/types';
 import { ROLE_COLORS, OBJECTIVE_WEIGHTS } from '../../core/models/constants';
 import { determineGraduatedOutcome } from '../../core/engine/nashEngine';
 import type { ObjectiveId } from '../../core/models/constants';
+import { PhaseNavigation } from '../effects/PhaseNavigation';
 
 interface ResolutionResult {
   seriesValue: number;
@@ -428,6 +429,25 @@ export default function BasketballPhase({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <PhaseNavigation
+        canContinue={stage === 'continue' || stage === 'summary'}
+        continueLabel="Continue to Phase 5: Scoring \u2192"
+        onContinue={() => {
+          console.log('PHASE TRANSITION: Action → Scoring');
+          if (finalResult) onPhaseComplete(finalResult);
+        }}
+        onSkip={() => {
+          console.log('PHASE SKIP: Auto-resolving action');
+          const autoResult: ResolutionResult = {
+            seriesValue: challenge.difficulty, threshold: challenge.difficulty,
+            outcome: 'narrow_success', chainBonus: 0, synergyBonus: 0,
+            teamPlayBonus: false, zoneChange: 0, contributions: {},
+          };
+          onPhaseComplete(autoResult);
+        }}
+        skipLabel="Auto-Resolve"
+      />
     </div>
   );
 }

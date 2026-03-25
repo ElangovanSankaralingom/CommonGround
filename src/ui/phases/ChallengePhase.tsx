@@ -10,6 +10,7 @@ import type {
 } from '../../core/models/types';
 import { CHALLENGE_CATEGORY_COLORS, ROLE_COLORS } from '../../core/models/constants';
 import { ZoneIllustration, ZONE_CLUE_POSITIONS } from '../zones/ZoneIllustrations';
+import { PhaseNavigation } from '../effects/PhaseNavigation';
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -1008,6 +1009,21 @@ export function ChallengePhase({
         {stage === 'results' && renderResults()}
         {stage === 'continue' && renderContinue()}
       </AnimatePresence>
+
+      <PhaseNavigation
+        canContinue={stage === 'continue' || stage === 'results'}
+        continueLabel="Continue to Phase 3: Deliberation \u2192"
+        onContinue={() => {
+          console.log('PHASE TRANSITION: Challenge → Deliberation');
+          onPhaseComplete(results);
+        }}
+        showBack={false}
+        onSkip={() => {
+          console.log('PHASE SKIP: Skipping exploration');
+          onPhaseComplete(results);
+        }}
+        skipLabel="Skip Exploration"
+      />
     </div>
   );
 }

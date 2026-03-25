@@ -9,6 +9,7 @@ import {
 	BUCHI_OBJECTIVES, OBJECTIVE_WEIGHTS, ObjectiveId,
 	SURVIVAL_THRESHOLDS, PLAYER_TYPE,
 } from '../../core/models/constants';
+import { PhaseNavigation } from '../effects/PhaseNavigation';
 
 // ─── Types & Constants ──────────────────────────────────────────
 interface DeliberationPhaseProps {
@@ -550,6 +551,23 @@ export default function DeliberationPhase(props: DeliberationPhaseProps) {
 					</motion.div>
 				)}
 			</AnimatePresence>
+
+			<PhaseNavigation
+				canContinue={stage === 'strategy' || stage === 'summary'}
+				continueLabel="Continue to Phase 4: Action \u2192"
+				onContinue={() => {
+					console.log('PHASE TRANSITION: Deliberation → Action');
+					onPhaseComplete();
+				}}
+				showBack={stage === 'strategy'}
+				backLabel="\u2190 Back to Challenge"
+				onBack={() => console.log('Back to Challenge phase')}
+				onSkip={() => {
+					console.log('PHASE SKIP: Skipping deliberation');
+					onPhaseComplete();
+				}}
+				skipLabel="Skip Deliberation"
+			/>
 		</div>
 	);
 }

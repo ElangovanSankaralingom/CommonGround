@@ -25,6 +25,7 @@ import {
   checkBuchiObjectives,
   type NashEngineOutput,
 } from '../../core/engine/nashEngine';
+import { PhaseNavigation } from '../effects/PhaseNavigation';
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -838,6 +839,15 @@ export default function ScoringPhase({ session, players, roundCPAwards, onPhaseC
           </div>
         </FadeSlide>
       )}
+
+      <PhaseNavigation
+        canContinue={finished}
+        continueLabel={isGameEnd ? 'Proceed to Results \u2192' : 'Continue to Next Round \u2192'}
+        onContinue={() => {
+          console.log('PHASE TRANSITION: Scoring →', isGameEnd ? 'Debrief' : 'Next Round');
+          handleComplete();
+        }}
+      />
     </div>
   );
 }
