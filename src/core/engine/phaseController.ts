@@ -1466,16 +1466,35 @@ export function endPhase(gameState: GameSession): { nextPhase: GamePhase; gameSt
     };
   }
 
-  // Handle skipping deliberation when event triggers individual_only
-  if (gameState.currentPhase === 'individual_action') {
-    const shouldSkipDelib = gameState.eventRollResult?.phaseTriggered === 'individual_only' &&
-      !Object.values(gameState.callDeliberationUsed).some(used => !used);
-    if (shouldSkipDelib) {
+  // Handle event_roll → deliberation branching
+  // If event triggers deliberation, go to deliberation BEFORE individual_action
+  if (gameState.currentPhase === 'event_roll') {
+    const pt = gameState.eventRollResult?.phaseTriggered;
+    if (pt === 'deliberation_all' || pt === 'deliberation_partial') {
+      console.log('endPhase: event triggered deliberation:', pt);
       return {
-        nextPhase: 'action_resolution',
-        gameState: { ...gameState, currentPhase: 'action_resolution' },
+        nextPhase: 'deliberation',
+        gameState: { ...gameState, currentPhase: 'deliberation' },
       };
     }
+    // Otherwise fall through to default: event_roll → individual_action
+  }
+
+  // Handle deliberation → individual_action (after event-triggered deliberation)
+  if (gameState.currentPhase === 'deliberation') {
+    return {
+      nextPhase: 'individual_action',
+      gameState: { ...gameState, currentPhase: 'individual_action' },
+    };
+  }
+
+  // Handle individual_action → action_resolution (always, since deliberation is handled above)
+  if (gameState.currentPhase === 'individual_action') {
+    console.log('endPhase: individual_action complete → action_resolution');
+    return {
+      nextPhase: 'action_resolution',
+      gameState: { ...gameState, currentPhase: 'action_resolution' },
+    };
   }
 
   if (currentIndex >= 0 && currentIndex < phaseOrder.length - 1) {

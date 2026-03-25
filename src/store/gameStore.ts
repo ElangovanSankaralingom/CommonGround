@@ -271,7 +271,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
 
     // Start with Payment Day (Phase 1 of new 7-phase system)
+    console.log('Starting game: Payment Day phase');
     const updatedSession = startPhase(session, 'payment_day');
+    console.log('Payment Day complete. Phase:', updatedSession.currentPhase);
 
     if (telemetryRecorder) {
       telemetryRecorder.record(
@@ -305,6 +307,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, stateMachine, telemetryRecorder } = get();
     if (!session) return;
 
+    const fromPhase = session.currentPhase;
+
     // Resolve coalitions before leaving action_resolution
     let preState = session;
     if (session.currentPhase === 'action_resolution' && session.activeCoalitions.length > 0) {
@@ -313,22 +317,37 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     const { nextPhase, gameState: transitionedState } = endPhase(preState);
 
+    console.log('Phase transition:', fromPhase, '->', nextPhase);
+
     // Map phase transitions to state machine actions
-    const phaseActionMap: Partial<Record<GamePhase, GameAction>> = {
-      'event_roll': 'COMPLETE_PAYMENT_DAY',
-      'individual_action': 'COMPLETE_EVENT_ROLL',
-      'deliberation': 'COMPLETE_INDIVIDUAL_ACTION',
-      'action_resolution': 'END_DELIBERATION',
-      'round_end_accounting': 'COMPLETE_ACTION_RESOLUTION',
-      'level_check': 'COMPLETE_ROUND_END_ACCOUNTING',
-      'round_end': 'COMPLETE_LEVEL_CHECK',
-      'payment_day': 'NEXT_ROUND',
-      'game_end': 'END_GAME',
+    // Must handle both normal flow and skip-deliberation path
+    const phaseActionMap: Partial<Record<string, GameAction>> = {
+      // Normal flow: nextPhase -> action needed on state machine
+      [`${fromPhase}->${nextPhase}`]: undefined, // filled dynamically below
     };
 
-    const action = phaseActionMap[nextPhase];
-    if (action && stateMachine.canTransition(action)) {
-      stateMachine.transition(action);
+    // Determine the correct SM action based on from->to transition
+    let smAction: GameAction | null = null;
+    if (fromPhase === 'payment_day' && nextPhase === 'event_roll') smAction = 'COMPLETE_PAYMENT_DAY';
+    else if (fromPhase === 'event_roll' && nextPhase === 'individual_action') smAction = 'EVENT_RESOLVED_NO_DELIB';
+    else if (fromPhase === 'event_roll' && nextPhase === 'deliberation') smAction = 'EVENT_RESOLVED_DELIBERATION';
+    else if (fromPhase === 'deliberation' && nextPhase === 'individual_action') smAction = 'END_DELIBERATION';
+    else if (fromPhase === 'deliberation' && nextPhase === 'action_resolution') smAction = 'END_DELIBERATION';
+    else if (fromPhase === 'individual_action' && nextPhase === 'action_resolution') smAction = 'ALL_PLAYERS_ACTED';
+    else if (fromPhase === 'individual_action' && nextPhase === 'deliberation') smAction = 'COMPLETE_INDIVIDUAL_ACTION';
+    else if (fromPhase === 'action_resolution' && nextPhase === 'round_end_accounting') smAction = 'COMPLETE_ACTION_RESOLUTION';
+    else if (fromPhase === 'round_end_accounting' && nextPhase === 'level_check') smAction = 'COMPLETE_ROUND_END_ACCOUNTING';
+    else if (fromPhase === 'level_check' && nextPhase === 'round_end') smAction = 'COMPLETE_LEVEL_CHECK';
+    else if (fromPhase === 'round_end' && nextPhase === 'payment_day') smAction = 'NEXT_ROUND';
+    else if (fromPhase === 'round_end' && nextPhase === 'game_end') smAction = 'END_GAME';
+
+    if (smAction && stateMachine.canTransition(smAction)) {
+      console.log('  SM transition:', stateMachine.currentState, '+', smAction);
+      stateMachine.transition(smAction);
+    } else if (smAction) {
+      console.warn('  SM cannot transition with action:', smAction, 'from state:', stateMachine.currentState);
+      // Force SM state to match
+      stateMachine.setState(nextPhase);
     }
 
     if (telemetryRecorder) {
@@ -338,7 +357,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         'phase_start',
         'system',
         'system',
-        { phase: nextPhase }
+        { phase: nextPhase, fromPhase }
       );
     }
 
@@ -347,6 +366,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     // Show Payment Day overlay at start of new round
     const isPaymentDay = nextPhase === 'payment_day';
     const isLevelCheck = nextPhase === 'level_check' && updatedSession.gameLevel > (session.gameLevel || 1);
+
+    console.log('  Phase started:', nextPhase, '| Status:', updatedSession.status);
 
     set({
       session: updatedSession,
@@ -362,7 +383,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const { session, telemetryRecorder } = get();
     if (!session) return;
 
+    console.log('Rolling event die (2d6)...');
     const updatedSession = startPhase(session, 'event_roll');
+    console.log('Event roll result:', updatedSession.eventRollResult?.total, updatedSession.eventRollResult?.eventEntry.name);
 
     if (telemetryRecorder && updatedSession.eventRollResult) {
       telemetryRecorder.record(

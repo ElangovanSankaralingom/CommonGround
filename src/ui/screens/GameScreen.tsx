@@ -161,6 +161,7 @@ function ActionBar({
   phase,
   canAct,
   abilityUsesRemaining,
+  hasEventResult,
 }: {
   onAdvancePhase: () => void;
   onRollDie: () => void;
@@ -174,6 +175,7 @@ function ActionBar({
   phase: string;
   canAct: boolean;
   abilityUsesRemaining: number;
+  hasEventResult?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -186,24 +188,16 @@ function ActionBar({
           Continue to Event Roll
         </button>
       )}
-      {phase === 'event_roll' && (
-        <>
-          <button
-            className="px-4 py-2 rounded-lg bg-amber-500 text-stone-900 text-sm font-bold
-                       hover:bg-amber-400 transition-colors shadow-md"
-            onClick={onRollDie}
-          >
-            Roll 2d6 Event Die
-          </button>
-          <button
-            className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold
-                       hover:bg-emerald-500 transition-colors shadow-md ml-auto"
-            onClick={onAdvancePhase}
-          >
-            Next Phase
-          </button>
-        </>
+      {phase === 'event_roll' && !hasEventResult && (
+        <button
+          className="px-4 py-2 rounded-lg bg-amber-500 text-stone-900 text-sm font-bold
+                     hover:bg-amber-400 transition-colors shadow-md"
+          onClick={onRollDie}
+        >
+          Roll 2d6 Event Die
+        </button>
       )}
+      {/* When event result is showing, the full results panel has the Continue button */}
       {(phase === 'individual_action' || phase === 'action_resolution') && canAct && (
         <>
           {abilityUsesRemaining > 0 && (
@@ -585,72 +579,119 @@ function VoteModal({
   );
 }
 
-function EventDieDisplay({ value, outcome, dice, eventName, phaseTriggered, affectedPlayers }: {
-  value: number;
-  outcome: string;
-  dice?: [number, number];
-  eventName?: string;
-  phaseTriggered?: string;
-  affectedPlayers?: string[];
+// Full Event Roll Results Panel (Bug 4 fix)
+function EventResultsPanel({
+  eventRollResult,
+  players,
+  onContinue,
+}: {
+  eventRollResult: NonNullable<typeof import('../../core/models/types').GameSession.prototype.eventRollResult>;
+  players: Player[];
+  onContinue: () => void;
 }) {
-  const color =
-    value <= 4 ? 'text-red-400'
-    : value >= 9 ? 'text-emerald-400'
-    : 'text-stone-300';
+  const { dice, total, eventEntry, phaseTriggered, affectedPlayers: affectedPlayerIds } = eventRollResult;
+
+  const isNegative = total <= 5;
+  const isPositive = total >= 8 && total !== 7;
+  const isNeutral = total === 7;
+  const bgTint = isNegative ? 'from-red-900/20 to-stone-800'
+    : isPositive ? 'from-emerald-900/20 to-stone-800'
+    : 'from-stone-700/20 to-stone-800';
+  const badgeColor = isNegative ? 'bg-red-500' : isPositive ? 'bg-emerald-500' : 'bg-stone-500';
+  const badgeLabel = isNegative ? 'Negative Event' : isPositive ? 'Positive Event' : 'Neutral';
+
+  // Resolve affected player names
+  const affectedPlayerNames = affectedPlayerIds
+    ? affectedPlayerIds.map((pid: string) => {
+        const p = players.find((pl) => pl.id === pid);
+        return p ? `${ROLE_NAMES[p.roleId]} (${p.name})` : pid;
+      })
+    : [];
+
+  // Resolve required roles for deliberation display
+  const requiredRoleNames = eventEntry.requiredPlayers === 'all'
+    ? 'All 5 players'
+    : (eventEntry.requiredPlayers as RoleId[]).map((r) => ROLE_NAMES[r]).join(', ');
+
+  const nextPhaseName = phaseTriggered === 'individual_only' ? 'Individual Actions'
+    : phaseTriggered === 'deliberation_partial' ? 'Deliberation (Partial)'
+    : 'Deliberation (Full)';
 
   return (
     <motion.div
-      className="bg-stone-700/80 rounded-xl p-4 text-center max-w-sm"
-      initial={{ scale: 0, rotate: -180 }}
-      animate={{ scale: 1, rotate: 0 }}
+      className={`bg-gradient-to-b ${bgTint} rounded-2xl p-6 max-w-lg w-full border border-stone-600/50 shadow-2xl space-y-4`}
+      initial={{ scale: 0.8, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
       transition={{ type: 'spring', damping: 15 }}
     >
-      {/* Two dice display (Fix 3) */}
-      <div className="flex items-center justify-center gap-3 mb-2">
-        {dice ? (
-          <>
-            <motion.div
-              className="w-12 h-12 rounded-lg bg-stone-600 flex items-center justify-center text-2xl font-black border-2 border-stone-500"
-              initial={{ rotateZ: -360 }}
-              animate={{ rotateZ: 0 }}
-              transition={{ duration: 0.6, type: 'spring' }}
-            >
-              {dice[0]}
-            </motion.div>
-            <span className="text-stone-400 text-lg">+</span>
-            <motion.div
-              className="w-12 h-12 rounded-lg bg-stone-600 flex items-center justify-center text-2xl font-black border-2 border-stone-500"
-              initial={{ rotateZ: 360 }}
-              animate={{ rotateZ: 0 }}
-              transition={{ duration: 0.6, type: 'spring', delay: 0.15 }}
-            >
-              {dice[1]}
-            </motion.div>
-            <span className="text-stone-400 text-lg">=</span>
-            <div className="w-12 h-12 rounded-lg bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center text-2xl font-black text-amber-300">
-              {value}
-            </div>
-          </>
-        ) : (
-          <div className="w-16 h-16 rounded-xl bg-stone-600 flex items-center justify-center text-3xl font-black border-2 border-stone-500 shadow-inner">
-            {value}
-          </div>
+      {/* a) THE ROLL */}
+      <div className="text-center">
+        <p className="text-stone-500 text-xs uppercase tracking-wider mb-2">Event Roll</p>
+        <div className="flex items-center justify-center gap-3">
+          <motion.div className="w-14 h-14 rounded-xl bg-stone-600 flex items-center justify-center text-2xl font-black border-2 border-stone-500" initial={{ rotateZ: -360 }} animate={{ rotateZ: 0 }} transition={{ duration: 0.5, type: 'spring' }}>
+            {dice[0]}
+          </motion.div>
+          <span className="text-stone-400 text-xl font-bold">+</span>
+          <motion.div className="w-14 h-14 rounded-xl bg-stone-600 flex items-center justify-center text-2xl font-black border-2 border-stone-500" initial={{ rotateZ: 360 }} animate={{ rotateZ: 0 }} transition={{ duration: 0.5, type: 'spring', delay: 0.15 }}>
+            {dice[1]}
+          </motion.div>
+          <span className="text-stone-400 text-xl font-bold">=</span>
+          <motion.div className="w-14 h-14 rounded-xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-3xl font-black text-amber-300" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.3, type: 'spring' }}>
+            {total}
+          </motion.div>
+        </div>
+      </div>
+
+      {/* b) EVENT NAME */}
+      <motion.h2 className={`text-center text-xl font-serif font-bold ${isNegative ? 'text-red-400' : isPositive ? 'text-emerald-400' : 'text-stone-200'}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
+        {eventEntry.name}
+      </motion.h2>
+
+      {/* c) EVENT TYPE BADGE */}
+      <div className="text-center">
+        <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold text-white ${badgeColor}`}>
+          {badgeLabel}
+        </span>
+      </div>
+
+      {/* d) ZONE EFFECT */}
+      <div className="bg-stone-700/50 rounded-lg p-3">
+        <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Zone Effect</h4>
+        <p className="text-stone-200 text-sm">{eventEntry.zoneEffect}</p>
+      </div>
+
+      {/* e) PLAYER EFFECT */}
+      <div className="bg-stone-700/50 rounded-lg p-3">
+        <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">Player Effect</h4>
+        <p className="text-stone-200 text-sm">{eventEntry.playerEffect}</p>
+        {affectedPlayerNames.length > 0 && affectedPlayerNames.length < players.length && (
+          <p className="text-stone-500 text-xs mt-1">Affected: {affectedPlayerNames.join(', ')}</p>
         )}
       </div>
 
-      {/* Event name */}
-      {eventName && (
-        <p className={`text-base font-bold ${color} mt-2`}>{eventName}</p>
-      )}
+      {/* f) PHASE IMPACT */}
+      <div className={`rounded-lg p-3 border ${
+        phaseTriggered === 'deliberation_all' ? 'bg-purple-900/20 border-purple-600/30'
+        : phaseTriggered === 'deliberation_partial' ? 'bg-indigo-900/20 border-indigo-600/30'
+        : 'bg-stone-700/30 border-stone-600/30'
+      }`}>
+        <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">What Happens Next</h4>
+        {phaseTriggered === 'deliberation_all' ? (
+          <p className="text-purple-300 text-sm font-semibold">This event triggers FULL DELIBERATION — all 5 players must negotiate.</p>
+        ) : phaseTriggered === 'deliberation_partial' ? (
+          <p className="text-indigo-300 text-sm font-semibold">This event triggers PARTIAL DELIBERATION — {requiredRoleNames} must negotiate.</p>
+        ) : (
+          <p className="text-stone-300 text-sm font-semibold">No deliberation required — proceed to Individual Actions.</p>
+        )}
+      </div>
 
-      {/* Deliberation indicator */}
-      {phaseTriggered && phaseTriggered !== 'individual_only' && (
-        <div className="mt-2 px-3 py-1 rounded-full bg-purple-900/40 border border-purple-700/50 inline-block">
-          <span className="text-purple-300 text-xs font-semibold">
-            {phaseTriggered === 'deliberation_all' ? 'All Players Deliberate' : 'Partial Deliberation'}
-          </span>
-        </div>
-      )}
+      {/* g) CONTINUE BUTTON */}
+      <button
+        className="w-full py-3 rounded-xl text-sm font-bold bg-amber-400 text-stone-900 hover:bg-amber-300 transition-colors shadow-lg"
+        onClick={onContinue}
+      >
+        Continue to {nextPhaseName} \u2192
+      </button>
     </motion.div>
   );
 }
@@ -748,21 +789,22 @@ export default function GameScreen() {
         gameLevel={session.gameLevel}
       />
 
-      {/* Event Die Result (Fix 3: 2d6) */}
+      {/* Event Roll Results Panel (Bug 4 fix — full results with Continue button) */}
       <AnimatePresence>
         {currentPhase === 'event_roll' && session.eventRollResult && (
           <motion.div
-            className="absolute top-20 left-1/2 -translate-x-1/2 z-30"
+            className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <EventDieDisplay
-              value={session.eventRollResult.total}
-              outcome={session.eventDieResult?.outcome || 'no_event'}
-              dice={session.eventRollResult.dice}
-              eventName={session.eventRollResult.eventEntry.name}
-              phaseTriggered={session.eventRollResult.phaseTriggered}
+            <EventResultsPanel
+              eventRollResult={session.eventRollResult as any}
+              players={players}
+              onContinue={() => {
+                console.log('Event roll continue: phaseTriggered =', session.eventRollResult?.phaseTriggered);
+                advancePhase();
+              }}
             />
           </motion.div>
         )}
@@ -816,7 +858,7 @@ export default function GameScreen() {
           ) : (
             <div className="bg-stone-800/50 rounded-2xl p-6 text-center border border-stone-700/30">
               <p className="text-stone-500 text-sm">No active challenge</p>
-              {currentPhase === 'phase_2_challenge' && (
+              {currentPhase === 'event_roll' && (
                 <p className="text-stone-600 text-xs mt-2">
                   Draw a challenge card to reveal this round&apos;s obstacle
                 </p>
@@ -912,6 +954,7 @@ export default function GameScreen() {
           phase={currentPhase}
           canAct={!!currentPlayer}
           abilityUsesRemaining={currentPlayer?.uniqueAbilityUsesRemaining || 0}
+          hasEventResult={!!session.eventRollResult}
         />
 
         <div className="flex items-center gap-6">

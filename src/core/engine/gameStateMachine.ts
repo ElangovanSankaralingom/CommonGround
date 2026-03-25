@@ -27,29 +27,28 @@ export type GameAction =
   | 'BACK_TO_CHARACTER_CREATION'
   | 'BACK_TO_FACILITATOR_BRIEFING'
   | 'BACK_TO_STANDEE_PLACEMENT'
-  // Gameplay — 7-phase round (Fix 5)
+  // Gameplay — 7-phase round
   | 'BEGIN_ROUND'
   | 'COMPLETE_PAYMENT_DAY'
   | 'COMPLETE_EVENT_ROLL'
+  | 'EVENT_RESOLVED_NO_DELIB'
+  | 'EVENT_RESOLVED_DELIBERATION'
   | 'COMPLETE_INDIVIDUAL_ACTION'
   | 'START_DELIBERATION'
   | 'SKIP_DELIBERATION'
   | 'END_DELIBERATION'
   | 'ALL_PLAYERS_READY'
+  | 'ALL_PLAYERS_ACTED'
   | 'COMPLETE_ACTION_RESOLUTION'
   | 'COMPLETE_ROUND_END_ACCOUNTING'
   | 'COMPLETE_LEVEL_CHECK'
   | 'NEXT_ROUND'
   | 'END_GAME'
-  // Legacy actions for backwards compat
-  | 'RESOLVE_EVENT'
-  | 'CONFIRM_CHALLENGE'
-  | 'START_ACTION_RESOLUTION'
-  | 'ALL_PLAYERS_ACTED'
-  | 'SCORING_DISPLAYED'
   // Post-game
   | 'START_DEBRIEF'
+  | 'DEBRIEF_COMPLETE'
   | 'START_EXPORT'
+  | 'EXPORT_COMPLETE'
   | 'RETURN_TO_TITLE';
 
 /**
@@ -80,6 +79,7 @@ const validTransitions: Record<string, Partial<Record<GameAction, GameState>>> =
   },
   setup_standee_placement: {
     PLACE_STANDEES: 'setup_ready',
+    READY_TO_PLAY: 'payment_day', // Direct path: skip setup_ready
     BACK_TO_FACILITATOR_BRIEFING: 'setup_facilitator_briefing',
     RETURN_TO_TITLE: 'title_screen',
   },
@@ -89,20 +89,23 @@ const validTransitions: Record<string, Partial<Record<GameAction, GameState>>> =
     RETURN_TO_TITLE: 'title_screen',
   },
 
-  // ─── 7-Phase Round Structure (Fix 5) ──────────────────────
+  // ─── 7-Phase Round Structure ───────────────────────────────
   payment_day: {
     COMPLETE_PAYMENT_DAY: 'event_roll',
   },
   event_roll: {
-    COMPLETE_EVENT_ROLL: 'individual_action',
+    COMPLETE_EVENT_ROLL: 'individual_action',       // Default: go to individual action
+    EVENT_RESOLVED_NO_DELIB: 'individual_action',   // Explicit: no deliberation needed
+    EVENT_RESOLVED_DELIBERATION: 'deliberation',    // Explicit: deliberation triggered
   },
   individual_action: {
     COMPLETE_INDIVIDUAL_ACTION: 'deliberation',
     SKIP_DELIBERATION: 'action_resolution',
+    ALL_PLAYERS_ACTED: 'action_resolution',
   },
   deliberation: {
-    END_DELIBERATION: 'action_resolution',
-    ALL_PLAYERS_READY: 'action_resolution',
+    END_DELIBERATION: 'individual_action',  // After event-triggered delib, go to individual action
+    ALL_PLAYERS_READY: 'individual_action',
   },
   action_resolution: {
     COMPLETE_ACTION_RESOLUTION: 'round_end_accounting',
@@ -122,9 +125,11 @@ const validTransitions: Record<string, Partial<Record<GameAction, GameState>>> =
     START_DEBRIEF: 'debrief',
   },
   debrief: {
+    DEBRIEF_COMPLETE: 'export',
     START_EXPORT: 'export',
   },
   export: {
+    EXPORT_COMPLETE: 'title_screen',
     RETURN_TO_TITLE: 'title_screen',
   },
 };
@@ -146,14 +151,20 @@ export class GameStateMachine {
     return action in transitions;
   }
 
+  /**
+   * Attempt to transition. Returns the new state.
+   * On invalid transition: logs a warning and returns current state (does NOT crash).
+   */
   transition(action: GameAction): GameState {
     const transitions = validTransitions[this._currentState];
     if (!transitions || !(action in transitions)) {
-      throw new Error(
-        `Invalid transition: cannot perform action "${action}" from state "${this._currentState}".`
+      console.warn(
+        `[StateMachine] Invalid transition: action "${action}" from state "${this._currentState}". Ignoring.`
       );
+      return this._currentState;
     }
     const nextState = transitions[action]!;
+    console.log(`[StateMachine] ${this._currentState} --${action}--> ${nextState}`);
     this._currentState = nextState;
     return nextState;
   }
@@ -165,6 +176,7 @@ export class GameStateMachine {
   }
 
   setState(state: GameState): void {
+    console.log(`[StateMachine] Force set: ${this._currentState} => ${state}`);
     this._currentState = state;
   }
 
