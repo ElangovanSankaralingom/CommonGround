@@ -10,7 +10,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     color: '#C0392B',
     icon: '\u{1F3DB}\uFE0F',
     startingAbilities: { authority: 16, resourcefulness: 12, communityTrust: 10, technicalKnowledge: 10, politicalLeverage: 14, adaptability: 10 },
-    startingResources: { budget: 8, influence: 4, volunteer: 1, material: 2, knowledge: 1 },
+    startingResources: { budget: 8, influence: 4, volunteer: 0, material: 0, knowledge: 0 },
     proficientSkills: ['regulatoryNavigation', 'budgeting', 'coalitionBuilding'],
     uniqueAbility: { name: 'Regulatory Override', description: 'Instantly bypass one obstacle/requirement on a challenge. Difficulty threshold reduced by 5. Cost: -2 Political Leverage (permanent). All other players\' CTR toward Administrator decreases by 1 for 1 round.' },
     goals: {
@@ -51,7 +51,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     color: '#2E86AB',
     icon: '\u{1F4D0}',
     startingAbilities: { authority: 8, resourcefulness: 10, communityTrust: 12, technicalKnowledge: 16, politicalLeverage: 10, adaptability: 14 },
-    startingResources: { budget: 2, influence: 2, volunteer: 1, material: 3, knowledge: 4 },
+    startingResources: { budget: 0, influence: 0, volunteer: 0, material: 3, knowledge: 5 },
     proficientSkills: ['designThinking', 'environmentalAssessment', 'crisisManagement'],
     uniqueAbility: { name: 'Visionary Blueprint', description: 'Present a comprehensive design. If accepted by majority vote (3/5), grants +3 CP to all who voted yes AND +5 to next series value targeting the zone. Cost: 2 Knowledge Tokens.' },
     goals: {
@@ -91,8 +91,8 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     realWorldAnalogue: 'Resident association leader, daily park user, parent, elderly regular',
     color: '#27AE60',
     icon: '\u{1F3D8}\uFE0F',
-    startingAbilities: { authority: 6, resourcefulness: 8, communityTrust: 16, technicalKnowledge: 8, politicalLeverage: 10, adaptability: 12 },
-    startingResources: { budget: 1, influence: 2, volunteer: 6, material: 0, knowledge: 1 },
+    startingAbilities: { authority: 6, resourcefulness: 8, communityTrust: 16, technicalKnowledge: 8, politicalLeverage: 8, adaptability: 12 },
+    startingResources: { budget: 0, influence: 0, volunteer: 6, material: 0, knowledge: 0 },
     proficientSkills: ['negotiation', 'publicSpeaking', 'crisisManagement'],
     uniqueAbility: { name: 'Community Rally', description: 'Adds +3 to any negotiation-related check or series value for the rest of this round. Generates 3 Volunteer Tokens immediately. Forces the current challenge to be discussed before any other action. Cost: 2 Volunteer Tokens.' },
     goals: {
@@ -132,8 +132,8 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     realWorldAnalogue: 'PPP contractor, local business owner, commercial developer, vendor',
     color: '#E67E22',
     icon: '\u{1F4BC}',
-    startingAbilities: { authority: 10, resourcefulness: 16, communityTrust: 8, technicalKnowledge: 10, politicalLeverage: 12, adaptability: 12 },
-    startingResources: { budget: 10, influence: 3, volunteer: 0, material: 4, knowledge: 1 },
+    startingAbilities: { authority: 10, resourcefulness: 16, communityTrust: 8, technicalKnowledge: 12, politicalLeverage: 10, adaptability: 12 },
+    startingResources: { budget: 10, influence: 2, volunteer: 0, material: 2, knowledge: 0 },
     proficientSkills: ['budgeting', 'negotiation', 'coalitionBuilding'],
     uniqueAbility: { name: 'Capital Injection', description: 'Immediately funds any one project/challenge by providing up to 6 Budget Tokens from external source (newly created). A Revenue Token is placed on the funded zone; Investor collects 1 Budget Token from that zone each subsequent round.' },
     goals: {
@@ -174,7 +174,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     color: '#8E44AD',
     icon: '\u{1F33F}',
     startingAbilities: { authority: 8, resourcefulness: 10, communityTrust: 14, technicalKnowledge: 12, politicalLeverage: 12, adaptability: 12 },
-    startingResources: { budget: 3, influence: 4, volunteer: 2, material: 1, knowledge: 3 },
+    startingResources: { budget: 0, influence: 2, volunteer: 0, material: 0, knowledge: 2 },
     proficientSkills: ['environmentalAssessment', 'publicSpeaking', 'coalitionBuilding'],
     uniqueAbility: { name: 'Media Spotlight', description: 'Forces an issue onto the agenda. The most-degraded zone (or chosen zone) becomes MANDATORY priority this round. All actions targeting this zone get +2 CWS bonus. Cost: 1 Influence Token.' },
     goals: {

@@ -37,7 +37,7 @@ const PROFILE_ICONS: Record<string, string> = {
   sfixed_lean: '\u{1F3DB}\u{FE0F}', environment_lean: '\u{1F33F}', balanced: '\u{2696}\u{FE0F}',
 };
 
-type Phase = 'questions' | 'computing' | 'reveal' | 'confirm';
+type Phase = 'questions' | 'computing' | 'reveal' | 'confirmed';
 
 export function CharacterQuestionnaire({ playerName, playerIndex, totalPlayers, role, onComplete }: CharacterQuestionnaireProps) {
   const [phase, setPhase] = useState<Phase>('questions');
@@ -306,15 +306,49 @@ export function CharacterQuestionnaire({ playerName, playerIndex, totalPlayers, 
         </div>
 
         {/* Confirm button */}
-        {revealStep >= 6 && (
+        {revealStep >= 6 && phase !== 'confirmed' && (
           <motion.div className="p-6 pt-2 text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}>
             <button
-              className="px-10 py-3 rounded-xl text-sm font-bold shadow-lg transition-all hover:brightness-110"
+              className="px-10 py-3 rounded-xl text-sm font-bold shadow-lg transition-all hover:brightness-110 active:scale-95"
               style={{ backgroundColor: role.color, color: '#1a1a2e' }}
-              onClick={() => onComplete(result)}
+              onClick={() => {
+                console.log('Character confirmed for', playerName, role.id);
+                setPhase('confirmed');
+                // Brief success animation, then call onComplete
+                setTimeout(() => {
+                  onComplete(result);
+                }, 1200);
+              }}
             >
               Confirm Character
             </button>
+          </motion.div>
+        )}
+
+        {/* Confirmed state */}
+        {phase === 'confirmed' && (
+          <motion.div
+            className="p-6 text-center"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ type: 'spring', damping: 15 }}
+          >
+            <motion.div
+              className="w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-3"
+              style={{ backgroundColor: `${role.color}22`, border: `3px solid ${role.color}` }}
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', delay: 0.2 }}
+            >
+              <span className="text-2xl" style={{ color: role.color }}>{'\u2713'}</span>
+            </motion.div>
+            <p className="text-lg font-serif font-bold" style={{ color: role.color }}>Character Confirmed!</p>
+            <p className="text-stone-500 text-sm mt-1">
+              {playerIndex < totalPlayers - 1
+                ? `Preparing for next player...`
+                : `All characters created!`
+              }
+            </p>
           </motion.div>
         )}
       </div>

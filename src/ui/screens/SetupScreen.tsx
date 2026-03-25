@@ -402,7 +402,7 @@ export default function SetupScreen() {
       default:
         return false;
     }
-  }, [step, assignments, characterCustomizations, validAssignments.length, briefingSegment, BRIEFING_SEGMENTS.length, placedStandees]);
+  }, [step, assignments, characterResults, validAssignments.length, briefingSegment, BRIEFING_SEGMENTS.length, placedStandees]);
 
   const handleNext = useCallback(() => {
     console.log('Setup handleNext: step', step, '->', step + 1);
@@ -468,7 +468,7 @@ export default function SetupScreen() {
       return;
     }
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
-  }, [step, totalRounds, timerLength, facilitatorMode, difficulty, validAssignments, characterCustomizations, initializeGame, selectSite, assignRoles, completeFacilitatorBriefing, session, placedStandees, placeStandee, startGame]);
+  }, [step, totalRounds, timerLength, facilitatorMode, difficulty, validAssignments, characterResults, initializeGame, selectSite, assignRoles, completeFacilitatorBriefing, session, placedStandees, placeStandee, startGame]);
 
   const handleBack = useCallback(() => {
     if (step === 0) {
@@ -875,9 +875,15 @@ export default function SetupScreen() {
                   totalPlayers={validAssignments.length}
                   role={currentCharRole}
                   onComplete={(result) => {
-                    setCharacterResults(prev => [...prev, result]);
+                    const newResults = [...characterResults, result];
+                    setCharacterResults(newResults);
                     if (characterIndex < validAssignments.length - 1) {
+                      // More players to go — advance to next player
                       setCharacterIndex(i => i + 1);
+                    } else {
+                      // Last player confirmed — advance past the questionnaire
+                      // so the summary screen shows
+                      setCharacterIndex(validAssignments.length);
                     }
                   }}
                 />
@@ -911,6 +917,15 @@ export default function SetupScreen() {
                       );
                     })}
                   </div>
+                  <motion.button
+                    className="mt-8 px-10 py-3 rounded-xl text-sm font-bold bg-amber-400 text-stone-900 hover:bg-amber-300 shadow-lg shadow-amber-400/20 transition-all"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    onClick={handleNext}
+                  >
+                    Continue to Facilitator Briefing
+                  </motion.button>
                 </motion.div>
               ) : null}
             </motion.div>
