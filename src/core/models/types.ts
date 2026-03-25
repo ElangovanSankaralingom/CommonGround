@@ -35,6 +35,10 @@ export interface GameSession {
   fullCoalitionAchieved: boolean;
   // Once-per-game Call Deliberation tracking per player
   callDeliberationUsed: Record<string, boolean>;
+  // Nash Engine output (updated after every round_end_accounting)
+  nashEngineOutput: any | null;
+  // Büchi history: tracks rounds each objective has been out of sat per role
+  buchiHistory: Record<string, Record<string, number>>;
 }
 
 export interface GameConfig {

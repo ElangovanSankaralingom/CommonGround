@@ -11,6 +11,8 @@ import type {
   Zone,
 } from '../../core/models/types';
 import { SKILL_ABILITY_MAP } from '../../core/models/constants';
+import { CharacterQuestionnaire } from '../components/CharacterQuestionnaire';
+import type { CharacterCreationResult } from '../../core/engine/characterQuestionnaire';
 
 // ── Role data ──────────────────────────────────────────────────
 
@@ -24,8 +26,8 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     realWorldAnalogue: 'Municipal officer / City planner',
     color: '#C0392B',
     icon: '\u{1F3DB}',
-    startingAbilities: { authority: 16, resourcefulness: 12, communityTrust: 8, technicalKnowledge: 10, politicalLeverage: 14, adaptability: 10 },
-    startingResources: { budget: 8, influence: 6, volunteer: 2, material: 4, knowledge: 4 },
+    startingAbilities: { authority: 16, resourcefulness: 12, communityTrust: 10, technicalKnowledge: 10, politicalLeverage: 14, adaptability: 10 },
+    startingResources: { budget: 8, influence: 4, volunteer: 0, material: 0, knowledge: 0 },
     proficientSkills: ['negotiation', 'budgeting', 'regulatoryNavigation'],
     uniqueAbility: { name: 'Executive Order', description: 'Once per round, bypass one resource requirement on a card play.' },
     goals: {
@@ -44,8 +46,8 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     realWorldAnalogue: 'Landscape architect / Urban planner',
     color: '#2E86AB',
     icon: '\u{1F4D0}',
-    startingAbilities: { authority: 8, resourcefulness: 14, communityTrust: 12, technicalKnowledge: 16, politicalLeverage: 8, adaptability: 12 },
-    startingResources: { budget: 4, influence: 4, volunteer: 4, material: 6, knowledge: 6 },
+    startingAbilities: { authority: 8, resourcefulness: 10, communityTrust: 12, technicalKnowledge: 16, politicalLeverage: 10, adaptability: 14 },
+    startingResources: { budget: 0, influence: 0, volunteer: 0, material: 3, knowledge: 5 },
     proficientSkills: ['designThinking', 'environmentalAssessment', 'publicSpeaking'],
     uniqueAbility: { name: 'Inspired Design', description: 'Once per round, double the progress markers placed on a zone this turn.' },
     goals: {
@@ -64,8 +66,8 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     realWorldAnalogue: 'Neighborhood association leader / Activist',
     color: '#27AE60',
     icon: '\u{1F91D}',
-    startingAbilities: { authority: 8, resourcefulness: 10, communityTrust: 16, technicalKnowledge: 8, politicalLeverage: 12, adaptability: 14 },
-    startingResources: { budget: 2, influence: 6, volunteer: 8, material: 2, knowledge: 4 },
+    startingAbilities: { authority: 6, resourcefulness: 8, communityTrust: 16, technicalKnowledge: 8, politicalLeverage: 8, adaptability: 12 },
+    startingResources: { budget: 0, influence: 0, volunteer: 6, material: 0, knowledge: 0 },
     proficientSkills: ['publicSpeaking', 'coalitionBuilding', 'crisisManagement'],
     uniqueAbility: { name: 'Rally the Community', description: 'Once per round, generate 3 volunteer tokens and distribute them freely.' },
     goals: {
@@ -84,8 +86,8 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     realWorldAnalogue: 'Real estate developer / Business owner',
     color: '#E67E22',
     icon: '\u{1F4B0}',
-    startingAbilities: { authority: 12, resourcefulness: 16, communityTrust: 8, technicalKnowledge: 10, politicalLeverage: 10, adaptability: 14 },
-    startingResources: { budget: 10, influence: 4, volunteer: 0, material: 6, knowledge: 2 },
+    startingAbilities: { authority: 10, resourcefulness: 16, communityTrust: 8, technicalKnowledge: 12, politicalLeverage: 10, adaptability: 12 },
+    startingResources: { budget: 10, influence: 2, volunteer: 0, material: 2, knowledge: 0 },
     proficientSkills: ['budgeting', 'negotiation', 'regulatoryNavigation'],
     uniqueAbility: { name: 'Capital Injection', description: 'Once per round, convert 4 budget into 2 of any other resource.' },
     goals: {
@@ -104,8 +106,8 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     realWorldAnalogue: 'Environmental scientist / NGO representative',
     color: '#8E44AD',
     icon: '\u{1F33F}',
-    startingAbilities: { authority: 10, resourcefulness: 10, communityTrust: 14, technicalKnowledge: 14, politicalLeverage: 8, adaptability: 12 },
-    startingResources: { budget: 2, influence: 4, volunteer: 4, material: 4, knowledge: 8 },
+    startingAbilities: { authority: 8, resourcefulness: 10, communityTrust: 14, technicalKnowledge: 12, politicalLeverage: 12, adaptability: 12 },
+    startingResources: { budget: 0, influence: 2, volunteer: 0, material: 0, knowledge: 2 },
     proficientSkills: ['environmentalAssessment', 'coalitionBuilding', 'publicSpeaking'],
     uniqueAbility: { name: 'Ecological Audit', description: 'Once per round, reveal hidden trigger tiles in adjacent zones.' },
     goals: {
@@ -272,8 +274,10 @@ export default function SetupScreen() {
   const [empathyNames, setEmpathyNames] = useState<string[]>(Array(5).fill(''));
   const [empathyComplete, setEmpathyComplete] = useState(false);
 
-  // Step 2 state — interactive character creation
+  // Step 2 state — questionnaire-based character creation
   const [characterIndex, setCharacterIndex] = useState(0);
+  const [characterResults, setCharacterResults] = useState<CharacterCreationResult[]>([]);
+  // Legacy compat
   const [characterCustomizations, setCharacterCustomizations] = useState<CharacterCustomization[]>([]);
 
   // Step 3 state — pre-built briefing
@@ -390,8 +394,7 @@ export default function SetupScreen() {
         return valid.length === 5 && uniqueRoles.size === 5;
       }
       case 2:
-        return characterCustomizations.length === validAssignments.length &&
-               characterCustomizations.every((c) => c.confirmed);
+        return characterResults.length === validAssignments.length;
       case 3:
         return briefingSegment >= BRIEFING_SEGMENTS.length;
       case 4:
@@ -421,25 +424,33 @@ export default function SetupScreen() {
       assignRoles(playerAssignments);
     }
     if (step === 2) {
-      // Apply character customizations to the game session
-      if (session) {
+      // Apply questionnaire-based character customizations to the game session
+      if (session && characterResults.length > 0) {
         const updatedPlayers = { ...session.players };
         const playerIds = Object.keys(updatedPlayers);
-        for (let i = 0; i < characterCustomizations.length && i < playerIds.length; i++) {
-          const c = characterCustomizations[i];
+        for (let i = 0; i < characterResults.length && i < playerIds.length; i++) {
+          const r = characterResults[i];
           const pid = playerIds[i];
           if (updatedPlayers[pid]) {
             updatedPlayers[pid] = {
               ...updatedPlayers[pid],
-              abilities: { ...c.abilities },
-              proficientSkills: [...c.selectedSkills],
+              abilities: { ...r.finalAbilities },
+              proficientSkills: [...r.selectedProficiencies],
             };
           }
         }
-        // Update session via store directly
         useGameStore.setState({
           session: { ...session, players: updatedPlayers },
         });
+        // Log telemetry for research
+        console.log('Character creation telemetry:', characterResults.map(r => ({
+          abilities: r.finalAbilities,
+          deltas: r.abilityDeltas,
+          objectives: r.finalObjectiveWeights,
+          proficiencies: r.selectedProficiencies,
+          profile: r.behavioralProfile,
+          valid: r.totalScoreVerification.valid,
+        })));
       }
     }
     if (step === 3) {
@@ -853,176 +864,55 @@ export default function SetupScreen() {
             </motion.div>
           )}
 
-          {/* ── Step 2: Interactive Character Creation (Bug 2 fix) ── */}
+          {/* ── Step 2: Questionnaire-Based Character Creation ── */}
           {step === 2 && (
-            <motion.div key="step-2" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-serif font-bold text-amber-300">
-                  Character Creation — {validAssignments[characterIndex]?.name || `Player ${characterIndex + 1}`}
-                </h2>
-                <span className="text-stone-500 text-sm">Player {characterIndex + 1} of {validAssignments.length}</span>
-              </div>
-
-              {currentCharRole && currentCustomization && (
-                <motion.div key={characterIndex} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-stone-700/50 rounded-2xl border overflow-hidden" style={{ borderColor: `${currentCharRole.color}44` }}>
-                  {/* Header */}
-                  <div className="p-6 flex items-center gap-4" style={{ background: `linear-gradient(135deg, ${currentCharRole.color}33 0%, transparent 100%)` }}>
-                    <div className="text-5xl">{currentCharRole.icon}</div>
-                    <div>
-                      <p className="text-stone-400 text-sm">{validAssignments[characterIndex].name}</p>
-                      <h3 className="text-2xl font-bold" style={{ color: currentCharRole.color }}>{currentCharRole.name}</h3>
-                      <p className="text-stone-400 text-sm">{currentCharRole.subtitle}</p>
-                    </div>
-                  </div>
-
-                  <div className="p-6 space-y-6">
-                    {/* Section A: Ability Scores — INTERACTIVE redistribution */}
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider">Ability Scores</h4>
-                        <span className="text-xs text-amber-400">Redistribute up to 4 points (subtract from one, add to another)</span>
-                      </div>
-                      <div className="space-y-2">
-                        {(Object.entries(currentCustomization.abilities) as [keyof AbilityScores, number][]).map(
-                          ([key, value]) => {
-                            const original = currentCharRole.startingAbilities[key];
-                            const diff = value - original;
-                            const modifier = Math.floor((value - 10) / 2);
-                            return (
-                              <div key={key} className="flex items-center gap-3">
-                                <span className="text-stone-300 text-sm w-36">{ABILITY_LABELS[key]}</span>
-                                <button className="w-7 h-7 rounded bg-stone-600 text-stone-300 text-sm font-bold hover:bg-stone-500 disabled:opacity-30" disabled={value <= 6} onClick={() => handleAbilityChange(key, -1)}>-</button>
-                                <div className="w-20 h-2 bg-stone-600 rounded-full overflow-hidden">
-                                  <motion.div className="h-full rounded-full" style={{ backgroundColor: currentCharRole.color }} animate={{ width: `${(value / 20) * 100}%` }} />
-                                </div>
-                                <span className={`font-bold text-sm w-6 text-right ${diff > 0 ? 'text-emerald-400' : diff < 0 ? 'text-red-400' : 'text-stone-200'}`}>{value}</span>
-                                <button className="w-7 h-7 rounded bg-stone-600 text-stone-300 text-sm font-bold hover:bg-stone-500 disabled:opacity-30" disabled={value >= 18} onClick={() => handleAbilityChange(key, +1)}>+</button>
-                                <span className="text-stone-500 text-xs w-10">({modifier >= 0 ? '+' : ''}{modifier})</span>
-                                {diff !== 0 && <span className={`text-xs ${diff > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{diff > 0 ? `+${diff}` : diff}</span>}
-                              </div>
-                            );
-                          }
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Section B: Proficient Skills — SWAPPABLE */}
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider">Proficient Skills (pick 3)</h4>
-                        <span className="text-xs text-stone-500">You may swap 1 default skill for another</span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        {ALL_SKILLS.map((skillId) => {
-                          const isSelected = currentCustomization.selectedSkills.includes(skillId);
-                          const isDefault = currentCharRole.proficientSkills.includes(skillId);
-                          const linkedAbility = SKILL_ABILITY_MAP[skillId];
-                          return (
-                            <button key={skillId} className={`px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${isSelected ? 'border-2 shadow-md' : 'bg-stone-600/30 text-stone-400 border border-stone-600/50 hover:bg-stone-600/50'}`} style={isSelected ? { backgroundColor: `${currentCharRole.color}22`, color: currentCharRole.color, borderColor: `${currentCharRole.color}66` } : undefined} onClick={() => handleSkillToggle(skillId)}>
-                              <div className="font-semibold">{SKILL_LABELS[skillId]}</div>
-                              <div className="text-[10px] mt-0.5 opacity-60">Linked: {ABILITY_LABELS[linkedAbility]}</div>
-                              {isDefault && <div className="text-[9px] mt-0.5 opacity-40">default</div>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Section C: Goals — read-only with acknowledgement */}
-                    <div>
-                      <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Objectives</h4>
-                      <div className="grid grid-cols-3 gap-3">
-                        {[
-                          { type: 'Character', goal: currentCharRole.goals.character, color: '#F59E0B' },
-                          { type: 'Survival', goal: currentCharRole.goals.survival, color: '#EF4444' },
-                          { type: 'Mission', goal: currentCharRole.goals.mission, color: '#3B82F6' },
-                        ].map(({ type, goal, color }) => (
-                          <div key={type} className="bg-stone-600/30 rounded-lg px-3 py-2 border border-stone-600/50">
-                            <span className="text-xs font-semibold" style={{ color }}>{type}</span>
-                            <p className="text-stone-300 text-xs mt-1">{goal.description}</p>
-                          </div>
-                        ))}
-                      </div>
-                      <label className="flex items-center gap-2 mt-3 cursor-pointer">
-                        <input type="checkbox" className="w-4 h-4 rounded accent-amber-400" checked={currentCustomization.goalsAcknowledged} onChange={() => { setCharacterCustomizations((prev) => { const next = [...prev]; next[characterIndex] = { ...next[characterIndex], goalsAcknowledged: !next[characterIndex].goalsAcknowledged }; return next; }); }} />
-                        <span className="text-stone-300 text-sm">I understand my objectives</span>
-                      </label>
-                    </div>
-
-                    {/* Section D: Unique Ability — reveal */}
-                    <div>
-                      <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Unique Ability</h4>
-                      {!currentCustomization.abilityRevealed ? (
-                        <button className="w-full py-4 rounded-xl border-2 border-dashed border-stone-500 text-stone-400 hover:border-amber-400 hover:text-amber-300 transition-colors text-sm font-semibold" onClick={() => { setCharacterCustomizations((prev) => { const next = [...prev]; next[characterIndex] = { ...next[characterIndex], abilityRevealed: true }; return next; }); }}>
-                          Tap to Reveal Your Unique Ability
-                        </button>
-                      ) : (
-                        <motion.div initial={{ scale: 0.8, opacity: 0, rotateY: 90 }} animate={{ scale: 1, opacity: 1, rotateY: 0 }} transition={{ type: 'spring', damping: 15 }} className="rounded-xl px-4 py-3 border" style={{ backgroundColor: `${currentCharRole.color}11`, borderColor: `${currentCharRole.color}33` }}>
-                          <p className="font-bold text-lg" style={{ color: currentCharRole.color }}>{currentCharRole.uniqueAbility.name}</p>
-                          <p className="text-stone-300 text-sm mt-1">{currentCharRole.uniqueAbility.description}</p>
-                        </motion.div>
-                      )}
-                    </div>
-
-                    {/* Section E: Starting Resources */}
-                    <div>
-                      <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Starting Resources</h4>
-                      <div className="flex flex-wrap gap-3">
-                        {(Object.entries(currentCharRole.startingResources) as [keyof ResourcePool, number][]).map(([key, value], i) => (
-                          <motion.div key={key} className="flex items-center gap-2 bg-stone-600/30 rounded-lg px-3 py-2" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-                            <span className="text-lg">{RESOURCE_ICONS[key]}</span>
-                            <span className="text-stone-300 text-sm">{RESOURCE_LABELS[key]}</span>
-                            <div className="flex items-center gap-0.5">
-                              {Array.from({ length: Math.min(value, 8) }).map((_, t) => (
-                                <motion.div key={t} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: currentCharRole.color }} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: i * 0.1 + t * 0.04 }} />
-                              ))}
-                              <span className="text-stone-200 font-bold text-sm ml-1">{value}</span>
+            <motion.div key="step-2" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }}>
+              {characterIndex < validAssignments.length && currentCharRole ? (
+                <CharacterQuestionnaire
+                  key={characterIndex}
+                  playerName={validAssignments[characterIndex].name}
+                  playerIndex={characterIndex}
+                  totalPlayers={validAssignments.length}
+                  role={currentCharRole}
+                  onComplete={(result) => {
+                    setCharacterResults(prev => [...prev, result]);
+                    if (characterIndex < validAssignments.length - 1) {
+                      setCharacterIndex(i => i + 1);
+                    }
+                  }}
+                />
+              ) : characterResults.length === validAssignments.length ? (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-12">
+                  <h2 className="text-3xl font-serif font-bold text-emerald-400 mb-4">All Characters Created</h2>
+                  <p className="text-stone-400 text-lg mb-2">
+                    {validAssignments.length} players have completed the questionnaire.
+                  </p>
+                  <p className="text-stone-500 text-sm">
+                    Each character sheet has been computed from 12 contextual questions.
+                    Ability scores are redistributed within role totals. Objective weights personalized.
+                  </p>
+                  <div className="mt-8 grid grid-cols-5 gap-3 max-w-3xl mx-auto">
+                    {validAssignments.map((a, i) => {
+                      const r = characterResults[i];
+                      const role = ROLE_MAP[a.roleId];
+                      return (
+                        <div key={i} className="bg-stone-700/50 rounded-xl p-3 text-center border" style={{ borderColor: `${role.color}44` }}>
+                          <div className="text-2xl mb-1">{role.icon}</div>
+                          <p className="text-xs font-bold" style={{ color: role.color }}>{a.name}</p>
+                          <p className="text-[10px] text-stone-500">{role.name}</p>
+                          {r && (
+                            <div className="mt-2 text-[10px] text-stone-400">
+                              <span className="text-emerald-400">Score: {r.totalScoreVerification.actual}</span>
+                              {' | '}
+                              <span>{r.behavioralProfile.coalitionStyle}</span>
                             </div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Confirm / Navigate buttons */}
-                  <div className="p-6 pt-0 flex justify-between items-center">
-                    {characterIndex > 0 && (
-                      <button className="px-6 py-2 rounded-lg text-sm font-semibold bg-stone-600 text-stone-300 hover:bg-stone-500 transition-colors" onClick={() => setCharacterIndex((i) => i - 1)}>Previous</button>
-                    )}
-                    <div className="flex-1" />
-                    {!currentCustomization.confirmed ? (
-                      <button
-                        className={`px-8 py-3 rounded-xl text-sm font-bold transition-all ${
-                          currentCustomization.goalsAcknowledged && currentCustomization.abilityRevealed
-                            ? 'text-stone-900 shadow-lg'
-                            : 'bg-stone-600 text-stone-500 cursor-not-allowed'
-                        }`}
-                        style={currentCustomization.goalsAcknowledged && currentCustomization.abilityRevealed ? { backgroundColor: currentCharRole.color } : undefined}
-                        disabled={!currentCustomization.goalsAcknowledged || !currentCustomization.abilityRevealed}
-                        onClick={() => {
-                          setCharacterCustomizations((prev) => {
-                            const next = [...prev];
-                            next[characterIndex] = { ...next[characterIndex], confirmed: true };
-                            return next;
-                          });
-                          if (characterIndex < validAssignments.length - 1) {
-                            setCharacterIndex((i) => i + 1);
-                          }
-                        }}
-                      >
-                        Confirm Character
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-3">
-                        <span className="text-emerald-400 text-sm font-semibold">\u2713 Confirmed</span>
-                        {characterIndex < validAssignments.length - 1 && (
-                          <button className="px-6 py-2 rounded-lg text-sm font-semibold bg-stone-600 text-stone-300 hover:bg-stone-500" onClick={() => setCharacterIndex((i) => i + 1)}>Next Player</button>
-                        )}
-                      </div>
-                    )}
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </motion.div>
-              )}
+              ) : null}
             </motion.div>
           )}
 

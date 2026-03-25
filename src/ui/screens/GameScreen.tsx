@@ -7,6 +7,7 @@ import CardHand from '../cards/CardHand';
 import ChallengeDisplay from '../cards/ChallengeDisplay';
 import StagingArea from '../cards/StagingArea';
 import { GameGraphView } from '../components/GameGraphView';
+import { NashDashboard } from '../components/NashDashboard';
 import type { RoleId, ResourcePool, ResourceType, Player } from '../../core/models/types';
 import { CHALLENGE_CATEGORY_COLORS } from '../../core/models/constants';
 
@@ -810,22 +811,34 @@ export default function GameScreen() {
         )}
       </AnimatePresence>
 
-      {/* Game Graph Button (Fix 6) */}
-      <button
-        className="absolute top-16 right-4 z-20 w-10 h-10 rounded-full bg-stone-700/80 border border-stone-600
-                   flex items-center justify-center hover:bg-stone-600 transition-colors"
-        onClick={toggleGameGraph}
-        title="Game Graph (V, E, VO)"
-      >
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#9CA3AF" strokeWidth="1.5">
-          <circle cx="4" cy="4" r="2" />
-          <circle cx="14" cy="4" r="2" />
-          <circle cx="9" cy="14" r="2" />
-          <line x1="6" y1="4" x2="12" y2="4" />
-          <line x1="4" y1="6" x2="9" y2="12" />
-          <line x1="14" y1="6" x2="9" y2="12" />
-        </svg>
-      </button>
+      {/* HUD Buttons (top-right) */}
+      <div className="absolute top-16 right-4 z-20 flex flex-col gap-2">
+        {/* Nash Dashboard Button */}
+        {session.nashEngineOutput && (
+          <button
+            className="w-10 h-10 rounded-full bg-amber-700/80 border border-amber-600 flex items-center justify-center hover:bg-amber-600 transition-colors"
+            onClick={() => useGameStore.setState((s: any) => ({ showNashDashboard: !s.showNashDashboard }))}
+            title="Nash Equilibrium Dashboard"
+          >
+            <span className="text-amber-200 text-sm font-bold">NE</span>
+          </button>
+        )}
+        {/* Game Graph Button */}
+        <button
+          className="w-10 h-10 rounded-full bg-stone-700/80 border border-stone-600 flex items-center justify-center hover:bg-stone-600 transition-colors"
+          onClick={toggleGameGraph}
+          title="Game Graph (V, E, VO)"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#9CA3AF" strokeWidth="1.5">
+            <circle cx="4" cy="4" r="2" />
+            <circle cx="14" cy="4" r="2" />
+            <circle cx="9" cy="14" r="2" />
+            <line x1="6" y1="4" x2="12" y2="4" />
+            <line x1="4" y1="6" x2="9" y2="12" />
+            <line x1="14" y1="6" x2="9" y2="12" />
+          </svg>
+        </button>
+      </div>
 
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
@@ -1092,6 +1105,16 @@ export default function GameScreen() {
               </button>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Nash Dashboard */}
+      <AnimatePresence>
+        {(useGameStore.getState() as any).showNashDashboard && session.nashEngineOutput && (
+          <NashDashboard
+            nashOutput={session.nashEngineOutput}
+            onClose={() => useGameStore.setState({ showNashDashboard: false } as any)}
+          />
         )}
       </AnimatePresence>
 

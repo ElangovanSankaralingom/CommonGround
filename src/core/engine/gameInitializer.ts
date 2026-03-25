@@ -252,6 +252,8 @@ export function initializeGame(
     zonesInvestedThisRound: [],
     fullCoalitionAchieved: false,
     callDeliberationUsed,
+    nashEngineOutput: null,
+    buchiHistory: {},
   };
 }
 

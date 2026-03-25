@@ -14,6 +14,13 @@ import {
   CoalitionCombination,
 } from '../models/types';
 import {
+  runNashEngine,
+  calculateObjectiveSatisfaction,
+  calculateAllUtilities,
+  calculateCWS as nashCalculateCWS,
+  type NashEngineOutput,
+} from './nashEngine';
+import {
   WELFARE_WEIGHTS,
   ZONE_CONDITION_ORDER,
   LEVEL_TABLE,
@@ -502,7 +509,7 @@ function processRoundEndAccounting(gameState: GameSession): GameSession {
       p = { ...p, resources: res };
     }
 
-    // Update utilities
+    // Update utilities (uses Nash Engine objective-based calculation)
     p.utilityScore = calculateUtility(p, zones);
     p.utilityHistory = [...p.utilityHistory, p.utilityScore];
 
@@ -542,13 +549,53 @@ function processRoundEndAccounting(gameState: GameSession): GameSession {
     ],
   };
 
-  return {
+  let updatedState: GameSession = {
     ...gameState,
     board: { ...gameState.board, zones },
     players,
     cwsTracker,
     status: 'scoring',
   };
+
+  // 7. Nash Engine — calculate objective satisfaction, utilities, CWS, Nash check, Büchi
+  const nashOutput = runNashEngine(updatedState);
+  updatedState = {
+    ...updatedState,
+    nashEngineOutput: nashOutput,
+  };
+
+  // 8. Büchi violation → Crisis State (-2 all abilities)
+  if (nashOutput.crisis_state.players_at_risk.length > 0) {
+    const crisisPlayers = { ...updatedState.players };
+    for (const violation of nashOutput.crisis_state.players_at_risk) {
+      const pid = Object.keys(crisisPlayers).find(k => crisisPlayers[k].roleId === violation.roleId);
+      if (pid) {
+        const p = crisisPlayers[pid];
+        crisisPlayers[pid] = {
+          ...p,
+          crisisState: true,
+          statusEffects: [...p.statusEffects, {
+            id: `buchi_crisis_${Date.now()}`,
+            name: 'Büchi Crisis',
+            description: `${violation.violatedObjectives.join(', ')} unsatisfied for 2+ rounds. -2 all abilities.`,
+            abilityModifiers: { authority: -2, resourcefulness: -2, communityTrust: -2, technicalKnowledge: -2, politicalLeverage: -2, adaptability: -2 },
+            resourceModifiers: {},
+            duration: 1,
+            source: 'buchi_violation',
+          }],
+        };
+      }
+    }
+    updatedState = { ...updatedState, players: crisisPlayers };
+  }
+
+  // 9. Check DNE end condition
+  if (nashOutput.end_condition === 'full_dne') {
+    updatedState = { ...updatedState, status: 'ended' };
+    console.log('DNE ACHIEVED! Game ends with Nash Equilibrium.');
+  }
+
+  return updatedState;
 }
 
 function refillHand(player: Player): Player {
