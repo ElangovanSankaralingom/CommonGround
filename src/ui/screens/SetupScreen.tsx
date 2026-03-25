@@ -232,6 +232,7 @@ const STEPS = [
   'Character Creation',
   'Facilitator Briefing',
   'Standee Placement',
+  'Pre-Game Survey',
 ];
 
 interface PlayerAssignment {
@@ -288,6 +289,10 @@ export default function SetupScreen() {
 
   // Step 4 state
   const [placedStandees, setPlacedStandees] = useState<Record<number, string>>({});
+
+  // Step 5 state — Pre-game survey (H4 baseline: power rankings)
+  const [surveyPlayerIndex, setSurveyPlayerIndex] = useState(0);
+  const [powerRankings, setPowerRankings] = useState<RoleId[][]>(Array.from({ length: 5 }, () => []));
 
   const { initializeGame, selectSite, assignRoles, completeFacilitatorBriefing, placeStandee, startGame, goBackSetup, returnToTitle, session } = useGameStore();
 
@@ -400,10 +405,12 @@ export default function SetupScreen() {
         return briefingSegment >= BRIEFING_SEGMENTS.length;
       case 4:
         return Object.keys(placedStandees).length === 5;
+      case 5:
+        return powerRankings.every(r => r.length === 5);
       default:
         return false;
     }
-  }, [step, assignments, characterResults, validAssignments.length, briefingSegment, BRIEFING_SEGMENTS.length, placedStandees]);
+  }, [step, assignments, characterResults, validAssignments.length, briefingSegment, BRIEFING_SEGMENTS.length, placedStandees, powerRankings]);
 
   const handleNext = useCallback(() => {
     console.log('Setup handleNext: step', step, '->', step + 1);
@@ -458,6 +465,7 @@ export default function SetupScreen() {
       completeFacilitatorBriefing();
     }
     if (step === 4) {
+      // Place standees, then advance to survey (NOT start game yet)
       if (session) {
         const playerIds = Object.keys(session.players);
         for (const [indexStr, zoneId] of Object.entries(placedStandees)) {
@@ -465,11 +473,15 @@ export default function SetupScreen() {
           if (pid) placeStandee(pid, zoneId);
         }
       }
+    }
+    if (step === 5) {
+      // Survey complete → start game
+      console.log('Pre-game survey data (H4 baseline):', powerRankings);
       startGame();
       return;
     }
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
-  }, [step, totalRounds, timerLength, facilitatorMode, difficulty, validAssignments, characterResults, initializeGame, selectSite, assignRoles, completeFacilitatorBriefing, session, placedStandees, placeStandee, startGame]);
+  }, [step, totalRounds, timerLength, facilitatorMode, difficulty, validAssignments, characterResults, initializeGame, selectSite, assignRoles, completeFacilitatorBriefing, session, placedStandees, placeStandee, startGame, powerRankings]);
 
   const handleBack = useCallback(() => {
     if (step === 0) {
@@ -717,6 +729,7 @@ export default function SetupScreen() {
           {/* ── Step 0: Site Selection ─────────────────────── */}
           {step === 0 && (
             <motion.div key="step-0" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="space-y-6">
+              <p className="text-stone-500 text-xs uppercase tracking-wider">Step 1 of {STEPS.length}: Choose your site and configure the game</p>
               <h2 className="text-2xl font-serif font-bold text-amber-300">Select Your Site</h2>
               <div className="bg-stone-700/50 rounded-2xl border border-stone-600/50 overflow-hidden">
                 <div className="h-48 flex items-end p-6" style={{ background: 'linear-gradient(135deg, #2D5016 0%, #4A7C2E 50%, #2D5016 100%)' }}>
@@ -781,6 +794,7 @@ export default function SetupScreen() {
           {/* ── Step 1: Role Assignment (Bug 1 fix) ──────── */}
           {step === 1 && (
             <motion.div key="step-1" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="space-y-6">
+              <p className="text-stone-500 text-xs uppercase tracking-wider">Step 2 of {STEPS.length}: Assign a role to each of the 5 players</p>
               <h2 className="text-2xl font-serif font-bold text-amber-300">Assign Roles</h2>
               <div className="flex gap-2">
                 {(['manual', 'random', 'empathy'] as const).map((method) => (
@@ -1137,6 +1151,112 @@ export default function SetupScreen() {
               </div>
             </motion.div>
           )}
+          {/* ── Step 5: Pre-Game Survey ──────────────── */}
+          {step === 5 && (
+            <motion.div key="step-5" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="space-y-6">
+              <div className="text-center">
+                <h2 className="text-2xl font-serif font-bold text-amber-300">Pre-Game Power Ranking</h2>
+                <p className="text-stone-400 text-sm mt-1">Step 6 of 6: Before we begin, each player ranks the 5 roles by perceived power</p>
+                <p className="text-stone-500 text-xs mt-1">This is research baseline data (H4). Rank 1 = most powerful, 5 = least powerful.</p>
+              </div>
+
+              {surveyPlayerIndex < validAssignments.length ? (
+                <div className="max-w-lg mx-auto bg-stone-700/30 rounded-2xl p-6 border border-stone-600/30">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="text-3xl">{ROLE_MAP[validAssignments[surveyPlayerIndex].roleId]?.icon}</div>
+                    <div>
+                      <p className="text-sm font-bold" style={{ color: ROLE_MAP[validAssignments[surveyPlayerIndex].roleId]?.color }}>
+                        {validAssignments[surveyPlayerIndex].name}
+                      </p>
+                      <p className="text-xs text-stone-500">Rank all 5 roles by how powerful you think they are</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {powerRankings[surveyPlayerIndex].length < 5 ? (
+                      <>
+                        <p className="text-stone-400 text-xs mb-2">
+                          Rank {powerRankings[surveyPlayerIndex].length + 1} of 5: Select the {
+                            powerRankings[surveyPlayerIndex].length === 0 ? 'MOST powerful' :
+                            powerRankings[surveyPlayerIndex].length === 4 ? 'LEAST powerful' :
+                            `#${powerRankings[surveyPlayerIndex].length + 1} most powerful`
+                          } role
+                        </p>
+                        {ALL_ROLES.filter(r => !powerRankings[surveyPlayerIndex].includes(r)).map(roleId => {
+                          const role = ROLE_MAP[roleId];
+                          return (
+                            <button
+                              key={roleId}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg bg-stone-600/30 border border-stone-500/30 hover:bg-stone-600/50 hover:border-stone-400/50 transition-all text-left"
+                              onClick={() => {
+                                setPowerRankings(prev => {
+                                  const next = [...prev];
+                                  next[surveyPlayerIndex] = [...next[surveyPlayerIndex], roleId];
+                                  // Auto-advance to next player if all 5 ranked
+                                  if (next[surveyPlayerIndex].length === 5 && surveyPlayerIndex < validAssignments.length - 1) {
+                                    setTimeout(() => setSurveyPlayerIndex(i => i + 1), 500);
+                                  }
+                                  return next;
+                                });
+                              }}
+                            >
+                              <span className="text-xl">{role?.icon}</span>
+                              <div>
+                                <span className="text-sm font-semibold" style={{ color: role?.color }}>{role?.name}</span>
+                                <span className="text-xs text-stone-500 ml-2">{role?.subtitle}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </>
+                    ) : (
+                      <div className="text-center py-4">
+                        <p className="text-emerald-400 font-bold">{'\u2713'} Ranking Complete</p>
+                        <div className="flex justify-center gap-2 mt-3">
+                          {powerRankings[surveyPlayerIndex].map((roleId, i) => (
+                            <div key={roleId} className="text-center">
+                              <span className="text-stone-500 text-[10px]">#{i + 1}</span>
+                              <div className="text-lg">{ROLE_MAP[roleId]?.icon}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {surveyPlayerIndex < validAssignments.length - 1 && (
+                          <button className="mt-4 px-6 py-2 rounded-lg bg-stone-600 text-stone-300 text-sm hover:bg-stone-500" onClick={() => setSurveyPlayerIndex(i => i + 1)}>
+                            Next Player
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Already ranked badges */}
+                  {powerRankings[surveyPlayerIndex].length > 0 && powerRankings[surveyPlayerIndex].length < 5 && (
+                    <div className="mt-3 flex gap-1">
+                      {powerRankings[surveyPlayerIndex].map((roleId, i) => (
+                        <span key={roleId} className="px-2 py-0.5 rounded text-[10px] bg-stone-600/50 text-stone-400">
+                          #{i + 1} {ROLE_MAP[roleId]?.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-8">
+                  <h3 className="text-2xl font-serif font-bold text-emerald-400 mb-4">All Rankings Complete</h3>
+                  <p className="text-stone-400">Pre-game power perceptions recorded. Ready to begin!</p>
+                  <motion.button
+                    className="mt-6 px-10 py-3 rounded-xl text-sm font-bold bg-amber-400 text-stone-900 hover:bg-amber-300 shadow-lg"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    onClick={handleNext}
+                  >
+                    Begin Round 1
+                  </motion.button>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
@@ -1156,7 +1276,7 @@ export default function SetupScreen() {
             disabled={!canGoNext()}
             onClick={handleNext}
           >
-            {step === 4 ? 'Start Game' : 'Next'}
+            {step === 5 ? 'Begin Game' : 'Next'}
           </button>
         </div>
       </div>
