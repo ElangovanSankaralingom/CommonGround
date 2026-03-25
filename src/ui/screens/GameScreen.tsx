@@ -12,6 +12,7 @@ import { ZoneInfoPanel } from '../components/ZoneInfoPanel';
 import { FacilitatorDashboard } from '../components/FacilitatorDashboard';
 import { SeriesBuilder } from '../components/SeriesBuilder';
 import { BuchiWarningPanel } from '../components/BuchiWarningPanel';
+import { GameplayPipeline } from '../components/GameplayPipeline';
 import type { RoleId, ResourcePool, ResourceType, Player, Zone } from '../../core/models/types';
 import { CHALLENGE_CATEGORY_COLORS, WELFARE_WEIGHTS, OBJECTIVE_WEIGHTS, BUCHI_OBJECTIVES, SURVIVAL_THRESHOLDS, PLAYER_TYPE, type ObjectiveId } from '../../core/models/constants';
 
@@ -938,6 +939,23 @@ export default function GameScreen() {
           )}
         </div>
       </div>
+
+      {/* Gameplay Pipeline — Clarification → Deliberation → Action → Resolution */}
+      {activeChallenge && (isDelibPhase || isActionPhase || currentPhase === 'round_end_accounting' || currentPhase === 'event_roll') && (
+        <GameplayPipeline
+          session={session}
+          activeChallenge={activeChallenge}
+          players={players}
+          currentPhase={currentPhase}
+          onAdvancePhase={advancePhase}
+          onPlayCard={(cardId, zoneId) => playCard(cardId, zoneId)}
+          onPassTurn={passTurn}
+          onProposeTrade={proposeTrade}
+          onEndDeliberation={endDeliberation}
+          currentPlayer={currentPlayer}
+          deliberationTimeRemaining={deliberationTimeRemaining}
+        />
+      )}
 
       {/* Staging Area */}
       <AnimatePresence>
