@@ -16,6 +16,17 @@ import { GameplayPipeline } from '../components/GameplayPipeline';
 import type { RoleId, ResourcePool, ResourceType, Player, Zone } from '../../core/models/types';
 import { CHALLENGE_CATEGORY_COLORS, WELFARE_WEIGHTS, OBJECTIVE_WEIGHTS, BUCHI_OBJECTIVES, SURVIVAL_THRESHOLDS, PLAYER_TYPE, type ObjectiveId } from '../../core/models/constants';
 
+// ── New Gamified Phase Components ─────────────────────────────────
+import { EventRollPhase } from '../phases/EventRollPhase';
+import { ChallengePhase } from '../phases/ChallengePhase';
+import DeliberationPhase from '../phases/DeliberationPhase';
+import BasketballPhase from '../phases/BasketballPhase';
+import ScoringPhase from '../phases/ScoringPhase';
+import RoundTransition from '../phases/RoundTransition';
+import { PhaseTransitionCard } from '../effects/PhaseTransitionCard';
+import { DeckDisplay } from '../effects/ResourceAnimation';
+import type { NashEngineOutput } from '../../core/engine/nashEngine';
+
 // ── Role metadata ────────────────────────────────────────────────
 
 const ROLE_NAMES: Record<RoleId, string> = {
@@ -743,6 +754,47 @@ export default function GameScreen() {
   const [selectedZoneForPanel, setSelectedZoneForPanel] = useState<string | null>(null);
   const [showFacilitatorDashboard, setShowFacilitatorDashboard] = useState(false);
 
+  // ── Gamified Flow State ────────────────────────────────────────
+  const [gamifiedPhase, setGamifiedPhase] = useState<
+    'event_roll' | 'challenge' | 'deliberation' | 'basketball' | 'scoring' | 'round_transition' | 'phase_transition' | null
+  >(null);
+  const [phaseTransition, setPhaseTransition] = useState<{
+    from: number; to: number; fromName: string; toName: string;
+  } | null>(null);
+  const [lastNashOutput, setLastNashOutput] = useState<NashEngineOutput | null>(null);
+  const [lastEndCondition, setLastEndCondition] = useState<string>('none');
+  const [roundCPAwards, setRoundCPAwards] = useState<Record<string, { amount: number; reason: string }[]>>({});
+
+  // Auto-activate gamified phases based on game phase
+  React.useEffect(() => {
+    if (!session) return;
+    const phase = session.currentPhase;
+    if (phase === 'payment_day') {
+      // Payment Day handled by existing overlay, then transitions to event_roll
+      // After payment day dismisses, start gamified event roll
+    } else if (phase === 'event_roll' && gamifiedPhase !== 'event_roll' && gamifiedPhase !== 'phase_transition') {
+      setGamifiedPhase('event_roll');
+    } else if ((phase === 'individual_action' || phase === 'action_resolution') && gamifiedPhase === null) {
+      // These phases are handled by basketball if we have a challenge
+      if (activeChallenge) {
+        setGamifiedPhase('basketball');
+      }
+    } else if (phase === 'round_end_accounting' && gamifiedPhase !== 'scoring' && gamifiedPhase !== 'phase_transition') {
+      setGamifiedPhase('scoring');
+    }
+  }, [session?.currentPhase]);
+
+  // Phase transition helper
+  const showPhaseTransition = useCallback((from: number, to: number, fromName: string, toName: string, nextPhase: typeof gamifiedPhase) => {
+    setPhaseTransition({ from, to, fromName, toName });
+    setGamifiedPhase('phase_transition');
+    // After transition animation, switch to next phase
+    setTimeout(() => {
+      setPhaseTransition(null);
+      setGamifiedPhase(nextPhase);
+    }, 2200);
+  }, []);
+
   if (!session) return null;
 
   const currentPlayer = getCurrentPlayer();
@@ -802,9 +854,186 @@ export default function GameScreen() {
         gameLevel={session.gameLevel}
       />
 
-      {/* Event Roll Results Panel (Bug 4 fix — full results with Continue button) */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* ══ GAMIFIED PHASE OVERLAYS ════════════════════════════ */}
+      {/* ══════════════════════════════════════════════════════════ */}
+
+      {/* Phase Transition Card */}
       <AnimatePresence>
-        {currentPhase === 'event_roll' && session.eventRollResult && (
+        {gamifiedPhase === 'phase_transition' && phaseTransition && (
+          <PhaseTransitionCard
+            fromPhase={phaseTransition.from}
+            toPhase={phaseTransition.to}
+            fromName={phaseTransition.fromName}
+            toName={phaseTransition.toName}
+            onComplete={() => {}}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Phase 1: Event Roll (gamified) */}
+      {gamifiedPhase === 'event_roll' && (
+        <div className="absolute inset-0 z-40">
+          <EventRollPhase
+            session={session}
+            onPhaseComplete={() => {
+              // Transition: Event Roll → Challenge
+              if (activeChallenge) {
+                showPhaseTransition(1, 2, 'Event Roll', 'Challenge', 'challenge');
+              } else {
+                // No challenge drawn, skip to deliberation
+                showPhaseTransition(1, 3, 'Event Roll', 'Deliberation', 'deliberation');
+              }
+              advancePhase();
+            }}
+          />
+        </div>
+      )}
+
+      {/* Phase 2: Challenge + Treasure Hunt (gamified) */}
+      {gamifiedPhase === 'challenge' && activeChallenge && (
+        <div className="absolute inset-0 z-40">
+          <ChallengePhase
+            session={session}
+            challenge={activeChallenge}
+            players={players}
+            onPhaseComplete={(results) => {
+              // Award CP from treasure hunt
+              const cpAwards: Record<string, { amount: number; reason: string }[]> = {};
+              for (const clue of results.cluesFound) {
+                if (!cpAwards[clue.finderId]) cpAwards[clue.finderId] = [];
+                cpAwards[clue.finderId].push({ amount: 1, reason: `Found ${clue.type} clue` });
+              }
+              if (results.allFound) {
+                for (const p of players) {
+                  if (!cpAwards[p.id]) cpAwards[p.id] = [];
+                  cpAwards[p.id].push({ amount: 2, reason: 'All 5 clues found (team bonus)' });
+                }
+              }
+              setRoundCPAwards(prev => {
+                const merged = { ...prev };
+                for (const [pid, awards] of Object.entries(cpAwards)) {
+                  merged[pid] = [...(merged[pid] || []), ...awards];
+                }
+                return merged;
+              });
+              showPhaseTransition(2, 3, 'Challenge', 'Deliberation', 'deliberation');
+            }}
+          />
+        </div>
+      )}
+
+      {/* Phase 3: I-Spy + Deliberation (gamified) */}
+      {gamifiedPhase === 'deliberation' && (
+        <div className="absolute inset-0 z-40">
+          <DeliberationPhase
+            session={session}
+            players={players}
+            currentPlayerId={currentPlayer?.id || players[0]?.id || ''}
+            challenge={activeChallenge}
+            onPhaseComplete={() => {
+              showPhaseTransition(3, 4, 'Deliberation', 'Action', 'basketball');
+              advancePhase();
+            }}
+            onProposeTrade={proposeTrade}
+            onAcceptTrade={(tradeId) => useGameStore.getState().acceptTrade(tradeId)}
+            onRejectTrade={(tradeId) => useGameStore.getState().rejectTrade(tradeId)}
+            onFormCoalition={(partnerIds, targetZoneId) => useGameStore.getState().formCoalition(partnerIds, targetZoneId)}
+            onMakePromise={(toPlayerId, resource, amount) => useGameStore.getState().makePromise(toPlayerId, resource, amount, session.currentRound + 1)}
+            onEndDeliberation={endDeliberation}
+            deliberationTimeRemaining={deliberationTimeRemaining}
+          />
+        </div>
+      )}
+
+      {/* Phase 4: Basketball Action Resolution (gamified) */}
+      {gamifiedPhase === 'basketball' && activeChallenge && (
+        <div className="absolute inset-0 z-40">
+          <BasketballPhase
+            session={session}
+            players={players}
+            challenge={activeChallenge}
+            onPhaseComplete={(result: any) => {
+              // Log resolution telemetry
+              console.log('Basketball resolution:', result);
+              setRoundCPAwards(prev => {
+                const merged = { ...prev };
+                if (result.teamPlayBonus) {
+                  for (const p of players) {
+                    if (!merged[p.id]) merged[p.id] = [];
+                    merged[p.id].push({ amount: 1, reason: 'Team play bonus (all contributed)' });
+                  }
+                }
+                return merged;
+              });
+              showPhaseTransition(4, 5, 'Action', 'Scoring', 'scoring');
+              advancePhase();
+            }}
+            onPlayCard={(cardId: string, targetZoneId?: string) => playCard(cardId, targetZoneId)}
+            onPassTurn={passTurn}
+            onUseAbility={() => useUniqueAbility()}
+          />
+        </div>
+      )}
+
+      {/* Phase 5: Scoring (gamified) */}
+      {gamifiedPhase === 'scoring' && (
+        <div className="absolute inset-0 z-40">
+          <ScoringPhase
+            session={session}
+            players={players}
+            roundCPAwards={roundCPAwards}
+            onPhaseComplete={(nashOutput, endCondition) => {
+              setLastNashOutput(nashOutput);
+              setLastEndCondition(endCondition);
+              setGamifiedPhase('round_transition');
+              advancePhase();
+            }}
+          />
+        </div>
+      )}
+
+      {/* Round Transition / End Game */}
+      {gamifiedPhase === 'round_transition' && (
+        <div className="absolute inset-0 z-40">
+          <RoundTransition
+            session={session}
+            endCondition={lastEndCondition as any}
+            nashOutput={lastNashOutput}
+            onNextRound={() => {
+              setGamifiedPhase(null);
+              setRoundCPAwards({});
+              advancePhase(); // Advances to next round's payment_day
+            }}
+            onDebrief={() => {
+              setGamifiedPhase(null);
+              advancePhase(); // Advances to debrief
+            }}
+          />
+        </div>
+      )}
+
+      {/* Deck Displays (always visible during gameplay) */}
+      {session.status === 'playing' && (
+        <div className="absolute top-16 left-4 z-15 flex flex-col gap-2">
+          <DeckDisplay
+            label="Event Deck"
+            remaining={session.decks.eventDeck.length}
+            discarded={session.decks.eventDiscard.length}
+            cardBackColor="#DC2626"
+          />
+          <DeckDisplay
+            label="Challenge Deck"
+            remaining={session.decks.challengeDeck.length}
+            discarded={session.decks.challengeDiscard.length}
+            cardBackColor="#D97706"
+          />
+        </div>
+      )}
+
+      {/* Legacy Event Roll Results Panel (fallback when gamified is not active) */}
+      <AnimatePresence>
+        {gamifiedPhase === null && currentPhase === 'event_roll' && session.eventRollResult && (
           <motion.div
             className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm"
             initial={{ opacity: 0 }}
@@ -1097,9 +1326,14 @@ export default function GameScreen() {
               <button
                 className="w-full py-3 rounded-xl bg-emerald-500 text-stone-900 font-bold text-sm
                            hover:bg-emerald-400 transition-colors"
-                onClick={() => { dismissPaymentDay(); advancePhase(); }}
+                onClick={() => {
+                  dismissPaymentDay();
+                  advancePhase();
+                  // Start gamified event roll after payment day
+                  setGamifiedPhase('event_roll');
+                }}
               >
-                Continue
+                Continue to Event Roll {'\u2192'}
               </button>
             </motion.div>
           </motion.div>
