@@ -10,7 +10,6 @@ import {
   NASH_PARAMS,
   PROFESSION_INCOME,
   ROLE_COLORS,
-  RESOURCE_COLORS,
   CONDITION_TO_WELFARE,
   LEVEL_TABLE,
   type ObjectiveId,
@@ -45,839 +44,800 @@ const SUB_PHASE_TITLES: Record<SubPhase, string> = {
   '5b': 'Resource Regeneration',
   '5c': 'Individual Utility',
   '5d': 'Community Welfare Score',
-  '5e': 'Büchi Safety Check',
-  '5f': 'CP Awards Ceremony',
-  '5g': 'Nash Check — The Final Whistle',
+  '5e': 'Buchi Safety Check',
+  '5f': 'CP Awards & Level-Up',
+  '5g': 'Nash Check: The Referee Review',
+};
+
+const SUB_PHASE_DURATIONS: Record<SubPhase, number> = {
+  '5a': 3000, '5b': 3000, '5c': 10000, '5d': 5000, '5e': 3000, '5f': 4000, '5g': 8000,
 };
 
 const CONDITION_COLORS: Record<ZoneCondition, string> = {
-  good: '#27AE60',
-  fair: '#F4D03F',
-  poor: '#E67E22',
-  critical: '#C0392B',
-  locked: '#7F8C8D',
+  good: '#27AE60', fair: '#F4D03F', poor: '#E67E22', critical: '#C0392B', locked: '#6B7280',
 };
 
 const OBJECTIVE_LABELS: Record<ObjectiveId, string> = {
-  safety: 'Safety',
-  greenery: 'Greenery',
-  access: 'Access',
-  culture: 'Culture',
-  revenue: 'Revenue',
-  community: 'Community',
-};
-
-const RESOURCE_LABELS: Record<string, string> = {
-  budget: 'Budget',
-  influence: 'Influence',
-  volunteer: 'Volunteers',
-  material: 'Material',
-  knowledge: 'Knowledge',
+  safety: 'Safety', greenery: 'Greenery', access: 'Access',
+  culture: 'Culture', revenue: 'Revenue', community: 'Community',
 };
 
 const ROLE_LABELS: Record<RoleId, string> = {
-  administrator: 'Administrator',
-  investor: 'Investor',
-  designer: 'Designer',
-  citizen: 'Citizen',
-  advocate: 'Advocate',
+  administrator: 'Administrator', investor: 'Investor', designer: 'Designer',
+  citizen: 'Citizen', advocate: 'Advocate',
 };
 
 const ROLE_INCOME_DESC: Record<RoleId, string> = {
-  administrator: '+2 Budget, +1 Influence',
-  investor: '+3 Budget',
-  designer: '+2 Knowledge',
-  citizen: '+3 Volunteers',
-  advocate: '+1 Influence, +1 Knowledge',
+  administrator: '+2B, +1I', investor: '+3B', designer: '+2K',
+  citizen: '+3V', advocate: '+1I, +1K',
 };
 
-// ─── Helper: animate-in wrapper ─────────────────────────────────
+const ALL_OBJECTIVES: ObjectiveId[] = ['safety', 'greenery', 'access', 'culture', 'revenue', 'community'];
 
-const FadeSlide: React.FC<{ delay?: number; children: React.ReactNode }> = ({ delay = 0, children }) => (
+// ─── Helpers ────────────────────────────────────────────────────
+
+const FadeSlide: React.FC<{ delay?: number; children: React.ReactNode; className?: string }> = ({
+  delay = 0, children, className = '',
+}) => (
   <motion.div
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.5, delay }}
+    transition={{ duration: 0.45, delay }}
+    className={className}
   >
     {children}
   </motion.div>
 );
 
-// ─── Component ──────────────────────────────────────────────────
+function conditionBadge(cond: ZoneCondition) {
+  return (
+    <span
+      className="inline-block px-2 py-0.5 rounded text-xs font-bold text-white"
+      style={{ backgroundColor: CONDITION_COLORS[cond] }}
+    >
+      {cond.toUpperCase()}
+    </span>
+  );
+}
 
-const ScoringPhase: React.FC<ScoringPhaseProps> = ({ session, players, roundCPAwards, onPhaseComplete }) => {
-  const [currentSubPhase, setCurrentSubPhase] = useState<SubPhase>('5a');
-  const [playerIndex5c, setPlayerIndex5c] = useState(0);
-  const scrollRef = useRef<HTMLDivElement>(null);
+function roleName(id: RoleId) { return ROLE_LABELS[id] || id; }
 
-  // ── Compute all Nash data once ──
+function fmt(n: number) { return Math.round(n * 100) / 100; }
+
+function getChangedZones(session: GameSession): { zone: Zone; prev: ZoneCondition }[] {
+  const results: { zone: Zone; prev: ZoneCondition }[] = [];
+  for (const zone of Object.values(session.board.zones)) {
+    const hist = zone.conditionHistory;
+    if (hist.length >= 2) {
+      const prev = hist[hist.length - 2].condition;
+      if (prev !== zone.condition) results.push({ zone, prev });
+    }
+  }
+  return results;
+}
+
+function getMaxPossibleUtility(roleId: RoleId): number {
+  const w = OBJECTIVE_WEIGHTS[roleId];
+  return ALL_OBJECTIVES.reduce((s, o) => s + Math.max(0, w[o]), 0);
+}
+
+function getBestSoloUtility(roleId: RoleId): number {
+  const w = OBJECTIVE_WEIGHTS[roleId];
+  const sorted = ALL_OBJECTIVES.map(o => w[o]).sort((a, b) => b - a);
+  return sorted[0] + (sorted[1] || 0);
+}
+
+function determineEndCondition(session: GameSession, nashOutput: NashEngineOutput): string {
+  const { cws, nash_q1, nash_q3, crisis_state } = nashOutput;
+  if (cws.total >= NASH_PARAMS.fullDneThreshold && nash_q1.passed && nash_q3.passed) return 'full_dne';
+  const allCrisis = Object.values(session.players).every(p => p.crisisState);
+  if (allCrisis) return 'veto_deadlock';
+  if (session.currentRound >= session.totalRounds) return 'time_ends';
+  if (cws.total >= NASH_PARAMS.partialThreshold) return 'partial_success';
+  return 'none';
+}
+
+function getPlayerPrevUtility(player: Player): number | null {
+  const h = player.utilityHistory;
+  return h.length >= 2 ? h[h.length - 2] : null;
+}
+
+// ─── Confetti ───────────────────────────────────────────────────
+
+const CONFETTI_COLORS = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96E6A1', '#DDA0DD'];
+const Confetti: React.FC = () => {
+  const pieces = useMemo(() => Array.from({ length: 30 }, (_, i) => ({
+    id: i, x: Math.random() * 100, color: CONFETTI_COLORS[i % 6],
+    delay: Math.random() * 2, size: 6 + Math.random() * 8,
+  })), []);
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      {pieces.map(p => (
+        <motion.div key={p.id} className="absolute rounded-full"
+          style={{ left: `${p.x}%`, top: -10, width: p.size, height: p.size, backgroundColor: p.color }}
+          animate={{ y: [0, 600], rotate: [0, 360], opacity: [1, 0] }}
+          transition={{ duration: 3, delay: p.delay, ease: 'easeIn' }} />
+      ))}
+    </div>
+  );
+};
+
+// ─── Sub-phase components ───────────────────────────────────────
+
+const Phase5a: React.FC<{ session: GameSession }> = ({ session }) => {
+  const changed = useMemo(() => getChangedZones(session), [session]);
+  const zones = Object.values(session.board.zones);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 justify-center">
+        {zones.map((z, i) => {
+          const hit = changed.some(c => c.zone.id === z.id);
+          return (
+            <motion.div key={z.id}
+              className="relative w-16 h-16 rounded-lg flex items-center justify-center text-[10px] font-bold text-white shadow"
+              style={{ backgroundColor: CONDITION_COLORS[z.condition], transition: 'background-color 1.5s ease' }}
+              initial={hit ? { scale: 0.8 } : {}} animate={hit ? { scale: [0.8, 1.15, 1] } : {}}
+              transition={{ duration: 0.8, delay: i * 0.05 }}>
+              {z.name.split(' ').map(w => w[0]).join('')}
+              {hit && (
+                <motion.div className="absolute inset-0 rounded-lg border-2 border-white"
+                  initial={{ opacity: 0.8, scale: 1 }} animate={{ opacity: 0, scale: 1.6 }}
+                  transition={{ duration: 1.2, delay: 0.3 }} />
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+      {changed.length > 0 ? (
+        <div className="space-y-1">
+          {changed.map((c, i) => (
+            <FadeSlide key={c.zone.id} delay={i * 0.2}>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="font-medium text-gray-200">{c.zone.name}:</span>
+                {conditionBadge(c.prev)}<span className="text-gray-400">&rarr;</span>{conditionBadge(c.zone.condition)}
+              </div>
+            </FadeSlide>
+          ))}
+        </div>
+      ) : <p className="text-gray-400 text-sm text-center">No zone conditions changed this round.</p>}
+    </div>
+  );
+};
+
+const Phase5b: React.FC<{ session: GameSession; players: Player[] }> = ({ session, players }) => {
+  const zones = Object.values(session.board.zones);
+  const goodZones = zones.filter(z => z.condition === 'good');
+  const badZones = zones.filter(z => z.condition === 'poor' || z.condition === 'critical');
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2">
+        {goodZones.map(z => (
+          <motion.div key={z.id} className="flex items-center gap-2 text-sm"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
+            <span className="text-green-400 font-bold">+1</span><span className="text-gray-300">{z.name}</span>
+          </motion.div>
+        ))}
+        {badZones.map(z => (
+          <motion.div key={z.id} className="flex items-center gap-2 text-sm"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
+            <span className="text-red-400 font-bold">-1</span><span className="text-gray-300">{z.name}</span>
+          </motion.div>
+        ))}
+      </div>
+      {/* Player income */}
+      <div className="space-y-2">
+        <h4 className="text-xs uppercase tracking-wide text-gray-500">Player Income</h4>
+        {players.map((p, i) => {
+          const income = PROFESSION_INCOME[p.roleId];
+          const entries = Object.entries(income.base).filter(([, v]) => v > 0);
+          return (
+            <FadeSlide key={p.id} delay={0.3 + i * 0.15}>
+              <div className="flex items-center gap-3 bg-gray-800/50 rounded px-3 py-1.5">
+                <div className="w-7 h-7 rounded-full flex-shrink-0" style={{ backgroundColor: ROLE_COLORS[p.roleId] }} />
+                <span className="text-sm font-medium text-white w-24">{roleName(p.roleId)}</span>
+                <span className="text-xs text-gray-400">{ROLE_INCOME_DESC[p.roleId]}</span>
+                <div className="flex gap-2 ml-auto">
+                  {entries.map(([res, amt]) => (
+                    <motion.span key={res} className="text-xs font-bold text-green-300"
+                      initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+                      transition={{ delay: 0.5 + i * 0.15 }}>
+                      +{amt} {res[0].toUpperCase()}
+                    </motion.span>
+                  ))}
+                </div>
+              </div>
+            </FadeSlide>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const Phase5c: React.FC<{
+  players: Player[]; satObjectives: Record<ObjectiveId, boolean>;
+  utilities: Record<RoleId, number>;
+}> = ({ players, satObjectives, utilities }) => {
+  const [activeIdx, setActiveIdx] = useState(0);
+  useEffect(() => {
+    if (activeIdx >= players.length) return;
+    const t = setTimeout(() => setActiveIdx(i => i + 1), 2000);
+    return () => clearTimeout(t);
+  }, [activeIdx, players.length]);
+
+  return (
+    <div className="space-y-3">
+      {/* Tab row */}
+      <div className="flex gap-1">
+        {players.map((p, i) => (
+          <button key={p.id}
+            onClick={() => setActiveIdx(i)}
+            className={`px-3 py-1 text-xs rounded-t font-medium transition-colors ${
+              i === activeIdx ? 'bg-gray-700 text-white' : 'bg-gray-800/40 text-gray-500'
+            }`}
+            style={i === activeIdx ? { borderBottom: `2px solid ${ROLE_COLORS[p.roleId]}` } : {}}>
+            {roleName(p.roleId)}
+          </button>
+        ))}
+      </div>
+      {/* Active player card */}
+      <AnimatePresence mode="wait">
+        {players[activeIdx] && (
+          <PlayerUtilityCard
+            key={players[activeIdx].id}
+            player={players[activeIdx]}
+            satObjectives={satObjectives}
+            utility={utilities[players[activeIdx].roleId]}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+const PlayerUtilityCard: React.FC<{
+  player: Player; satObjectives: Record<ObjectiveId, boolean>; utility: number;
+}> = ({ player, satObjectives, utility }) => {
+  const weights = OBJECTIVE_WEIGHTS[player.roleId];
+  const maxU = getMaxPossibleUtility(player.roleId);
+  const threshold = SURVIVAL_THRESHOLDS[player.roleId];
+  const prevU = getPlayerPrevUtility(player);
+  const aboveThresh = utility >= threshold;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}
+      transition={{ duration: 0.35 }}
+      className="bg-gray-800/60 rounded-lg p-4 space-y-3"
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full border-2 flex items-center justify-center text-white font-bold text-sm"
+          style={{ borderColor: ROLE_COLORS[player.roleId], backgroundColor: ROLE_COLORS[player.roleId] + '30' }}>
+          {roleName(player.roleId)[0]}
+        </div>
+        <span className="text-lg font-bold text-white">{roleName(player.roleId)}</span>
+      </div>
+      {/* Objective rows */}
+      <div className="space-y-1">
+        {ALL_OBJECTIVES.map((obj, i) => {
+          const w = weights[obj];
+          const sat = satObjectives[obj];
+          const product = sat ? w : 0;
+          return (
+            <FadeSlide key={obj} delay={i * 0.15}>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="w-20 text-gray-400">{OBJECTIVE_LABELS[obj]}:</span>
+                <span className="w-6 text-right text-gray-300">{w}</span>
+                <span className="text-gray-500 mx-1">&times;</span>
+                <span className={sat ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+                  {sat ? '\u2713' : '\u2717'}
+                </span>
+                <span className="text-gray-500 mx-1">=</span>
+                <span className="font-medium text-white">{product}</span>
+              </div>
+            </FadeSlide>
+          );
+        })}
+      </div>
+      <div className="pt-2 border-t border-gray-700 space-y-2">
+        <motion.div className="flex items-center gap-2"
+          initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={{ delay: 0.9 }}>
+          <span className="text-lg font-black text-white">UTILITY: u = {utility}</span>
+        </motion.div>
+        <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+          <motion.div
+            className="h-full rounded-full"
+            style={{ backgroundColor: ROLE_COLORS[player.roleId] }}
+            initial={{ width: 0 }}
+            animate={{ width: `${Math.min(100, (utility / maxU) * 100)}%` }}
+            transition={{ duration: 1, delay: 0.5 }}
+          />
+        </div>
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>0</span><span>Max: {maxU}</span>
+        </div>
+        <div className={`text-sm font-medium ${aboveThresh ? 'text-green-400' : 'text-red-400'}`}>
+          Threshold: {threshold} &rarr; {aboveThresh ? '\u2713 ABOVE' : '\u2717 BELOW'}
+        </div>
+        {prevU !== null && (
+          <div className="text-xs text-gray-400">
+            Was: {prevU} &rarr; Now: {utility}{' '}
+            <span className={utility >= prevU ? 'text-green-400' : 'text-red-400'}>
+              ({utility >= prevU ? '+' : ''}{utility - prevU})
+            </span>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
+const Phase5d: React.FC<{
+  players: Player[]; utilities: Record<RoleId, number>; cws: NashEngineOutput['cws'];
+}> = ({ players, utilities, cws }) => {
+  const variance = calculateVariance(utilities);
+  const values = Object.values(utilities);
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  const cpTotal = players.reduce((s, p) => s + p.collaborationPoints, 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Step 1 */}
+      <FadeSlide delay={0}>
+        <div className="bg-gray-800/50 rounded p-3 space-y-1">
+          <h4 className="text-xs uppercase tracking-wide text-yellow-400 font-bold">Step 1: Weighted Utilities</h4>
+          {players.map(p => {
+            const w = WELFARE_WEIGHTS[p.roleId];
+            const u = utilities[p.roleId];
+            return (
+              <div key={p.id} className="flex gap-2 text-sm text-gray-300">
+                <span className="w-24">{roleName(p.roleId)}</span>
+                <span>{w} &times; {u} = <strong className="text-white">{fmt(w * u)}</strong></span>
+              </div>
+            );
+          })}
+          <div className="text-sm font-bold text-white pt-1 border-t border-gray-700">
+            Subtotal: {fmt(cws.weighted_sum)}
+          </div>
+        </div>
+      </FadeSlide>
+      {/* Step 2 */}
+      <FadeSlide delay={1}>
+        <div className="bg-gray-800/50 rounded p-3 space-y-1">
+          <h4 className="text-xs uppercase tracking-wide text-blue-400 font-bold">Step 2: Equity Bonus</h4>
+          <div className="text-sm text-gray-300">
+            Mean: [{values.join(', ')}] / {values.length} = <strong className="text-white">{fmt(mean)}</strong>
+          </div>
+          <div className="text-sm text-gray-300">
+            Variance: <strong className="text-white">{fmt(variance)}</strong>
+          </div>
+          <div className="text-sm text-gray-300">
+            Equity Bonus: 10 &times; (1 - {fmt(variance)}/100) ={' '}
+            <strong className="text-white">{fmt(cws.equity_bonus)}</strong>
+          </div>
+        </div>
+      </FadeSlide>
+      {/* Step 3 */}
+      <FadeSlide delay={2}>
+        <div className="bg-gray-800/50 rounded p-3">
+          <h4 className="text-xs uppercase tracking-wide text-purple-400 font-bold">Step 3: Collaboration Points</h4>
+          <div className="text-sm text-white font-bold">{cpTotal}</div>
+        </div>
+      </FadeSlide>
+      {/* Step 4 */}
+      <FadeSlide delay={3}>
+        <div className="bg-gray-800/50 rounded p-3 space-y-2">
+          <h4 className="text-xs uppercase tracking-wide text-green-400 font-bold">Step 4: TOTAL CWS</h4>
+          <div className="text-sm text-gray-300">
+            {fmt(cws.weighted_sum)} + {fmt(cws.equity_bonus)} + {cws.cp_bonus} ={' '}
+            <strong className="text-xl text-white">{fmt(cws.total)}</strong>
+          </div>
+          {/* Progress bar */}
+          <div className="relative h-5 bg-gray-700 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full rounded-full"
+              style={{ backgroundColor: cws.total >= 75 ? '#27AE60' : '#F4D03F' }}
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.min(100, (cws.total / 120) * 100)}%` }}
+              transition={{ duration: 1.5, delay: 0.5 }}
+            />
+            {/* Target line */}
+            <div className="absolute top-0 bottom-0 w-0.5 bg-white/70"
+              style={{ left: `${(75 / 120) * 100}%` }}>
+              <span className="absolute -top-5 -translate-x-1/2 text-[10px] text-gray-400">75</span>
+            </div>
+          </div>
+          <div className={`text-sm font-bold ${cws.total >= 75 ? 'text-green-400' : 'text-amber-400'}`}>
+            {cws.total >= 75 ? 'Above target!' : 'Below target'}
+          </div>
+        </div>
+      </FadeSlide>
+    </div>
+  );
+};
+
+const Phase5e: React.FC<{
+  session: GameSession; players: Player[]; satObjectives: Record<ObjectiveId, boolean>;
+}> = ({ session, players, satObjectives }) => {
+  const buchiHistory = (session.buchiHistory || {}) as Record<RoleId, Record<ObjectiveId, number>>;
+  return (
+    <div className="space-y-3">
+      {players.map((p, pi) => {
+        const objs = BUCHI_OBJECTIVES[p.roleId] || [];
+        const hist = buchiHistory[p.roleId] || {};
+        const hasCrisis = objs.some(o => (hist[o] || 0) >= 2);
+        return (
+          <FadeSlide key={p.id} delay={pi * 0.15}>
+            <div className={`bg-gray-800/50 rounded p-3 ${hasCrisis ? 'ring-2 ring-red-500' : ''}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold ${hasCrisis ? 'ring-2 ring-red-500' : ''}`}
+                  style={{ backgroundColor: ROLE_COLORS[p.roleId] }}>
+                  {roleName(p.roleId)[0]}
+                </div>
+                <span className="text-sm font-bold text-white">{roleName(p.roleId)}</span>
+                {hasCrisis && (
+                  <span className="ml-auto text-xs bg-red-600 text-white px-2 py-0.5 rounded font-bold">
+                    -2 all abilities
+                  </span>
+                )}
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="text-left py-0.5">Objective</th>
+                    <th className="text-right py-0.5">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {objs.map(obj => {
+                    const rounds = hist[obj] || 0;
+                    const sat = satObjectives[obj];
+                    let status: string, color: string;
+                    if (sat || rounds === 0) { status = '\u2713 Safe'; color = 'text-green-400'; }
+                    else if (rounds === 1) { status = '\u26A0 Warning'; color = 'text-yellow-400'; }
+                    else { status = 'CRISIS STATE'; color = 'text-red-400'; }
+                    return (
+                      <tr key={obj} className="border-t border-gray-700/50">
+                        <td className="py-1 text-gray-300">{OBJECTIVE_LABELS[obj]}</td>
+                        <td className={`py-1 text-right font-bold ${color}`}>{status}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </FadeSlide>
+        );
+      })}
+    </div>
+  );
+};
+
+const Phase5f: React.FC<{
+  players: Player[]; roundCPAwards: Record<string, { amount: number; reason: string }[]>;
+}> = ({ players, roundCPAwards }) => {
+  return (
+    <div className="space-y-3">
+      {players.map((p, pi) => {
+        const awards = roundCPAwards[p.id] || [];
+        const totalAward = awards.reduce((s, a) => s + a.amount, 0);
+        const newCP = p.collaborationPoints;
+        const currentLevel = p.level;
+        const nextLevel = LEVEL_TABLE.find(l => l.level === currentLevel + 1);
+        const leveledUp = nextLevel && newCP >= nextLevel.cpRequired;
+        return (
+          <FadeSlide key={p.id} delay={pi * 0.15}>
+            <div className="bg-gray-800/50 rounded p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-6 h-6 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: ROLE_COLORS[p.roleId] }} />
+                <span className="text-sm font-bold text-white">{roleName(p.roleId)}</span>
+                <span className="ml-auto text-xs text-gray-400">CP: {newCP}</span>
+              </div>
+              {awards.length > 0 ? (
+                <div className="space-y-0.5 ml-8">
+                  {awards.map((a, i) => (
+                    <motion.div key={i} className="text-xs text-gray-300"
+                      initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: pi * 0.15 + i * 0.1 }}>
+                      <span className="text-green-400 font-bold">+{a.amount}</span>{' '}{a.reason}
+                    </motion.div>
+                  ))}
+                  <div className="text-xs text-white font-bold pt-0.5">Total: +{totalAward} CP</div>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-500 ml-8">No CP this round</div>
+              )}
+              {leveledUp && (
+                <motion.div
+                  className="mt-2 bg-yellow-500/20 border border-yellow-500 rounded px-3 py-1.5 text-center"
+                  initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.5, type: 'spring' }}>
+                  <div className="text-yellow-400 font-black text-sm">LEVEL UP!</div>
+                  <div className="text-xs text-yellow-300">
+                    Level {currentLevel} &rarr; {currentLevel + 1}
+                    {nextLevel.newSkill && ' | New Skill'}
+                    {nextLevel.abilityBonus && ' | +1 Ability'}
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          </FadeSlide>
+        );
+      })}
+    </div>
+  );
+};
+
+const Phase5g: React.FC<{
+  players: Player[]; nashOutput: NashEngineOutput; endCondition: string;
+}> = ({ players, nashOutput, endCondition }) => {
+  const { utilities, cws, nash_q1, nash_q3, dne_achieved } = nashOutput;
+  const allPass = nash_q1.passed && nash_q3.passed;
+
+  // Q2: best solo for environment players
+  const envRoles: RoleId[] = ['designer', 'citizen', 'advocate'];
+  const fixedRoles: RoleId[] = ['administrator', 'investor'];
+
+  // Find lowest utility player for Q3 failure reason
+  const utilEntries = Object.entries(utilities) as [RoleId, number][];
+  const sorted = [...utilEntries].sort((a, b) => a[1] - b[1]);
+  const lowest = sorted[0];
+  const avg = utilEntries.reduce((s, [, v]) => s + v, 0) / utilEntries.length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-lg font-black text-white">
+        <span className="text-2xl">&#127937;</span> NASH CHECK: The Referee Review
+      </div>
+
+      {/* Q1 */}
+      <FadeSlide delay={0}>
+        <div className="bg-gray-800/50 rounded p-3 space-y-1">
+          <h4 className="text-xs uppercase tracking-wide text-cyan-400 font-bold">
+            Q1 -- Individual Thresholds
+          </h4>
+          <p className="text-[11px] text-gray-500 italic">Is everyone above survival?</p>
+          {utilEntries.map(([roleId, u]) => {
+            const t = SURVIVAL_THRESHOLDS[roleId];
+            const pass = u >= t;
+            return (
+              <div key={roleId} className="text-sm text-gray-300">
+                {roleName(roleId)}: u={u} {pass ? '\u2265' : '<'} T={t}{' '}
+                <span className={pass ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+                  {pass ? '\u2713' : '\u2717'}
+                </span>
+              </div>
+            );
+          })}
+          <div className={`text-sm font-black pt-1 border-t border-gray-700 ${nash_q1.passed ? 'text-green-400' : 'text-red-400'}`}>
+            CALL: Q1 {nash_q1.passed ? 'PASSES \u2713' : `FAILS \u2717 -- ${nash_q1.failing_players.map(f => roleName(f.roleId)).join(', ')}`}
+          </div>
+        </div>
+      </FadeSlide>
+
+      {/* Q2 */}
+      <FadeSlide delay={1}>
+        <div className="bg-gray-800/50 rounded p-3 space-y-1">
+          <h4 className="text-xs uppercase tracking-wide text-orange-400 font-bold">
+            Q2 -- No Profitable Deviation
+          </h4>
+          <div className="text-xs text-gray-500 italic mb-1">
+            S-FIXED players ({fixedRoles.map(r => roleName(r)).join(', ')}): not reviewed -- institutionally constrained
+          </div>
+          {envRoles.map(roleId => {
+            const actual = utilities[roleId] ?? 0;
+            const bestSolo = getBestSoloUtility(roleId);
+            const pass = actual >= bestSolo;
+            return (
+              <div key={roleId} className="text-sm text-gray-300">
+                {roleName(roleId)}: actual={actual}, best solo={bestSolo}{' '}
+                <span className={pass ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+                  {pass ? 'NO profitable deviation \u2713' : 'profitable deviation exists \u2717'}
+                </span>
+              </div>
+            );
+          })}
+          <div className={`text-sm font-black pt-1 border-t border-gray-700 ${
+            envRoles.every(r => (utilities[r] ?? 0) >= getBestSoloUtility(r)) ? 'text-green-400' : 'text-red-400'
+          }`}>
+            CALL: Q2 {envRoles.every(r => (utilities[r] ?? 0) >= getBestSoloUtility(r)) ? 'PASSES \u2713' : 'FAILS \u2717'}
+          </div>
+        </div>
+      </FadeSlide>
+
+      {/* Q3 */}
+      <FadeSlide delay={2}>
+        <div className="bg-gray-800/50 rounded p-3 space-y-1">
+          <h4 className="text-xs uppercase tracking-wide text-pink-400 font-bold">
+            Q3 -- Equity + CWS
+          </h4>
+          <p className="text-[11px] text-gray-500 italic">Is it fair AND sufficient?</p>
+          <div className="text-sm text-gray-300">
+            Variance: {fmt(nash_q3.variance)} &le; 4.00?{' '}
+            <span className={nash_q3.variance <= 4 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+              {nash_q3.variance <= 4 ? 'YES' : 'NO'}
+            </span>
+          </div>
+          <div className="text-sm text-gray-300">
+            CWS: {fmt(cws.total)} &ge; 75?{' '}
+            <span className={nash_q3.cws_above_target ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+              {nash_q3.cws_above_target ? 'YES' : 'NO'}
+            </span>
+          </div>
+          {!nash_q3.passed && lowest && (
+            <div className="text-xs text-red-300 italic">
+              REASON: {roleName(lowest[0])} at {lowest[1]} is {fmt(avg - lowest[1])} below average
+            </div>
+          )}
+          <div className={`text-sm font-black pt-1 border-t border-gray-700 ${nash_q3.passed ? 'text-green-400' : 'text-red-400'}`}>
+            CALL: Q3 {nash_q3.passed ? 'PASSES \u2713' : 'FAILS \u2717'}
+          </div>
+        </div>
+      </FadeSlide>
+
+      {/* DNE Verdict */}
+      <FadeSlide delay={3.5}>
+        {allPass ? (
+          <div className="relative bg-gradient-to-r from-yellow-600/30 to-yellow-500/20 border-2 border-yellow-500 rounded-lg p-5 text-center overflow-hidden">
+            <Confetti />
+            <div className="text-2xl font-black text-yellow-400 mb-1">
+              &#127942; NASH EQUILIBRIUM ACHIEVED! DNE FOUND!
+            </div>
+            <div className="text-sm text-yellow-200">
+              The park is restored. Every stakeholder found their balance.
+            </div>
+          </div>
+        ) : (
+          <div className="bg-gray-800/70 border border-gray-600 rounded-lg p-4 space-y-2">
+            <div className="text-lg font-black text-gray-300">DNE Not Yet Achieved</div>
+            <div className="text-sm text-gray-400 space-y-1">
+              {!nash_q1.passed && (
+                <div>Q1 failed: {nash_q1.failing_players.map(f =>
+                  `${roleName(f.roleId)} needs +${f.deficit} utility`).join('; ')}</div>
+              )}
+              {!nash_q3.passed && nash_q3.variance > 4 && (
+                <div>Q3 failed: variance {fmt(nash_q3.variance)} exceeds equity band of 4.00</div>
+              )}
+              {!nash_q3.passed && !nash_q3.cws_above_target && (
+                <div>Q3 failed: CWS {fmt(cws.total)} below target of 75</div>
+              )}
+            </div>
+            {nashOutput.optimal_next_action.reasoning && (
+              <div className="text-sm text-cyan-300 font-medium pt-1 border-t border-gray-700">
+                ADVICE: {nashOutput.optimal_next_action.reasoning}
+              </div>
+            )}
+          </div>
+        )}
+      </FadeSlide>
+    </div>
+  );
+};
+
+// ─── Main Component ─────────────────────────────────────────────
+
+export default function ScoringPhase({ session, players, roundCPAwards, onPhaseComplete }: ScoringPhaseProps) {
+  const [currentSubIdx, setCurrentSubIdx] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Compute all scoring data once
+  const satObjectives = useMemo(() => calculateObjectiveSatisfaction(session.board.zones), [session]);
+  const utilities = useMemo(() => calculateAllUtilities(session.players, satObjectives), [session, satObjectives]);
   const nashOutput = useMemo(() => runNashEngine(session), [session]);
+  const endCondition = useMemo(() => determineEndCondition(session, nashOutput), [session, nashOutput]);
 
-  const satObjectives = useMemo(
-    () => calculateObjectiveSatisfaction(session.board.zones),
-    [session.board.zones]
-  );
-
-  const utilities = useMemo(
-    () => calculateAllUtilities(session.players, satObjectives),
-    [session.players, satObjectives]
-  );
-
-  const cpTotal = useMemo(
-    () => players.reduce((s, p) => s + p.collaborationPoints, 0),
-    [players]
-  );
-
-  const cwsData = useMemo(() => calculateCWS(utilities, cpTotal), [utilities, cpTotal]);
-
-  const variance = useMemo(() => calculateVariance(utilities), [utilities]);
-
-  const q1 = useMemo(() => checkNashQ1(utilities), [utilities]);
-  const q3 = useMemo(() => checkNashQ3(utilities, cwsData.total), [utilities, cwsData.total]);
-
-  const buchiResult = useMemo(
-    () => checkBuchiObjectives(
-      session.players,
-      satObjectives,
-      (session.buchiHistory || {}) as Record<RoleId, Record<ObjectiveId, number>>
-    ),
-    [session.players, satObjectives, session.buchiHistory]
-  );
-
-  // ── Zone changes detection ──
-  const zoneChanges = useMemo(() => {
-    const changes: { zone: Zone; oldCondition: ZoneCondition; newCondition: ZoneCondition }[] = [];
-    const zones = session.board.zones as Record<string, Zone>;
-    for (const zone of Object.values(zones)) {
-      const hist = zone.conditionHistory;
-      if (hist.length >= 2) {
-        const prev = hist[hist.length - 2];
-        const curr = hist[hist.length - 1];
-        if (prev.condition !== curr.condition) {
-          changes.push({ zone, oldCondition: prev.condition, newCondition: curr.condition });
-        }
+  // Auto-scroll timer
+  useEffect(() => {
+    if (finished) return;
+    const phase = SUB_PHASE_ORDER[currentSubIdx];
+    if (!phase) { setFinished(true); return; }
+    const timer = setTimeout(() => {
+      if (currentSubIdx < SUB_PHASE_ORDER.length - 1) {
+        setCurrentSubIdx(i => i + 1);
+      } else {
+        setFinished(true);
       }
-    }
-    return changes;
-  }, [session.board.zones]);
-
-  // ── Auto-advance through sub-phases ──
-  useEffect(() => {
-    const idx = SUB_PHASE_ORDER.indexOf(currentSubPhase);
-    if (idx < SUB_PHASE_ORDER.length - 1) {
-      const delay = currentSubPhase === '5c' ? (players.length * 2000 + 1000) : 4000;
-      const timer = setTimeout(() => {
-        setCurrentSubPhase(SUB_PHASE_ORDER[idx + 1]);
-      }, delay);
-      return () => clearTimeout(timer);
-    }
-  }, [currentSubPhase, players.length]);
-
-  // ── Auto-scroll players in 5c ──
-  useEffect(() => {
-    if (currentSubPhase !== '5c') return;
-    if (playerIndex5c >= players.length - 1) return;
-    const timer = setTimeout(() => setPlayerIndex5c(i => i + 1), 2000);
+    }, SUB_PHASE_DURATIONS[phase]);
     return () => clearTimeout(timer);
-  }, [currentSubPhase, playerIndex5c, players.length]);
+  }, [currentSubIdx, finished]);
 
-  // ── Scroll to bottom on sub-phase change ──
+  // Scroll to current sub-phase
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [currentSubPhase]);
+    const phase = SUB_PHASE_ORDER[currentSubIdx];
+    const el = sectionRefs.current[phase];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [currentSubIdx]);
 
-  // ── Advance handler ──
-  const handleNext = useCallback(() => {
-    const idx = SUB_PHASE_ORDER.indexOf(currentSubPhase);
-    if (idx < SUB_PHASE_ORDER.length - 1) {
-      setCurrentSubPhase(SUB_PHASE_ORDER[idx + 1]);
+  const advance = useCallback(() => {
+    if (currentSubIdx < SUB_PHASE_ORDER.length - 1) {
+      setCurrentSubIdx(i => i + 1);
+    } else {
+      setFinished(true);
     }
-  }, [currentSubPhase]);
-
-  // ── End condition determination ──
-  const endCondition = useMemo(() => {
-    const allBuchiCrisis = buchiResult.violations.length >= players.length && players.length > 0;
-    const isFinalRound = session.currentRound >= session.totalRounds;
-
-    if (cwsData.total >= NASH_PARAMS.fullDneThreshold && q1.passed && q3.passed) return 'full_dne';
-    if (allBuchiCrisis) return 'veto_deadlock';
-    if (cwsData.total >= NASH_PARAMS.partialThreshold && isFinalRound) return 'partial';
-    if (isFinalRound) return 'time_ends';
-    return 'continue';
-  }, [cwsData.total, q1.passed, q3.passed, buchiResult.violations.length, players.length, session.currentRound, session.totalRounds]);
+  }, [currentSubIdx]);
 
   const handleComplete = useCallback(() => {
     onPhaseComplete(nashOutput, endCondition);
-  }, [nashOutput, endCondition, onPhaseComplete]);
+  }, [onPhaseComplete, nashOutput, endCondition]);
 
-  // ── Determine which sub-phases to show (all up to current) ──
-  const visiblePhases = SUB_PHASE_ORDER.slice(0, SUB_PHASE_ORDER.indexOf(currentSubPhase) + 1);
+  const isGameEnd = endCondition !== 'none';
 
   return (
-    <div className="flex flex-col h-full bg-gray-950 text-white">
+    <div ref={containerRef} className="relative max-w-2xl mx-auto px-4 py-6 space-y-6 overflow-y-auto max-h-[85vh]">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-800">
-        <h1 className="text-xl font-bold tracking-wide">
-          Phase 5 — Consequence &amp; Scoring
-        </h1>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400">Round {session.currentRound}/{session.totalRounds}</span>
-          {currentSubPhase !== '5g' && (
-            <button
-              onClick={handleNext}
-              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium transition-colors"
-            >
-              Next &raquo;
-            </button>
-          )}
+      <div className="text-center">
+        <h2 className="text-2xl font-black text-white tracking-tight">Phase 5: Scoring & Nash Check</h2>
+        <p className="text-sm text-gray-400">Round {session.currentRound} of {session.totalRounds}</p>
+      </div>
+
+      {/* Sub-phase progress */}
+      <div className="flex gap-1">
+        {SUB_PHASE_ORDER.map((sp, i) => (
+          <button key={sp} onClick={() => { setCurrentSubIdx(i); }}
+            className={`flex-1 h-1.5 rounded-full transition-colors ${
+              i <= currentSubIdx ? 'bg-cyan-500' : 'bg-gray-700'
+            }`}
+            title={SUB_PHASE_TITLES[sp]}
+          />
+        ))}
+      </div>
+
+      {/* Sub-phase sections */}
+      {SUB_PHASE_ORDER.map((sp, i) => {
+        if (i > currentSubIdx) return null;
+        return (
+          <div key={sp} ref={el => { sectionRefs.current[sp] = el; }}
+            className="scroll-mt-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded font-mono">
+                {sp.toUpperCase()}
+              </span>
+              <h3 className="text-sm font-bold text-gray-300">{SUB_PHASE_TITLES[sp]}</h3>
+            </div>
+            <AnimatePresence>
+              {sp === '5a' && <Phase5a session={session} />}
+              {sp === '5b' && <Phase5b session={session} players={players} />}
+              {sp === '5c' && <Phase5c players={players} satObjectives={satObjectives} utilities={utilities} />}
+              {sp === '5d' && <Phase5d players={players} utilities={utilities} cws={nashOutput.cws} />}
+              {sp === '5e' && <Phase5e session={session} players={players} satObjectives={satObjectives} />}
+              {sp === '5f' && <Phase5f players={players} roundCPAwards={roundCPAwards} />}
+              {sp === '5g' && <Phase5g players={players} nashOutput={nashOutput} endCondition={endCondition} />}
+            </AnimatePresence>
+          </div>
+        );
+      })}
+
+      {/* Next / Advance button */}
+      {!finished && (
+        <div className="sticky bottom-0 flex justify-center py-3">
+          <button
+            onClick={advance}
+            className="bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold px-5 py-2 rounded-lg shadow-lg transition-colors"
+          >
+            Next &#9660;
+          </button>
         </div>
-      </div>
-
-      {/* Scrolling content */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-8">
-        <AnimatePresence>
-          {/* ═══ 5a: Zone Condition Updates ═══ */}
-          {visiblePhases.includes('5a') && (
-            <SectionWrapper key="5a" label="5a" title={SUB_PHASE_TITLES['5a']}>
-              {zoneChanges.length === 0 ? (
-                <FadeSlide delay={0.2}>
-                  <p className="text-gray-400 italic">No zone conditions changed this round.</p>
-                </FadeSlide>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {zoneChanges.map((change, i) => (
-                    <FadeSlide key={change.zone.id} delay={0.2 + i * 0.15}>
-                      <div className="flex items-center gap-3 bg-gray-800 rounded-lg p-3">
-                        <span className="font-medium text-sm w-36 truncate">{change.zone.name}</span>
-                        <ConditionBadge condition={change.oldCondition} />
-                        <span className="text-gray-500">&rarr;</span>
-                        <ConditionBadge condition={change.newCondition} />
-                        {change.zone.progressMarkers > 0 && (
-                          <span className="ml-auto text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded">
-                            +{change.zone.progressMarkers} progress
-                          </span>
-                        )}
-                        {change.zone.problemMarkers > 0 && (
-                          <span className="ml-auto text-xs bg-red-900 text-red-300 px-2 py-0.5 rounded">
-                            +{change.zone.problemMarkers} problems
-                          </span>
-                        )}
-                      </div>
-                    </FadeSlide>
-                  ))}
-                </div>
-              )}
-            </SectionWrapper>
-          )}
-
-          {/* ═══ 5b: Resource Regeneration ═══ */}
-          {visiblePhases.includes('5b') && (
-            <SectionWrapper key="5b" label="5b" title={SUB_PHASE_TITLES['5b']}>
-              {/* Zone regen/drain */}
-              <FadeSlide delay={0.1}>
-                <h4 className="text-sm font-semibold text-gray-300 mb-2">Zone Regeneration</h4>
-              </FadeSlide>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
-                {(Object.values(session.board.zones) as Zone[]).map((zone, i) => {
-                  const isGood = zone.condition === 'good';
-                  const isDraining = zone.condition === 'poor' || zone.condition === 'critical';
-                  if (!isGood && !isDraining) return null;
-                  return (
-                    <FadeSlide key={zone.id} delay={0.2 + i * 0.08}>
-                      <div className="flex items-center gap-2 bg-gray-800 rounded p-2 text-sm">
-                        <span className="truncate flex-1">{zone.name}</span>
-                        {isGood && (
-                          <span className="text-green-400 font-bold text-xs bg-green-900/50 px-2 py-0.5 rounded">+1</span>
-                        )}
-                        {isDraining && (
-                          <span className="text-red-400 font-bold text-xs bg-red-900/50 px-2 py-0.5 rounded">-1</span>
-                        )}
-                      </div>
-                    </FadeSlide>
-                  );
-                })}
-              </div>
-
-              {/* Player income */}
-              <FadeSlide delay={0.5}>
-                <h4 className="text-sm font-semibold text-gray-300 mb-2">Profession Income</h4>
-              </FadeSlide>
-              <div className="space-y-2">
-                {players.map((player, i) => {
-                  const income = PROFESSION_INCOME[player.roleId];
-                  const incomeEntries = (Object.entries(income.base) as [string, number][]).filter(([, v]) => v > 0);
-                  return (
-                    <FadeSlide key={player.id} delay={0.6 + i * 0.15}>
-                      <div className="flex items-center gap-3 bg-gray-800 rounded-lg p-3">
-                        <span
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: ROLE_COLORS[player.roleId] }}
-                        />
-                        <span className="font-medium text-sm w-28">{player.name}</span>
-                        <span className="text-xs text-gray-400 w-24">{ROLE_LABELS[player.roleId]}</span>
-                        <div className="flex gap-2 flex-wrap">
-                          {incomeEntries.map(([res, amount]) => (
-                            <span
-                              key={res}
-                              className="text-xs font-semibold px-2 py-0.5 rounded"
-                              style={{ backgroundColor: `${RESOURCE_COLORS[res]}22`, color: RESOURCE_COLORS[res] }}
-                            >
-                              +{amount} {RESOURCE_LABELS[res] || res}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </FadeSlide>
-                  );
-                })}
-              </div>
-            </SectionWrapper>
-          )}
-
-          {/* ═══ 5c: Individual Utility ═══ */}
-          {visiblePhases.includes('5c') && (
-            <SectionWrapper key="5c" label="5c" title={SUB_PHASE_TITLES['5c']}>
-              <div className="space-y-4">
-                {players.map((player, pIdx) => {
-                  const weights = OBJECTIVE_WEIGHTS[player.roleId];
-                  const utility = utilities[player.roleId] ?? 0;
-                  const threshold = SURVIVAL_THRESHOLDS[player.roleId];
-                  const maxUtil = (Object.values(weights) as number[]).reduce((s, w) => s + Math.max(0, w), 0);
-                  const meetsThreshold = utility >= threshold;
-
-                  return (
-                    <FadeSlide key={player.id} delay={pIdx * 0.3}>
-                      <div
-                        className="bg-gray-800 rounded-lg overflow-hidden border"
-                        style={{ borderColor: pIdx <= playerIndex5c ? ROLE_COLORS[player.roleId] : '#374151' }}
-                      >
-                        <div
-                          className="px-4 py-2 text-sm font-bold"
-                          style={{ backgroundColor: `${ROLE_COLORS[player.roleId]}33`, color: ROLE_COLORS[player.roleId] }}
-                        >
-                          {player.name} — {ROLE_LABELS[player.roleId]}
-                        </div>
-                        <div className="p-4 space-y-1.5">
-                          {(Object.entries(weights) as [ObjectiveId, number][]).map(([objId, weight], oIdx) => {
-                            const sat = satObjectives[objId];
-                            const product = sat ? weight : 0;
-                            return (
-                              <motion.div
-                                key={objId}
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: pIdx * 0.3 + oIdx * 0.08 }}
-                                className="flex items-center gap-2 text-sm"
-                              >
-                                <span className="w-24 text-gray-300">{OBJECTIVE_LABELS[objId]}</span>
-                                <span className="text-gray-500 w-8 text-right">{weight}</span>
-                                <span className="text-gray-600 mx-1">&times;</span>
-                                <span className={sat ? 'text-green-400' : 'text-red-400'}>
-                                  {sat ? '\u2713' : '\u2717'}
-                                </span>
-                                <span className="text-gray-600 mx-1">=</span>
-                                <span className="font-mono font-bold w-6 text-right">{product}</span>
-                              </motion.div>
-                            );
-                          })}
-                          {/* Utility total */}
-                          <div className="mt-3 pt-2 border-t border-gray-700">
-                            <div className="flex items-center gap-3">
-                              <span className="text-sm font-semibold">Total Utility: {utility}</span>
-                              <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-                                <motion.div
-                                  className="h-full rounded-full"
-                                  style={{ backgroundColor: ROLE_COLORS[player.roleId] }}
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${maxUtil > 0 ? (utility / maxUtil) * 100 : 0}%` }}
-                                  transition={{ duration: 0.8, delay: pIdx * 0.3 + 0.5 }}
-                                />
-                              </div>
-                              <span className="text-xs text-gray-500">{utility}/{maxUtil}</span>
-                            </div>
-                            <div className="mt-1 text-xs">
-                              Threshold T={threshold}:{' '}
-                              <span className={meetsThreshold ? 'text-green-400' : 'text-red-400'}>
-                                {meetsThreshold ? '\u2713 Met' : '\u2717 Below'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </FadeSlide>
-                  );
-                })}
-              </div>
-            </SectionWrapper>
-          )}
-
-          {/* ═══ 5d: CWS Calculation ═══ */}
-          {visiblePhases.includes('5d') && (
-            <SectionWrapper key="5d" label="5d" title={SUB_PHASE_TITLES['5d']}>
-              {/* Step 1: Weighted Utilities */}
-              <FadeSlide delay={0.1}>
-                <h4 className="text-sm font-semibold text-yellow-400 mb-2">Step 1: Weighted Utilities</h4>
-              </FadeSlide>
-              <div className="space-y-1 mb-4">
-                {players.map((p, i) => {
-                  const w = WELFARE_WEIGHTS[p.roleId];
-                  const u = utilities[p.roleId] ?? 0;
-                  return (
-                    <FadeSlide key={p.id} delay={0.2 + i * 0.1}>
-                      <div className="flex items-center gap-2 text-sm bg-gray-800 rounded p-2">
-                        <span className="w-28 truncate">{ROLE_LABELS[p.roleId]}</span>
-                        <span className="text-gray-400 font-mono">{w}</span>
-                        <span className="text-gray-600">&times;</span>
-                        <span className="font-mono">{u}</span>
-                        <span className="text-gray-600">=</span>
-                        <span className="font-bold font-mono">{(w * u).toFixed(1)}</span>
-                      </div>
-                    </FadeSlide>
-                  );
-                })}
-                <FadeSlide delay={0.7}>
-                  <div className="text-sm font-semibold text-right pr-2">
-                    Sum = {cwsData.weighted_sum}
-                  </div>
-                </FadeSlide>
-              </div>
-
-              {/* Step 2: Equity Bonus */}
-              <FadeSlide delay={0.9}>
-                <h4 className="text-sm font-semibold text-yellow-400 mb-2">Step 2: Equity Bonus</h4>
-              </FadeSlide>
-              <FadeSlide delay={1.0}>
-                <div className="bg-gray-800 rounded p-3 text-sm space-y-1 mb-4">
-                  <div>Mean utility = {((Object.values(utilities) as number[]).reduce((s, v) => s + v, 0) / Math.max((Object.values(utilities) as number[]).length, 1)).toFixed(2)}</div>
-                  <div>Variance = {variance.toFixed(2)}</div>
-                  <div>Equity = 10 &times; (1 &minus; {variance.toFixed(2)}/100) = <span className="font-bold">{cwsData.equity_bonus.toFixed(2)}</span></div>
-                </div>
-              </FadeSlide>
-
-              {/* Step 3: CP */}
-              <FadeSlide delay={1.2}>
-                <h4 className="text-sm font-semibold text-yellow-400 mb-2">Step 3: Collaboration Points</h4>
-              </FadeSlide>
-              <FadeSlide delay={1.3}>
-                <div className="bg-gray-800 rounded p-3 text-sm mb-4">
-                  Total CP = {cpTotal}
-                </div>
-              </FadeSlide>
-
-              {/* Final CWS */}
-              <FadeSlide delay={1.5}>
-                <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                  <div className="text-center text-lg font-bold mb-2">
-                    CWS = {cwsData.weighted_sum} + {cwsData.equity_bonus.toFixed(2)} + {cwsData.cp_bonus} = {cwsData.total}
-                  </div>
-                  <div className="h-4 bg-gray-700 rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full rounded-full"
-                      style={{
-                        backgroundColor: cwsData.total >= NASH_PARAMS.cwsTarget ? '#27AE60' : '#F4D03F',
-                        boxShadow: cwsData.total >= NASH_PARAMS.cwsTarget ? '0 0 12px #27AE60' : 'none',
-                      }}
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min((cwsData.total / 120) * 100, 100)}%` }}
-                      transition={{ duration: 1.2, delay: 0.3 }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>0</span>
-                    <span className={cwsData.total >= NASH_PARAMS.cwsTarget ? 'text-green-400 font-bold' : 'text-yellow-400'}>
-                      Target: {NASH_PARAMS.cwsTarget}
-                    </span>
-                    <span>120</span>
-                  </div>
-                </div>
-              </FadeSlide>
-            </SectionWrapper>
-          )}
-
-          {/* ═══ 5e: Büchi Check ═══ */}
-          {visiblePhases.includes('5e') && (
-            <SectionWrapper key="5e" label="5e" title={SUB_PHASE_TITLES['5e']}>
-              <div className="space-y-4">
-                {players.map((player, pIdx) => {
-                  const roleId = player.roleId;
-                  const buchiObjs = BUCHI_OBJECTIVES[roleId] || [];
-                  const history = (session.buchiHistory?.[roleId] || {}) as Record<string, number>;
-                  const violation = buchiResult.violations.find(v => v.roleId === roleId);
-                  const inCrisis = !!violation;
-
-                  return (
-                    <FadeSlide key={player.id} delay={pIdx * 0.2}>
-                      <div
-                        className={`bg-gray-800 rounded-lg p-4 ${inCrisis ? 'border-2 border-red-500' : 'border border-gray-700'}`}
-                      >
-                        <div className="flex items-center gap-2 mb-3">
-                          <span
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: ROLE_COLORS[roleId] }}
-                          />
-                          <span className="font-semibold text-sm">{player.name} — {ROLE_LABELS[roleId]}</span>
-                          {inCrisis && (
-                            <span className="ml-auto text-xs bg-red-600 text-white px-2 py-0.5 rounded font-bold animate-pulse">
-                              CRISIS STATE &mdash; -2 all abilities
-                            </span>
-                          )}
-                        </div>
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="text-gray-500 text-xs border-b border-gray-700">
-                              <th className="text-left py-1">Objective</th>
-                              <th className="text-center py-1">Rounds Unsatisfied</th>
-                              <th className="text-center py-1">Current</th>
-                              <th className="text-center py-1">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {buchiObjs.map(obj => {
-                              const rounds = history[obj] || 0;
-                              const updatedRounds = buchiResult.updatedHistory[roleId]?.[obj] || 0;
-                              const sat = satObjectives[obj];
-                              let status: string;
-                              let statusColor: string;
-                              if (updatedRounds >= 2) {
-                                status = 'CRISIS';
-                                statusColor = 'text-red-400';
-                              } else if (updatedRounds === 1) {
-                                status = '\u26A0 Warning';
-                                statusColor = 'text-yellow-400';
-                              } else {
-                                status = '\u2713 Safe';
-                                statusColor = 'text-green-400';
-                              }
-
-                              return (
-                                <tr key={obj} className="border-b border-gray-700/50">
-                                  <td className="py-1.5">{OBJECTIVE_LABELS[obj]}</td>
-                                  <td className="text-center font-mono">{rounds}</td>
-                                  <td className="text-center">
-                                    <span className={sat ? 'text-green-400' : 'text-red-400'}>
-                                      {sat ? '\u2713' : '\u2717'}
-                                    </span>
-                                  </td>
-                                  <td className={`text-center font-semibold ${statusColor}`}>{status}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </FadeSlide>
-                  );
-                })}
-              </div>
-            </SectionWrapper>
-          )}
-
-          {/* ═══ 5f: CP Awards Ceremony ═══ */}
-          {visiblePhases.includes('5f') && (
-            <SectionWrapper key="5f" label="5f" title={SUB_PHASE_TITLES['5f']}>
-              <div className="space-y-4">
-                {players.map((player, pIdx) => {
-                  const awards = roundCPAwards[player.id] || [];
-                  const roundTotal = awards.reduce((s, a) => s + a.amount, 0);
-                  const newLevel = LEVEL_TABLE.find(
-                    l => l.cpRequired > (player.collaborationPoints - roundTotal) && l.cpRequired <= player.collaborationPoints
-                  );
-
-                  return (
-                    <FadeSlide key={player.id} delay={pIdx * 0.15}>
-                      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: ROLE_COLORS[player.roleId] }}
-                          />
-                          <span className="font-semibold text-sm">{player.name}</span>
-                          <span className="text-xs text-gray-500">{ROLE_LABELS[player.roleId]}</span>
-                          <span className="ml-auto font-mono text-sm">
-                            Total CP: <span className="text-yellow-400 font-bold">{player.collaborationPoints}</span>
-                          </span>
-                        </div>
-                        {awards.length === 0 ? (
-                          <p className="text-xs text-gray-500 italic">No CP earned this round.</p>
-                        ) : (
-                          <div className="space-y-1">
-                            {awards.map((award, aIdx) => (
-                              <motion.div
-                                key={aIdx}
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: pIdx * 0.15 + aIdx * 0.1 }}
-                                className="flex items-center gap-2 text-sm"
-                              >
-                                <span className="text-yellow-400 font-bold w-8 text-right">+{award.amount}</span>
-                                <span className="text-gray-300">{award.reason}</span>
-                              </motion.div>
-                            ))}
-                            <div className="text-xs text-right text-gray-400 pt-1 border-t border-gray-700">
-                              Round total: +{roundTotal} CP
-                            </div>
-                          </div>
-                        )}
-                        {newLevel && (
-                          <motion.div
-                            initial={{ scale: 0.8, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            transition={{ delay: pIdx * 0.15 + 0.5, type: 'spring' }}
-                            className="mt-3 bg-yellow-900/40 border border-yellow-500/50 rounded-lg p-3 text-center"
-                          >
-                            <div className="text-lg font-bold text-yellow-400">LEVEL UP!</div>
-                            <div className="text-sm text-yellow-200">
-                              Level {newLevel.level} &mdash; Proficiency +{newLevel.proficiencyBonus}
-                              {newLevel.newSkill && ', New Skill'}
-                              {newLevel.abilityBonus && ', +1 Ability'}
-                              , Hand size {newLevel.handSize}
-                            </div>
-                          </motion.div>
-                        )}
-                      </div>
-                    </FadeSlide>
-                  );
-                })}
-              </div>
-            </SectionWrapper>
-          )}
-
-          {/* ═══ 5g: Nash Check — The Final Whistle ═══ */}
-          {visiblePhases.includes('5g') && (
-            <SectionWrapper key="5g" label="5g" title={SUB_PHASE_TITLES['5g']}>
-              {/* Q1 */}
-              <FadeSlide delay={0.1}>
-                <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 mb-4">
-                  <h4 className="font-semibold text-sm mb-2 text-blue-400">
-                    Q1 — Individual Thresholds
-                  </h4>
-                  <div className="space-y-1">
-                    {players.map(p => {
-                      const u = utilities[p.roleId] ?? 0;
-                      const t = SURVIVAL_THRESHOLDS[p.roleId];
-                      const passes = u >= t;
-                      return (
-                        <div key={p.id} className="flex items-center gap-2 text-sm">
-                          <span className="w-28">{ROLE_LABELS[p.roleId]}</span>
-                          <span className="font-mono">u={u} &ge; T={t}</span>
-                          <span className={passes ? 'text-green-400' : 'text-red-400'}>
-                            {passes ? '\u2713' : '\u2717'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className={`mt-2 text-sm font-bold ${q1.passed ? 'text-green-400' : 'text-red-400'}`}>
-                    Overall: {q1.passed ? 'PASSES' : 'FAILS'}
-                  </div>
-                </div>
-              </FadeSlide>
-
-              {/* Q2 */}
-              <FadeSlide delay={0.5}>
-                <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 mb-4">
-                  <h4 className="font-semibold text-sm mb-2 text-purple-400">
-                    Q2 — No Profitable Deviation
-                  </h4>
-                  <div className="space-y-1">
-                    {players.map(p => {
-                      const type = PLAYER_TYPE[p.roleId];
-                      if (type === 'S-FIXED') {
-                        return (
-                          <div key={p.id} className="flex items-center gap-2 text-sm text-gray-500">
-                            <span className="w-28">{ROLE_LABELS[p.roleId]}</span>
-                            <span>S-Fixed (strategy constrained) — skipped</span>
-                          </div>
-                        );
-                      }
-                      const u = utilities[p.roleId] ?? 0;
-                      // Best solo approximation: only revenue+access for isolation
-                      const soloSat: Record<ObjectiveId, boolean> = {
-                        safety: false, greenery: false, access: satObjectives.access,
-                        culture: false, revenue: satObjectives.revenue, community: false,
-                      };
-                      const soloU = (Object.entries(OBJECTIVE_WEIGHTS[p.roleId]) as [ObjectiveId, number][])
-                        .reduce((s, [obj, w]) => s + (soloSat[obj] ? w : 0), 0);
-                      const noProfitableDeviation = u >= soloU;
-                      return (
-                        <div key={p.id} className="flex items-center gap-2 text-sm">
-                          <span className="w-28">{ROLE_LABELS[p.roleId]}</span>
-                          <span className="font-mono text-xs">
-                            Solo={soloU}, Current={u}
-                          </span>
-                          <span className={noProfitableDeviation ? 'text-green-400' : 'text-red-400'}>
-                            {noProfitableDeviation ? '\u2713 NO deviation' : '\u2717 Could improve alone'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </FadeSlide>
-
-              {/* Q3 */}
-              <FadeSlide delay={0.9}>
-                <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 mb-4">
-                  <h4 className="font-semibold text-sm mb-2 text-orange-400">
-                    Q3 — Equity + CWS
-                  </h4>
-                  <div className="space-y-1 text-sm">
-                    <div className="flex items-center gap-2">
-                      <span>Variance = {q3.variance.toFixed(2)} &le; {NASH_PARAMS.equityBandK}</span>
-                      <span className={q3.variance <= NASH_PARAMS.equityBandK ? 'text-green-400' : 'text-red-400'}>
-                        {q3.variance <= NASH_PARAMS.equityBandK ? '\u2713' : '\u2717'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span>CWS = {cwsData.total} &ge; {NASH_PARAMS.cwsTarget}</span>
-                      <span className={q3.cws_above_target ? 'text-green-400' : 'text-red-400'}>
-                        {q3.cws_above_target ? '\u2713' : '\u2717'}
-                      </span>
-                    </div>
-                    {!q3.passed && q1.failing_players.length > 0 && (
-                      <div className="mt-2 text-xs text-red-300">
-                        Dragged down by: {q1.failing_players.map(f => ROLE_LABELS[f.roleId]).join(', ')}.
-                        Prioritize their objectives next round.
-                      </div>
-                    )}
-                  </div>
-                  <div className={`mt-2 text-sm font-bold ${q3.passed ? 'text-green-400' : 'text-red-400'}`}>
-                    Overall: {q3.passed ? 'PASSES' : 'FAILS'}
-                  </div>
-                </div>
-              </FadeSlide>
-
-              {/* DNE Verdict */}
-              <FadeSlide delay={1.3}>
-                <DNEVerdict
-                  endCondition={endCondition}
-                  cwsTotal={cwsData.total}
-                  q1Passed={q1.passed}
-                  q3Passed={q3.passed}
-                />
-              </FadeSlide>
-
-              {/* Continue button */}
-              <FadeSlide delay={1.8}>
-                <div className="flex justify-center mt-6">
-                  <button
-                    onClick={handleComplete}
-                    className="px-8 py-3 rounded-lg text-lg font-bold transition-all hover:scale-105"
-                    style={{
-                      backgroundColor: endCondition === 'full_dne' ? '#F1C40F' :
-                        endCondition === 'partial' ? '#95A5A6' :
-                        endCondition === 'veto_deadlock' ? '#C0392B' :
-                        '#3498DB',
-                      color: endCondition === 'full_dne' ? '#000' : '#FFF',
-                    }}
-                  >
-                    {endCondition === 'continue' ? 'Continue to Next Round' : 'View Final Results'}
-                  </button>
-                </div>
-              </FadeSlide>
-            </SectionWrapper>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-};
-
-// ─── Sub-components ─────────────────────────────────────────────
-
-const SectionWrapper: React.FC<{
-  label: string;
-  title: string;
-  children: React.ReactNode;
-}> = ({ label, title, children }) => (
-  <motion.section
-    initial={{ opacity: 0, y: 30 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.6 }}
-    className="pb-6"
-  >
-    <div className="flex items-center gap-3 mb-4">
-      <span className="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded">{label}</span>
-      <h3 className="text-lg font-bold">{title}</h3>
-    </div>
-    {children}
-  </motion.section>
-);
-
-const ConditionBadge: React.FC<{ condition: ZoneCondition }> = ({ condition }) => (
-  <span
-    className="text-xs font-bold px-2 py-0.5 rounded uppercase"
-    style={{
-      backgroundColor: `${CONDITION_COLORS[condition]}22`,
-      color: CONDITION_COLORS[condition],
-      border: `1px solid ${CONDITION_COLORS[condition]}44`,
-    }}
-  >
-    {condition}
-  </span>
-);
-
-const DNEVerdict: React.FC<{
-  endCondition: string;
-  cwsTotal: number;
-  q1Passed: boolean;
-  q3Passed: boolean;
-}> = ({ endCondition, cwsTotal, q1Passed, q3Passed }) => {
-  const configs: Record<string, { bg: string; border: string; text: string; title: string; desc: string }> = {
-    full_dne: {
-      bg: 'bg-yellow-900/30',
-      border: 'border-yellow-500',
-      text: 'text-yellow-400',
-      title: 'NASH EQUILIBRIUM ACHIEVED!',
-      desc: `CWS ${cwsTotal} \u2265 85, all thresholds met, equity in band. Gold standard ending!`,
-    },
-    partial: {
-      bg: 'bg-gray-700/30',
-      border: 'border-gray-400',
-      text: 'text-gray-300',
-      title: 'Partial Success',
-      desc: `CWS ${cwsTotal} \u2265 60 but full DNE not achieved. ${!q1Passed ? 'Some players below threshold.' : ''} ${!q3Passed ? 'Equity/CWS check failed.' : ''}`,
-    },
-    time_ends: {
-      bg: 'bg-orange-900/30',
-      border: 'border-orange-500',
-      text: 'text-orange-400',
-      title: 'Time Expired',
-      desc: 'Final round reached. The community must live with the current outcome.',
-    },
-    veto_deadlock: {
-      bg: 'bg-red-900/30',
-      border: 'border-red-500',
-      text: 'text-red-400',
-      title: 'Veto Deadlock',
-      desc: 'All players are in B\u00FCchi crisis. The city planning process has stalled.',
-    },
-    continue: {
-      bg: 'bg-blue-900/30',
-      border: 'border-blue-500',
-      text: 'text-blue-400',
-      title: 'Round Complete',
-      desc: 'The game continues. Review the Nash feedback and plan your next moves.',
-    },
-  };
-
-  const cfg = configs[endCondition] || configs.continue;
-
-  return (
-    <div className={`${cfg.bg} border-2 ${cfg.border} rounded-xl p-6 text-center`}>
-      {endCondition === 'full_dne' && (
-        <motion.div
-          className="text-4xl mb-2"
-          animate={{ rotate: [0, -5, 5, -5, 0], scale: [1, 1.1, 1] }}
-          transition={{ duration: 1, repeat: 2 }}
-        >
-          {'\u2728\u2728\u2728'}
-        </motion.div>
       )}
-      <h2 className={`text-2xl font-black ${cfg.text} mb-2`}>{cfg.title}</h2>
-      <p className="text-sm text-gray-300">{cfg.desc}</p>
+
+      {/* Final button */}
+      {finished && (
+        <FadeSlide delay={0.3}>
+          <div className="flex justify-center pt-4 pb-8">
+            <button
+              onClick={handleComplete}
+              className={`text-white font-black text-base px-8 py-3 rounded-xl shadow-xl transition-colors ${
+                isGameEnd
+                  ? 'bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400'
+                  : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500'
+              }`}
+            >
+              {isGameEnd ? 'Proceed to Results \u2192' : 'Continue to Next Round \u2192'}
+            </button>
+          </div>
+        </FadeSlide>
+      )}
     </div>
   );
-};
-
-export default ScoringPhase;
+}

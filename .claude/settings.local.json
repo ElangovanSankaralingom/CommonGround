@@ -7,7 +7,8 @@
       "Bash(ls:*)",
       "Bash(npx tsc:*)",
       "Bash(timeout 8 npx vite --host)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(timeout 6 npx vite)"
     ]
   }
 }
