@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { RoleId, RoleDefinition, AbilityScores, SkillId } from '../../core/models/types';
-import { QUESTION_BANK, computeCharacterSheet, ROLE_DEFAULT_ABILITIES, ROLE_TOTALS, type CharacterCreationResult, type BehavioralProfile } from '../../core/engine/characterQuestionnaire';
+import { QUESTION_BANK, computeCharacterSheet, randomizeCharacterSheet, ROLE_DEFAULT_ABILITIES, ROLE_TOTALS, type CharacterCreationResult, type BehavioralProfile } from '../../core/engine/characterQuestionnaire';
 import { OBJECTIVE_WEIGHTS, BUCHI_OBJECTIVES, SURVIVAL_THRESHOLDS, PLAYER_TYPE, WELFARE_WEIGHTS, SKILL_ABILITY_MAP, type ObjectiveId } from '../../core/models/constants';
 
 interface CharacterQuestionnaireProps {
@@ -49,6 +49,23 @@ export function CharacterQuestionnaire({ playerName, playerIndex, totalPlayers, 
 
   const question = QUESTION_BANK[currentQ];
 
+  const handleRandomize = useCallback(() => {
+    console.log('Randomizing character for', playerName, role.id);
+    const randomResult = randomizeCharacterSheet(role.id);
+    setResult(randomResult);
+    // Skip questions and computing — go straight to reveal
+    setPhase('computing');
+    setTimeout(() => {
+      setPhase('reveal');
+      let step = 0;
+      const revealInterval = setInterval(() => {
+        step++;
+        setRevealStep(step);
+        if (step >= 6) clearInterval(revealInterval);
+      }, 400); // Slightly faster for randomized
+    }, 1200);
+  }, [playerName, role.id]);
+
   const handleAnswer = useCallback((answerId: string) => {
     setSelectedAnswer(answerId);
     // Auto-advance after 0.8s
@@ -83,10 +100,20 @@ export function CharacterQuestionnaire({ playerName, playerIndex, totalPlayers, 
   if (phase === 'questions') {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center max-w-3xl mx-auto">
-        {/* Progress */}
-        <div className="w-full flex items-center justify-between mb-8">
+        {/* Progress + Randomize button */}
+        <div className="w-full flex items-center justify-between mb-4">
           <span className="text-stone-500 text-sm">{playerName} &middot; {role.name}</span>
-          <span className="text-stone-400 text-sm font-mono">{currentQ + 1} of {QUESTION_BANK.length}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-stone-400 text-sm font-mono">{currentQ + 1} of {QUESTION_BANK.length}</span>
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-stone-500/50 text-stone-400 hover:text-stone-200 hover:border-stone-400 hover:bg-stone-700/50 transition-all"
+              onClick={handleRandomize}
+              title="Skip questions and generate a random character for this player"
+            >
+              <span>🎲</span>
+              <span>Randomize</span>
+            </button>
+          </div>
         </div>
         <div className="w-full h-1.5 bg-stone-700 rounded-full mb-8 overflow-hidden">
           <motion.div className="h-full rounded-full" style={{ backgroundColor: role.color }} animate={{ width: `${((currentQ + 1) / QUESTION_BANK.length) * 100}%` }} transition={{ duration: 0.3 }} />

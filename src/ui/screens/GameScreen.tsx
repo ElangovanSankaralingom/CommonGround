@@ -8,8 +8,12 @@ import ChallengeDisplay from '../cards/ChallengeDisplay';
 import StagingArea from '../cards/StagingArea';
 import { GameGraphView } from '../components/GameGraphView';
 import { NashDashboard } from '../components/NashDashboard';
-import type { RoleId, ResourcePool, ResourceType, Player } from '../../core/models/types';
-import { CHALLENGE_CATEGORY_COLORS } from '../../core/models/constants';
+import { ZoneInfoPanel } from '../components/ZoneInfoPanel';
+import { FacilitatorDashboard } from '../components/FacilitatorDashboard';
+import { SeriesBuilder } from '../components/SeriesBuilder';
+import { BuchiWarningPanel } from '../components/BuchiWarningPanel';
+import type { RoleId, ResourcePool, ResourceType, Player, Zone } from '../../core/models/types';
+import { CHALLENGE_CATEGORY_COLORS, WELFARE_WEIGHTS, OBJECTIVE_WEIGHTS, BUCHI_OBJECTIVES, SURVIVAL_THRESHOLDS, PLAYER_TYPE, type ObjectiveId } from '../../core/models/constants';
 
 // ── Role metadata ────────────────────────────────────────────────
 
@@ -195,7 +199,7 @@ function ActionBar({
                      hover:bg-amber-400 transition-colors shadow-md"
           onClick={onRollDie}
         >
-          Roll 2d6 Event Die
+          Roll Event Die
         </button>
       )}
       {/* When event result is showing, the full results panel has the Continue button */}
@@ -580,26 +584,30 @@ function VoteModal({
   );
 }
 
-// Full Event Roll Results Panel (Bug 4 fix)
+// Event Roll Results Panel — 1d6 per spec Part 3.1
 function EventResultsPanel({
+  eventDieResult,
   eventRollResult,
   players,
   onContinue,
 }: {
+  eventDieResult: { value: number; outcome: string } | null;
   eventRollResult: NonNullable<typeof import('../../core/models/types').GameSession.prototype.eventRollResult>;
   players: Player[];
   onContinue: () => void;
 }) {
-  const { dice, total, eventEntry, phaseTriggered, affectedPlayers: affectedPlayerIds } = eventRollResult;
+  const { eventEntry, phaseTriggered, affectedPlayers: affectedPlayerIds } = eventRollResult;
+  const dieValue = eventDieResult?.value || 0;
+  const outcome = eventDieResult?.outcome || 'no_event';
 
-  const isNegative = total <= 5;
-  const isPositive = total >= 8 && total !== 7;
-  const isNeutral = total === 7;
+  const isNegative = outcome === 'negative_event';
+  const isPositive = outcome === 'positive_event';
+  const isNeutral = outcome === 'no_event';
   const bgTint = isNegative ? 'from-red-900/20 to-stone-800'
     : isPositive ? 'from-emerald-900/20 to-stone-800'
     : 'from-stone-700/20 to-stone-800';
   const badgeColor = isNegative ? 'bg-red-500' : isPositive ? 'bg-emerald-500' : 'bg-stone-500';
-  const badgeLabel = isNegative ? 'Negative Event' : isPositive ? 'Positive Event' : 'Neutral';
+  const badgeLabel = isNegative ? '\u26A0\uFE0F Negative Event' : isPositive ? '\u2B50 Positive Event' : '\u2796 Neutral \u2014 No External Event';
 
   // Resolve affected player names
   const affectedPlayerNames = affectedPlayerIds
@@ -625,22 +633,21 @@ function EventResultsPanel({
       animate={{ scale: 1, opacity: 1 }}
       transition={{ type: 'spring', damping: 15 }}
     >
-      {/* a) THE ROLL */}
+      {/* a) THE ROLL — Single d6 */}
       <div className="text-center">
-        <p className="text-stone-500 text-xs uppercase tracking-wider mb-2">Event Roll</p>
-        <div className="flex items-center justify-center gap-3">
-          <motion.div className="w-14 h-14 rounded-xl bg-stone-600 flex items-center justify-center text-2xl font-black border-2 border-stone-500" initial={{ rotateZ: -360 }} animate={{ rotateZ: 0 }} transition={{ duration: 0.5, type: 'spring' }}>
-            {dice[0]}
-          </motion.div>
-          <span className="text-stone-400 text-xl font-bold">+</span>
-          <motion.div className="w-14 h-14 rounded-xl bg-stone-600 flex items-center justify-center text-2xl font-black border-2 border-stone-500" initial={{ rotateZ: 360 }} animate={{ rotateZ: 0 }} transition={{ duration: 0.5, type: 'spring', delay: 0.15 }}>
-            {dice[1]}
-          </motion.div>
-          <span className="text-stone-400 text-xl font-bold">=</span>
-          <motion.div className="w-14 h-14 rounded-xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-3xl font-black text-amber-300" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.3, type: 'spring' }}>
-            {total}
-          </motion.div>
-        </div>
+        <p className="text-stone-500 text-xs uppercase tracking-wider mb-2">Event Die (1d6)</p>
+        <motion.div
+          className={`w-20 h-20 mx-auto rounded-xl flex items-center justify-center text-4xl font-black border-3 shadow-lg ${
+            isNegative ? 'bg-red-900/30 border-red-500 text-red-300' :
+            isPositive ? 'bg-emerald-900/30 border-emerald-500 text-emerald-300' :
+            'bg-stone-600 border-stone-500 text-stone-200'
+          }`}
+          initial={{ rotateZ: -720, scale: 0 }}
+          animate={{ rotateZ: 0, scale: 1 }}
+          transition={{ duration: 0.8, type: 'spring', damping: 12 }}
+        >
+          {dieValue}
+        </motion.div>
       </div>
 
       {/* b) EVENT NAME */}
@@ -732,6 +739,8 @@ export default function GameScreen() {
   } = useGameStore();
 
   const [showStagingArea, setShowStagingArea] = useState(false);
+  const [selectedZoneForPanel, setSelectedZoneForPanel] = useState<string | null>(null);
+  const [showFacilitatorDashboard, setShowFacilitatorDashboard] = useState(false);
 
   if (!session) return null;
 
@@ -769,8 +778,10 @@ export default function GameScreen() {
   const handleZoneClick = useCallback(
     (zoneId: string) => {
       selectZone(zoneId === selectedZoneId ? null : zoneId);
+      // Open zone info panel on click (Fix 2)
+      setSelectedZoneForPanel(zoneId === selectedZoneForPanel ? null : zoneId);
     },
-    [selectZone, selectedZoneId]
+    [selectZone, selectedZoneId, selectedZoneForPanel]
   );
 
   const handleTradePropose = useCallback(
@@ -800,6 +811,7 @@ export default function GameScreen() {
             exit={{ opacity: 0 }}
           >
             <EventResultsPanel
+              eventDieResult={session.eventDieResult}
               eventRollResult={session.eventRollResult as any}
               players={players}
               onContinue={() => {
@@ -813,6 +825,14 @@ export default function GameScreen() {
 
       {/* HUD Buttons (top-right) */}
       <div className="absolute top-16 right-4 z-20 flex flex-col gap-2">
+        {/* Facilitator Dashboard Button */}
+        <button
+          className="w-10 h-10 rounded-full bg-stone-700/80 border border-stone-600 flex items-center justify-center hover:bg-stone-600 transition-colors"
+          onClick={() => setShowFacilitatorDashboard(true)}
+          title="Facilitator Dashboard (Research Data)"
+        >
+          <span className="text-stone-300 text-sm">{'\u{1F4CB}'}</span>
+        </button>
         {/* Nash Dashboard Button */}
         {session.nashEngineOutput && (
           <button
@@ -1117,6 +1137,59 @@ export default function GameScreen() {
           />
         )}
       </AnimatePresence>
+
+      {/* Facilitator Dashboard Overlay */}
+      <AnimatePresence>
+        {showFacilitatorDashboard && (
+          <FacilitatorDashboard
+            session={session}
+            onClose={() => setShowFacilitatorDashboard(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Zone Info Panel (Fix 2 — click to open) */}
+      <AnimatePresence>
+        {selectedZoneForPanel && session.board.zones[selectedZoneForPanel] && (
+          <ZoneInfoPanel
+            zone={session.board.zones[selectedZoneForPanel]}
+            players={players.map(p => ({ id: p.id, name: p.name, roleId: p.roleId }))}
+            adjacentZones={(session.board.adjacency[selectedZoneForPanel] || []).map(adjId => ({
+              id: adjId,
+              name: session.board.zones[adjId]?.name || adjId,
+            }))}
+            onClose={() => setSelectedZoneForPanel(null)}
+            onNavigate={(zoneId) => { setSelectedZoneForPanel(zoneId); selectZone(zoneId); }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Series Builder (Fix 4 — visible during deliberation and action phases) */}
+      {(isDelibPhase || isActionPhase) && activeChallenge && (
+        <div className="px-4 pb-2">
+          <SeriesBuilder
+            players={players}
+            activeChallenge={activeChallenge}
+            seriesCards={session.activeSeries?.cards || []}
+            coalitionBonus={session.activeCoalitions.length > 0 ? 2 : 0}
+            multiRoleBonus={session.activeSeries ? (new Set(session.activeSeries.cards.map(c => {
+              const p = Object.values(session.players).find(pl => pl.id === c.playerId);
+              return p?.roleId;
+            }))).size >= 3 ? 3 : 0 : 0}
+          />
+        </div>
+      )}
+
+      {/* Büchi Warning Panel (Fix 4 Step 7) */}
+      {isDelibPhase && (
+        <div className="px-4 pb-2">
+          <BuchiWarningPanel
+            players={players}
+            zones={session.board.zones}
+            buchiHistory={session.buchiHistory || {}}
+          />
+        </div>
+      )}
 
       {/* Game Graph View (Fix 6) */}
       <AnimatePresence>

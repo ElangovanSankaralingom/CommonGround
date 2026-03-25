@@ -158,7 +158,15 @@ function checkPenaltyCondition(player: Player, condition: string, gameState: Gam
   }
 }
 
-// ─── PHASE 2: Event Roll (Fix 3: 2d6) ───────────────────────
+// ─── PHASE 2: Event Roll ─────────────────────────────────────
+// Per spec Part 3.1: 1d6 event die. 1-2=Negative, 3-4=Neutral, 5-6=Positive.
+function rollEventDie1d6(seed: number): { die: number; nextSeed: number } {
+  const { value, nextSeed } = seededRandom(seed);
+  const die = Math.floor(value * 6) + 1;
+  return { die, nextSeed };
+}
+
+// Legacy 2d6 support (kept for backwards compat with event table)
 function rollEventDie2d6(seed: number): { dice: [number, number]; total: number; nextSeed: number } {
   const { value: v1, nextSeed: s1 } = seededRandom(seed);
   const { value: v2, nextSeed: s2 } = seededRandom(s1);
@@ -168,48 +176,64 @@ function rollEventDie2d6(seed: number): { dice: [number, number]; total: number;
 }
 
 function processEventRoll(gameState: GameSession): GameSession {
-  const { dice, total, nextSeed } = rollEventDie2d6(gameState.rngSeed);
+  // Per spec Part 3.1: Roll 1d6. 1-2=Negative, 3-4=Neutral, 5-6=Positive.
+  const { die, nextSeed } = rollEventDie1d6(gameState.rngSeed);
 
-  // Find matching event entry
+  // Determine event type from 1d6
+  const outcome: EventDieResult['outcome'] = die <= 2 ? 'negative_event' : die >= 5 ? 'positive_event' : 'no_event';
+
+  // Also roll 2d6 for the event table lookup (determines specific event details)
+  const { dice, total, nextSeed: nextSeed2 } = rollEventDie2d6(nextSeed);
   const eventEntry = EVENT_TABLE.find(e => e.roll === total) || EVENT_TABLE.find(e => e.roll === 7)!;
 
   // Determine affected players
   const affectedPlayers: string[] = [];
-  if (eventEntry.requiredPlayers === 'all') {
-    affectedPlayers.push(...Object.keys(gameState.players));
-  } else {
-    for (const [pid, player] of Object.entries(gameState.players)) {
-      if ((eventEntry.requiredPlayers as RoleId[]).includes(player.roleId)) {
-        affectedPlayers.push(pid);
+  if (outcome !== 'no_event') {
+    if (eventEntry.requiredPlayers === 'all') {
+      affectedPlayers.push(...Object.keys(gameState.players));
+    } else {
+      for (const [pid, player] of Object.entries(gameState.players)) {
+        if ((eventEntry.requiredPlayers as RoleId[]).includes(player.roleId)) {
+          affectedPlayers.push(pid);
+        }
       }
     }
   }
 
   const eventRollResult: EventRollResult = {
-    dice,
+    dice: [die, dice[1]], // First value is the 1d6 result, second is from 2d6 for table
     total,
-    eventEntry,
+    eventEntry: outcome === 'no_event'
+      ? { roll: die, name: 'Neutral Round', zoneEffect: 'No zone effect', playerEffect: 'The environment is stable this round.', phaseTriggered: 'individual_only', requiredPlayers: 'all' }
+      : eventEntry,
     affectedZones: [],
     affectedPlayers,
-    phaseTriggered: eventEntry.phaseTriggered,
+    phaseTriggered: outcome === 'no_event' ? 'individual_only' : eventEntry.phaseTriggered,
     deliberationPlayerCount: affectedPlayers.length,
   };
 
-  // Legacy EventDieResult for backward compat
   const eventDieResult: EventDieResult = {
-    value: total,
-    outcome: total <= 4 ? 'negative_event' : total >= 9 ? 'positive_event' : 'no_event',
+    value: die,
+    outcome,
   };
 
   // Apply zone effects based on the event
   let state: GameSession = {
     ...gameState,
-    rngSeed: nextSeed,
+    rngSeed: nextSeed2,
     eventDieResult,
     eventRollResult,
   };
 
-  state = applyEventTableEffects(state, eventEntry, total);
+  // For positive/negative events, draw from event card deck AND apply table effects
+  if (outcome === 'negative_event') {
+    state = drawEventCard(state, 'negative');
+    state = applyEventTableEffects(state, eventRollResult.eventEntry, total);
+  } else if (outcome === 'positive_event') {
+    state = drawEventCard(state, 'positive');
+    state = applyEventTableEffects(state, eventRollResult.eventEntry, total);
+  }
+  // Neutral: no effects applied
 
   return state;
 }

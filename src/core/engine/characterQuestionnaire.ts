@@ -403,3 +403,20 @@ function getDefaultProficiencies(roleId: RoleId): SkillId[] {
   };
   return map[roleId] || [];
 }
+
+// ─── Randomize Helper ────────────────────────────────────────
+
+/**
+ * Generate a random character sheet by randomly selecting one of the 4 answers
+ * for each of the 12 questions. Returns the same CharacterCreationResult as
+ * the manual flow, but with a `randomized` flag for telemetry.
+ */
+export function randomizeCharacterSheet(roleId: RoleId): CharacterCreationResult & { randomized: true } {
+  const randomAnswers = QUESTION_BANK.map(q => {
+    const idx = Math.floor(Math.random() * q.answers.length);
+    return { questionId: q.id, answerId: q.answers[idx].id };
+  });
+
+  const result = computeCharacterSheet(roleId, randomAnswers);
+  return { ...result, randomized: true as const };
+}

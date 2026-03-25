@@ -12,7 +12,7 @@ import type {
 } from '../../core/models/types';
 import { SKILL_ABILITY_MAP } from '../../core/models/constants';
 import { CharacterQuestionnaire } from '../components/CharacterQuestionnaire';
-import type { CharacterCreationResult } from '../../core/engine/characterQuestionnaire';
+import { randomizeCharacterSheet, type CharacterCreationResult } from '../../core/engine/characterQuestionnaire';
 
 // ── Role data ──────────────────────────────────────────────────
 
@@ -276,7 +276,8 @@ export default function SetupScreen() {
 
   // Step 2 state — questionnaire-based character creation
   const [characterIndex, setCharacterIndex] = useState(0);
-  const [characterResults, setCharacterResults] = useState<CharacterCreationResult[]>([]);
+  const [characterResults, setCharacterResults] = useState<(CharacterCreationResult & { randomized?: boolean })[]>([]);
+  const [randomizeAllProgress, setRandomizeAllProgress] = useState(-1); // -1 = not started, 0-4 = animating, 5 = done
   // Legacy compat
   const [characterCustomizations, setCharacterCustomizations] = useState<CharacterCustomization[]>([]);
 
@@ -551,6 +552,35 @@ export default function SetupScreen() {
       }))
     );
   }, []);
+
+  // ── Randomize All Players handler ─────────────────────────────
+  const handleRandomizeAllPlayers = useCallback(() => {
+    if (validAssignments.length < 5) return;
+    console.log('Randomizing all 5 player characters...');
+    setRandomizeAllProgress(0);
+
+    // Generate all 5 characters with staggered animation
+    const allResults: (CharacterCreationResult & { randomized?: boolean })[] = [];
+    let idx = 0;
+    const interval = setInterval(() => {
+      const assignment = validAssignments[idx];
+      const result = randomizeCharacterSheet(assignment.roleId);
+      allResults.push(result);
+      setRandomizeAllProgress(idx + 1);
+      console.log(`  Generated ${assignment.name} (${assignment.roleId}): total=${result.totalScoreVerification.actual}, style=${result.behavioralProfile.coalitionStyle}`);
+
+      idx++;
+      if (idx >= validAssignments.length) {
+        clearInterval(interval);
+        // All done — save results and advance
+        setTimeout(() => {
+          setCharacterResults(allResults);
+          setCharacterIndex(validAssignments.length); // Show summary
+          setRandomizeAllProgress(validAssignments.length);
+        }, 600);
+      }
+    }, 500);
+  }, [validAssignments]);
 
   // ── Character customization handlers (Bug 2) ──────────────────
 
@@ -867,8 +897,54 @@ export default function SetupScreen() {
           {/* ── Step 2: Questionnaire-Based Character Creation ── */}
           {step === 2 && (
             <motion.div key="step-2" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }}>
-              {characterIndex < validAssignments.length && currentCharRole ? (
-                <CharacterQuestionnaire
+              {/* Randomize All Players — shown when no player has started yet */}
+              {randomizeAllProgress >= 0 && randomizeAllProgress < validAssignments.length ? (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16 space-y-8">
+                  <h2 className="text-2xl font-serif font-bold text-amber-300">Generating Characters...</h2>
+                  <div className="grid grid-cols-5 gap-3 max-w-3xl mx-auto">
+                    {validAssignments.map((a, i) => {
+                      const role = ROLE_MAP[a.roleId];
+                      const isGenerated = i < randomizeAllProgress;
+                      const isActive = i === randomizeAllProgress;
+                      return (
+                        <motion.div
+                          key={i}
+                          className={`rounded-xl p-4 text-center border-2 transition-all ${isGenerated ? 'border-emerald-500/50 bg-emerald-900/10' : isActive ? 'border-amber-400/50 bg-amber-900/10' : 'border-stone-600/30 bg-stone-800/30'}`}
+                          animate={isActive ? { scale: [1, 1.05, 1] } : {}}
+                          transition={isActive ? { duration: 0.4, repeat: Infinity } : {}}
+                        >
+                          <div className="text-3xl mb-2">{role.icon}</div>
+                          <p className="text-xs font-bold" style={{ color: role.color }}>{a.name}</p>
+                          <p className="text-[10px] text-stone-500">{role.name}</p>
+                          {isGenerated && (
+                            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="mt-2">
+                              <span className="text-emerald-400 text-sm font-bold">{'\u2713'} Generated</span>
+                            </motion.div>
+                          )}
+                          {isActive && (
+                            <p className="mt-2 text-amber-400 text-xs animate-pulse">Creating...</p>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              ) : characterIndex < validAssignments.length && currentCharRole && characterResults.length < validAssignments.length ? (
+                <div>
+                  {/* Randomize All button — only show when first player hasn't started yet */}
+                  {characterIndex === 0 && characterResults.length === 0 && (
+                    <div className="flex justify-end mb-4">
+                      <button
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-stone-500/50 text-stone-400 hover:text-amber-300 hover:border-amber-400/50 hover:bg-amber-900/10 transition-all"
+                        onClick={handleRandomizeAllPlayers}
+                        title="Generate random characters for all 5 players and proceed to briefing"
+                      >
+                        <span>🎲</span>
+                        <span>Randomize All 5 Players</span>
+                      </button>
+                    </div>
+                  )}
+                  <CharacterQuestionnaire
                   key={characterIndex}
                   playerName={validAssignments[characterIndex].name}
                   playerIndex={characterIndex}
@@ -887,6 +963,7 @@ export default function SetupScreen() {
                     }
                   }}
                 />
+                </div>
               ) : characterResults.length === validAssignments.length ? (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-12">
                   <h2 className="text-3xl font-serif font-bold text-emerald-400 mb-4">All Characters Created</h2>
