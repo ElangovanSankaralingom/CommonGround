@@ -281,7 +281,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
       return {
         type: 'stable' as const,
         tint: 'transparent',
-        banner: '\u2796 STABLE \u2014 No external disruption this round.',
+        banner: '\u2796 STABLE \u2014 No external disruption this season.',
         bannerBg: 'bg-gray-800/60',
         bannerBorder: 'border-gray-500/50',
       };
@@ -393,7 +393,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
               transition={{ delay: 0.2 }}
               className="text-5xl font-serif font-bold text-amber-400 mb-4"
             >
-              Phase 1: Event Roll
+              Phase 1: The Winds of Change
             </motion.h1>
             <motion.p
               initial={{ y: 20, opacity: 0 }}
@@ -718,6 +718,54 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
               />
             </div>
 
+            {/* Ripple Effect Visualization */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.8 }}
+              className="w-full bg-white/5 rounded-xl border border-white/10 p-4 mb-4"
+            >
+              <h3 className="text-amber-400 text-sm font-semibold uppercase tracking-wide mb-3">
+                Ripple Effect — How this event cascades
+              </h3>
+              <div className="space-y-2">
+                {eventRollResult.affectedZones.map((zoneId) => {
+                  const adjacentZones = activeSession.board.adjacency[zoneId] || [];
+                  return adjacentZones.slice(0, 2).map((adjId) => {
+                    const adjZone = activeSession.board.zones[adjId];
+                    if (!adjZone) return null;
+                    return (
+                      <motion.div
+                        key={`${zoneId}-${adjId}`}
+                        initial={{ x: -20, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        transition={{ delay: 1.0 }}
+                        className="flex items-center gap-2 text-gray-300 text-sm"
+                      >
+                        <span className="text-gray-500">↳</span>
+                        <span>{activeSession.board.zones[zoneId]?.name}</span>
+                        <span className="text-gray-500">→</span>
+                        <span>{adjZone.name}</span>
+                        <span className="text-gray-500 text-xs">
+                          ({adjZone.condition} — at risk)
+                        </span>
+                      </motion.div>
+                    );
+                  });
+                })}
+              </div>
+              {outcomeInfo?.type === 'positive' && (
+                <p className="text-emerald-400/70 text-xs mt-3 italic">
+                  But resources alone can't fix the park. You'll need expertise, volunteers, and shared vision.
+                </p>
+              )}
+              {outcomeInfo?.type === 'negative' && (
+                <p className="text-red-400/70 text-xs mt-3 italic">
+                  The park's systems are connected. Neglect in one zone risks others.
+                </p>
+              )}
+            </motion.div>
+
             <motion.button
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -776,11 +824,11 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
               <span className="text-amber-400 text-2xl">&#10003;</span>
             </motion.div>
 
-            <h2 className="text-white text-2xl font-bold mb-2">Event Phase Complete</h2>
+            <h2 className="text-white text-2xl font-bold mb-2">The Winds Have Spoken</h2>
             <p className="text-gray-400 text-sm mb-8">
               {eventRollResult
                 ? `${eventRollResult.eventEntry.name} has been resolved`
-                : 'No event this round'}
+                : 'No event this season'}
             </p>
 
             <motion.button
@@ -789,7 +837,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
               onClick={onPhaseComplete}
               className="px-8 py-3 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-lg shadow-lg shadow-amber-500/30 transition-all"
             >
-              Continue to Phase 2: Challenge &rarr;
+              Continue to Phase 2: Investigate &rarr;
             </motion.button>
           </motion.div>
         )}
@@ -799,7 +847,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
       {/* Universal bottom navigation */}
       <PhaseNavigation
         canContinue={stage === 'continue' || stage === 'impact' || stage === 'discard'}
-        continueLabel="Continue to Phase 2: Challenge \u2192"
+        continueLabel="Continue to Phase 2: Investigate \u2192"
         onContinue={() => {
           console.log('PHASE TRANSITION: Event Roll → Challenge');
           onPhaseComplete();

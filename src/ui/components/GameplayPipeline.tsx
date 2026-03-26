@@ -108,7 +108,7 @@ export function GameplayPipeline({
           if (activeChallenge.failureConsequences.length === 0) return 'No specific penalties listed.';
           return activeChallenge.failureConsequences
             .map(c => c.type.replace(/_/g, ' '))
-            .join(', ') + '. Zone condition may degrade, CWS penalty applies.';
+            .join(', ') + '. Zone condition may degrade, SVS penalty applies.';
         },
       },
       {
@@ -129,10 +129,10 @@ export function GameplayPipeline({
       {
         q: 'Can this challenge be partially resolved?',
         getAnswer: () =>
-          'Full Success (exceed by 5+): +2 zone levels, full CWS bonus\n' +
+          'Full Success (exceed by 5+): +2 zone levels, full SVS bonus\n' +
           'Partial Success (exceed by 1-4): +1 zone level, 60% bonus\n' +
           'Narrow Success (exact match): +1 zone level, 40% bonus, extra cost\n' +
-          'Failure: consequences apply, difficulty escalates +2 next round',
+          'Failure: consequences apply, difficulty escalates +2 next season',
       },
     ];
 
@@ -244,7 +244,7 @@ export function GameplayPipeline({
                     <p className="text-[9px] text-stone-500">{ROLE_NAMES[p.roleId]}</p>
                   </div>
                   <span className={`text-[8px] px-1 py-0.5 rounded ${playerType === 'S-FIXED' ? 'bg-red-900/30 text-red-400' : 'bg-emerald-900/30 text-emerald-400'}`}>
-                    {playerType === 'S-FIXED' ? 'Fixed' : 'Free'}
+                    {playerType === 'S-FIXED' ? 'Guided' : 'Free'}
                   </span>
                 </div>
 
@@ -520,9 +520,9 @@ export function GameplayPipeline({
         >
           <h2 className="text-2xl font-serif font-bold" style={{ color: outcomeColor }}>{outcomeLabel}</h2>
           <p className="text-stone-400 text-sm mt-1">{activeChallenge.name}</p>
-          {outcome === 'full' && <p className="text-emerald-400 text-xs mt-2">Zone improved 2 levels | Full CWS bonus | All contributors +3 CP</p>}
-          {outcome === 'partial' && <p className="text-amber-400 text-xs mt-2">Zone improved 1 level | 60% CWS bonus | Contributors +2 CP</p>}
-          {outcome === 'narrow' && <p className="text-orange-400 text-xs mt-2">Zone improved 1 level | 40% CWS bonus | Extra resource cost</p>}
+          {outcome === 'full' && <p className="text-emerald-400 text-xs mt-2">Zone improved 2 levels | Full SVS bonus | All contributors +3 CP</p>}
+          {outcome === 'partial' && <p className="text-amber-400 text-xs mt-2">Zone improved 1 level | 60% SVS bonus | Contributors +2 CP</p>}
+          {outcome === 'narrow' && <p className="text-orange-400 text-xs mt-2">Zone improved 1 level | 40% SVS bonus | Extra resource cost</p>}
           {outcome === 'failure' && <p className="text-red-400 text-xs mt-2">Zone degrades | Resources lost | Threshold escalates +2</p>}
         </motion.div>
 
@@ -565,9 +565,9 @@ export function GameplayPipeline({
         {/* CWS Calculation */}
         {ne && (
           <div className="bg-stone-800/50 rounded-xl p-4 border border-amber-700/30">
-            <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">CWS Calculation</h3>
+            <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">SVS Calculation</h3>
             <div className="text-xs text-stone-300 font-mono space-y-1">
-              <p>CWS = {players.map(p => `${WELFARE_WEIGHTS[p.roleId]}\u00D7${ne.utilities[p.roleId] || 0}`).join(' + ')} + Equity + CP</p>
+              <p>SVS = {players.map(p => `${WELFARE_WEIGHTS[p.roleId]}\u00D7${ne.utilities[p.roleId] || 0}`).join(' + ')} + Equity + CP</p>
               <p className="text-stone-400">= {ne.cws.weighted_sum} + {ne.cws.equity_bonus.toFixed(1)} + {ne.cws.cp_bonus}</p>
               <p className="text-lg font-bold text-amber-300">= {ne.cws.total.toFixed(1)}</p>
             </div>
@@ -577,7 +577,7 @@ export function GameplayPipeline({
         {/* Nash Check */}
         {ne && (
           <div className="bg-stone-800/50 rounded-xl p-4 border border-stone-600/30">
-            <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Nash Equilibrium Check</h3>
+            <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Shared Balance Point Check</h3>
             <div className="grid grid-cols-3 gap-2">
               <div className={`rounded-lg p-3 ${ne.nash_q1.passed ? 'bg-emerald-900/20 border border-emerald-700/50' : 'bg-red-900/20 border border-red-700/50'}`}>
                 <span className="text-xs font-bold">Q1: Thresholds</span>
@@ -589,13 +589,13 @@ export function GameplayPipeline({
               </div>
               <div className={`rounded-lg p-3 ${ne.nash_q3.passed ? 'bg-emerald-900/20 border border-emerald-700/50' : 'bg-red-900/20 border border-red-700/50'}`}>
                 <span className="text-xs font-bold">Q3: Equity</span>
-                <p className="text-[10px] text-stone-400 mt-1">Var={ne.nash_q3.variance?.toFixed(1)} | CWS={ne.cws.total.toFixed(1)}</p>
+                <p className="text-[10px] text-stone-400 mt-1">Var={ne.nash_q3.variance?.toFixed(1)} | SVS={ne.cws.total.toFixed(1)}</p>
               </div>
             </div>
             {ne.dne_achieved && (
               <motion.div className="mt-3 text-center" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring' }}>
                 <span className="px-6 py-2 rounded-full bg-emerald-500/20 border-2 border-emerald-500 text-emerald-300 text-sm font-bold animate-pulse">
-                  NASH EQUILIBRIUM ACHIEVED
+                  SHARED BALANCE POINT ACHIEVED
                 </span>
               </motion.div>
             )}
@@ -608,7 +608,7 @@ export function GameplayPipeline({
             className="px-8 py-3 rounded-xl text-sm font-bold bg-amber-400 text-stone-900 hover:bg-amber-300 shadow-lg"
             onClick={onAdvancePhase}
           >
-            {session.currentRound >= session.totalRounds ? 'End Game' : 'Continue to Next Round'} {'\u2192'}
+            {session.currentRound >= session.totalRounds ? 'End Game' : 'Continue to Next Season'} {'\u2192'}
           </button>
         </div>
       </motion.div>

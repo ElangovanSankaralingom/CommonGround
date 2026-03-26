@@ -9,12 +9,12 @@ interface ChapterProps {
 type SectionId = 'phases' | 'roles' | 'resources' | 'conditions' | 'series' | 'scoring';
 
 const SECTIONS: { id: SectionId; title: string; icon: string }[] = [
-  { id: 'phases', title: 'Round Phases', icon: '🔄' },
+  { id: 'phases', title: 'Season Phases', icon: '🔄' },
   { id: 'roles', title: 'Role Summary', icon: '👥' },
   { id: 'resources', title: 'Resources', icon: '💎' },
   { id: 'conditions', title: 'Zone Conditions', icon: '🗺️' },
   { id: 'series', title: 'Series Rules', icon: '🃏' },
-  { id: 'scoring', title: 'CWS Scoring', icon: '📊' },
+  { id: 'scoring', title: 'SVS Scoring', icon: '📊' },
 ];
 
 export default function Chapter8({ onBack }: ChapterProps) {
@@ -66,10 +66,10 @@ export default function Chapter8({ onBack }: ChapterProps) {
           <div className="space-y-2">
             {[
               { phase: '1. Event', desc: 'Roll die. 1-2: negative event, 3-4: nothing, 5-6: positive event.', color: '#E74C3C' },
-              { phase: '2. Challenge', desc: 'Draw a challenge card. It targets zones and escalates each round.', color: '#E67E22' },
+              { phase: '2. Challenge', desc: 'Draw a challenge card. It targets zones and escalates each season.', color: '#E67E22' },
               { phase: '3. Deliberation', desc: 'Discuss strategy, propose trades. Timer applies.', color: '#2E86AB' },
               { phase: '4. Action', desc: 'Take turns: play cards, form series/combinations, trade, use abilities, or pass.', color: '#8E44AD' },
-              { phase: '5. Scoring', desc: 'Calculate utility, apply welfare weights, compute equity & collaboration bonus, update CWS.', color: '#27AE60' },
+              { phase: '5. Scoring', desc: 'Calculate utility, apply welfare weights, compute equity & collaboration bonus, update SVS.', color: '#27AE60' },
             ].map((p, i) => (
               <motion.div
                 key={p.phase}
@@ -154,10 +154,10 @@ export default function Chapter8({ onBack }: ChapterProps) {
         {activeSection === 'conditions' && (
           <div className="space-y-2">
             {[
-              { name: 'Good', color: '#27AE60', desc: 'Zone is thriving. Generates resources each round. Players benefit from being here.' },
+              { name: 'Good', color: '#27AE60', desc: 'Zone is thriving. Generates resources each season. Players benefit from being here.' },
               { name: 'Fair', color: '#F1C40F', desc: 'Zone is functional but has issues. Stable but not generating bonuses.' },
               { name: 'Poor', color: '#E67E22', desc: 'Zone is struggling. Problems accumulate. Will degrade to Critical if neglected.' },
-              { name: 'Critical', color: '#E74C3C', desc: 'Zone is in crisis. Active penalties. Drags down CWS. Urgent action needed.' },
+              { name: 'Critical', color: '#E74C3C', desc: 'Zone is in crisis. Active penalties. Drags down SVS. Urgent action needed.' },
               { name: 'Locked', color: '#95A5A6', desc: 'Zone is inaccessible until unlocked by resolving a specific challenge or trigger.' },
             ].map((cond, i) => (
               <motion.div
@@ -214,9 +214,9 @@ export default function Chapter8({ onBack }: ChapterProps) {
         {activeSection === 'scoring' && (
           <div className="space-y-3">
             <div className="p-4 rounded-lg border-2" style={{ borderColor: '#1B3A5C30', background: '#1B3A5C08' }}>
-              <h5 className="text-sm font-bold mb-2" style={{ color: '#1B3A5C' }}>CWS Formula</h5>
+              <h5 className="text-sm font-bold mb-2" style={{ color: '#1B3A5C' }}>SVS Formula</h5>
               <div className="font-mono text-xs p-2 rounded" style={{ background: '#4A3728', color: '#F5E6D3' }}>
-                CWS = sum(weight_i * utility_i) + equityBonus + collaborationBonus
+                SVS = sum(weight_i * utility_i) + equityBonus + collaborationBonus
               </div>
             </div>
 
@@ -243,7 +243,7 @@ export default function Chapter8({ onBack }: ChapterProps) {
               <div className="grid grid-cols-3 gap-2 text-xs text-center">
                 <div className="p-2 rounded" style={{ background: '#27AE6015' }}>
                   <div className="font-bold" style={{ color: '#27AE60' }}>Full Success</div>
-                  <div style={{ color: '#6B5744' }}>CWS meets target</div>
+                  <div style={{ color: '#6B5744' }}>SVS meets target</div>
                 </div>
                 <div className="p-2 rounded" style={{ background: '#E67E2215' }}>
                   <div className="font-bold" style={{ color: '#E67E22' }}>Partial</div>

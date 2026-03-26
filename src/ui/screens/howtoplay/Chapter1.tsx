@@ -308,7 +308,7 @@ export default function Chapter1({ onNext }: ChapterProps) {
           viewport={{ once: true }}
           transition={{ delay: 0.6 }}
         >
-          <strong style={{ color: '#C75B39' }}>The Collective Welfare Score (CWS)</strong> tracks how well the
+          <strong style={{ color: '#C75B39' }}>The Shared Vision Score (SVS)</strong> tracks how well the
           entire community is doing. If it hits the target, everyone succeeds.
           But neglecting any one role's needs drags down the whole group.
         </motion.div>

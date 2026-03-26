@@ -71,6 +71,15 @@ const TOTAL_CLUES = 5;
 const PROXIMITY_PX = 60;
 const CLUE_RADIUS = 24;
 
+/** Role-specific advantage: certain clue types glow bigger for certain roles */
+const ROLE_CLUE_ADVANTAGE: Record<string, string[]> = {
+  citizen: ['consequence', 'resource'],
+  designer: ['capability', 'connection'],
+  advocate: ['resource', 'connection'],
+  administrator: ['outcome', 'consequence'],
+  investor: ['resource', 'outcome'],
+};
+
 const ABILITY_DISPLAY: Record<AbilityId, string> = {
   authority: 'Authority',
   resourcefulness: 'Resourcefulness',
@@ -117,7 +126,7 @@ function generateClues(
     .map((c) => {
       switch (c.type) {
         case 'cws_penalty':
-          return `CWS penalty: -${c.params.amount ?? '?'}`;
+          return `SVS penalty: -${c.params.amount ?? '?'}`;
         case 'zone_degrade':
           return `Zone degrades by ${c.params.levels ?? 1} level(s)`;
         case 'resource_loss':
@@ -734,9 +743,15 @@ export function ChallengePhase({
               {clues.map((clue) => {
                 const proximity = getClueProximity(clue);
                 const isNearby = proximity > 0;
-                const baseOpacity = clue.found ? 0.9 : 0.15 + proximity * 0.35;
+                // Role-specific advantage: advantaged clue types are bigger & brighter
+                const hasAdvantage =
+                  currentPlayer &&
+                  (ROLE_CLUE_ADVANTAGE[currentPlayer.roleId] ?? []).includes(clue.type);
+                const effectiveRadius = hasAdvantage ? 32 : CLUE_RADIUS;
+                const idleOpacity = hasAdvantage ? 0.5 : 0.25;
+                const baseOpacity = clue.found ? 0.9 : idleOpacity + proximity * 0.35;
                 const scale = clue.found ? 1 : 1 + proximity * 0.3;
-                const glowRadius = CLUE_RADIUS + proximity * 12;
+                const glowRadius = effectiveRadius + proximity * 12;
 
                 return (
                   <g key={clue.id} style={{ pointerEvents: 'auto' }}>
@@ -758,7 +773,7 @@ export function ChallengePhase({
                       <circle
                         cx={clue.x}
                         cy={clue.y}
-                        r={CLUE_RADIUS}
+                        r={effectiveRadius}
                         fill={CLUE_TYPE_COLORS[clue.type]}
                         opacity={baseOpacity}
                         style={{
@@ -781,7 +796,7 @@ export function ChallengePhase({
                         <circle
                           cx={clue.x}
                           cy={clue.y}
-                          r={CLUE_RADIUS}
+                          r={effectiveRadius}
                           fill={CLUE_TYPE_COLORS[clue.type]}
                           opacity={0.85}
                           stroke="white"

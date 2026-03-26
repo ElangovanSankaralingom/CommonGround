@@ -396,7 +396,7 @@ function AboutModal({ onClose }: { onClose: () => void }) {
           </p>
           <p>
             Every decision, trade, and collaboration is recorded for research analysis. The
-            Collective Welfare Score measures how well the group balances individual interests
+            Shared Vision Score measures how well the group balances individual interests
             with collective benefit — reflecting real-world placemaking outcomes.
           </p>
           <p className="text-xs opacity-70 pt-2 border-t border-[#1B3A5C]/10">

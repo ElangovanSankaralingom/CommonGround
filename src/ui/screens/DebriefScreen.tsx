@@ -137,7 +137,7 @@ export default function DebriefScreen({ onExportData, onNewGame, onDetailedStats
               transition={{ duration: 0.6 }}
             >
               <h2 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-4">
-                Final Community Welfare Score
+                Final Shared Vision Score
               </h2>
               <div className="flex items-center gap-6 mb-4">
                 <motion.span
@@ -306,7 +306,7 @@ export default function DebriefScreen({ onExportData, onNewGame, onDetailedStats
                 {/* Nash Equilibrium */}
                 <div className="bg-stone-800/50 rounded-xl p-5 border border-stone-700/20">
                   <h3 className="text-xs text-stone-500 uppercase tracking-wider mb-2">
-                    Nash Equilibrium
+                    Shared Balance Point
                   </h3>
                   <div className="flex items-center gap-3">
                     <div
@@ -324,8 +324,8 @@ export default function DebriefScreen({ onExportData, onNewGame, onDetailedStats
                       </p>
                       <p className="text-stone-500 text-xs">
                         {result.nashEquilibriumApprox
-                          ? 'No player could improve alone'
-                          : 'Unilateral improvement possible'}
+                          ? 'Chose collaboration over solo'
+                          : 'Solo improvement possible'}
                       </p>
                     </div>
                   </div>
@@ -367,7 +367,7 @@ export default function DebriefScreen({ onExportData, onNewGame, onDetailedStats
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <p className="text-stone-500 text-xs">Rounds Played</p>
+                    <p className="text-stone-500 text-xs">Seasons Played</p>
                     <p className="text-stone-200 text-xl font-bold">{session.totalRounds}</p>
                   </div>
                   <div>

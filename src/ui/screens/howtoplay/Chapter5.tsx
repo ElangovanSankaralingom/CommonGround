@@ -224,7 +224,7 @@ function Phase1Event({ onBecomeVisible }: { onBecomeVisible: () => void }) {
 
       <div className="rounded-xl p-6 text-center" style={{ background: '#FDF6EC', border: '1px solid rgba(139,111,71,0.15)' }}>
         <p className="text-sm mb-5" style={{ color: '#4A3728' }}>
-          Each round begins with a die roll that determines whether an event affects the game.
+          Each season begins with a die roll that determines whether an event affects the game.
         </p>
 
         <div className="flex justify-center mb-4">
@@ -977,7 +977,7 @@ function Phase5Scoring({ onBecomeVisible }: { onBecomeVisible: () => void }) {
           <h3 className="text-xl font-bold" style={{ fontFamily: "'Playfair Display', serif", color: '#2C1810' }}>
             Scoring
           </h3>
-          <p className="text-xs" style={{ color: '#8B6F47' }}>How the Collective Welfare Score is calculated</p>
+          <p className="text-xs" style={{ color: '#8B6F47' }}>How the Shared Vision Score is calculated</p>
         </div>
       </div>
 
@@ -985,7 +985,7 @@ function Phase5Scoring({ onBecomeVisible }: { onBecomeVisible: () => void }) {
         {/* CWS bar */}
         <div className="mb-6">
           <div className="flex items-center justify-between text-xs mb-1">
-            <span style={{ color: '#8B6F47' }}>Collective Welfare Score</span>
+            <span style={{ color: '#8B6F47' }}>Shared Vision Score</span>
             <span style={{ color: '#8E44AD' }} className="font-bold">
               {animateScoring ? Math.round(cwsContribution) : 0} / 100
             </span>
@@ -1052,7 +1052,7 @@ function Phase5Scoring({ onBecomeVisible }: { onBecomeVisible: () => void }) {
           animate={animateScoring ? { opacity: 1 } : {}}
           transition={{ delay: 1.5 }}
         >
-          <h5 className="text-xs font-bold mb-2" style={{ color: '#8E44AD' }}>CWS BREAKDOWN</h5>
+          <h5 className="text-xs font-bold mb-2" style={{ color: '#8E44AD' }}>SVS BREAKDOWN</h5>
           <div className="space-y-1 text-sm" style={{ color: '#4A3728' }}>
             <div className="flex justify-between">
               <span>Weighted utilities</span>
@@ -1067,7 +1067,7 @@ function Phase5Scoring({ onBecomeVisible }: { onBecomeVisible: () => void }) {
               <span className="font-semibold" style={{ color: '#27AE60' }}>+{collaborationBonus}</span>
             </div>
             <div className="flex justify-between pt-1 border-t font-bold" style={{ borderColor: 'rgba(142,68,173,0.15)' }}>
-              <span>Round CWS contribution</span>
+              <span>Season SVS contribution</span>
               <span style={{ color: '#8E44AD' }}>{cwsContribution}</span>
             </div>
           </div>
@@ -1139,7 +1139,7 @@ export default function Chapter5({ onNext, onBack }: Chapter5Props) {
             className="text-3xl font-bold mb-2"
             style={{ fontFamily: "'Playfair Display', serif", color: '#8E44AD' }}
           >
-            How a Round Works
+            How a Season Works
           </h2>
           <p className="text-sm" style={{ color: '#6B5339' }}>
             Scroll through each phase. Interactive elements let you experience the game mechanics firsthand.

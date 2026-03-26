@@ -20,7 +20,7 @@ const ABILITY_LABELS: Record<keyof AbilityScores, string> = {
 const SKILL_LABELS: Record<SkillId, string> = {
   negotiation: 'Negotiation', budgeting: 'Budgeting', designThinking: 'Design Thinking',
   publicSpeaking: 'Public Speaking', regulatoryNavigation: 'Regulatory Navigation',
-  environmentalAssessment: 'Environmental Assessment', coalitionBuilding: 'Coalition Building', crisisManagement: 'Crisis Management',
+  environmentalAssessment: 'Environmental Assessment', coalitionBuilding: 'Alliance Building', crisisManagement: 'Crisis Management',
 };
 
 const OBJECTIVE_LABELS: Record<ObjectiveId, string> = {
@@ -194,7 +194,7 @@ export function CharacterQuestionnaire({ playerName, playerIndex, totalPlayers, 
         </div>
         <div className="flex items-center gap-2">
           <span className={`px-2 py-1 rounded-full text-xs font-bold ${PLAYER_TYPE[role.id] === 'S-FIXED' ? 'bg-red-900/30 text-red-400 border border-red-700/50' : 'bg-emerald-900/30 text-emerald-400 border border-emerald-700/50'}`}>
-            {PLAYER_TYPE[role.id]}
+            {PLAYER_TYPE[role.id] === 'S-FIXED' ? 'S-GUIDED' : PLAYER_TYPE[role.id]}
           </span>
           <span className="px-2 py-1 rounded-full text-xs font-bold bg-amber-900/30 text-amber-400 border border-amber-700/50">
             w={WELFARE_WEIGHTS[role.id]}x

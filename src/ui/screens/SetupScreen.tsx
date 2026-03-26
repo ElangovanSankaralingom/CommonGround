@@ -13,6 +13,7 @@ import type {
 import { SKILL_ABILITY_MAP } from '../../core/models/constants';
 import { CharacterQuestionnaire } from '../components/CharacterQuestionnaire';
 import { randomizeCharacterSheet, type CharacterCreationResult } from '../../core/engine/characterQuestionnaire';
+import { ParkStory } from '../components/ParkStory';
 
 // ── Role data ──────────────────────────────────────────────────
 
@@ -29,7 +30,7 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     startingAbilities: { authority: 16, resourcefulness: 12, communityTrust: 10, technicalKnowledge: 10, politicalLeverage: 14, adaptability: 10 },
     startingResources: { budget: 8, influence: 4, volunteer: 0, material: 0, knowledge: 0 },
     proficientSkills: ['negotiation', 'budgeting', 'regulatoryNavigation'],
-    uniqueAbility: { name: 'Executive Order', description: 'Once per round, bypass one resource requirement on a card play.' },
+    uniqueAbility: { name: 'Executive Order', description: 'Once per season, bypass one resource requirement on a card play.' },
     goals: {
       character: { description: 'Maintain administrative control while balancing stakeholder demands', subGoals: [], totalWeight: 1 },
       survival: { description: 'Keep budget above 3 at all times', subGoals: [{ id: 'admin_surv_1', description: 'Budget >= 3', weight: 5, condition: { type: 'resource_threshold', params: { resource: 'budget', minimum: 3 } }, satisfied: true }], totalWeight: 5 },
@@ -49,7 +50,7 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     startingAbilities: { authority: 8, resourcefulness: 10, communityTrust: 12, technicalKnowledge: 16, politicalLeverage: 10, adaptability: 14 },
     startingResources: { budget: 0, influence: 0, volunteer: 0, material: 3, knowledge: 5 },
     proficientSkills: ['designThinking', 'environmentalAssessment', 'publicSpeaking'],
-    uniqueAbility: { name: 'Inspired Design', description: 'Once per round, double the progress markers placed on a zone this turn.' },
+    uniqueAbility: { name: 'Inspired Design', description: 'Once per season, double the progress markers placed on a zone this turn.' },
     goals: {
       character: { description: 'Create beautiful, functional spaces that serve all stakeholders', subGoals: [], totalWeight: 1 },
       survival: { description: 'Keep knowledge above 3 at all times', subGoals: [{ id: 'des_surv_1', description: 'Knowledge >= 3', weight: 5, condition: { type: 'resource_threshold', params: { resource: 'knowledge', minimum: 3 } }, satisfied: true }], totalWeight: 5 },
@@ -69,7 +70,7 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     startingAbilities: { authority: 6, resourcefulness: 8, communityTrust: 16, technicalKnowledge: 8, politicalLeverage: 8, adaptability: 12 },
     startingResources: { budget: 0, influence: 0, volunteer: 6, material: 0, knowledge: 0 },
     proficientSkills: ['publicSpeaking', 'coalitionBuilding', 'crisisManagement'],
-    uniqueAbility: { name: 'Rally the Community', description: 'Once per round, generate 3 volunteer tokens and distribute them freely.' },
+    uniqueAbility: { name: 'Rally the Community', description: 'Once per season, generate 3 volunteer tokens and distribute them freely.' },
     goals: {
       character: { description: 'Empower community voices in every decision', subGoals: [], totalWeight: 1 },
       survival: { description: 'Keep volunteer above 3 at all times', subGoals: [{ id: 'cit_surv_1', description: 'Volunteer >= 3', weight: 5, condition: { type: 'resource_threshold', params: { resource: 'volunteer', minimum: 3 } }, satisfied: true }], totalWeight: 5 },
@@ -89,7 +90,7 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     startingAbilities: { authority: 10, resourcefulness: 16, communityTrust: 8, technicalKnowledge: 12, politicalLeverage: 10, adaptability: 12 },
     startingResources: { budget: 10, influence: 2, volunteer: 0, material: 2, knowledge: 0 },
     proficientSkills: ['budgeting', 'negotiation', 'regulatoryNavigation'],
-    uniqueAbility: { name: 'Capital Injection', description: 'Once per round, convert 4 budget into 2 of any other resource.' },
+    uniqueAbility: { name: 'Capital Injection', description: 'Once per season, convert 4 budget into 2 of any other resource.' },
     goals: {
       character: { description: 'Maximize return on investment while contributing to community goals', subGoals: [], totalWeight: 1 },
       survival: { description: 'Keep budget above 5 at all times', subGoals: [{ id: 'inv_surv_1', description: 'Budget >= 5', weight: 5, condition: { type: 'resource_threshold', params: { resource: 'budget', minimum: 5 } }, satisfied: true }], totalWeight: 5 },
@@ -109,7 +110,7 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     startingAbilities: { authority: 8, resourcefulness: 10, communityTrust: 14, technicalKnowledge: 12, politicalLeverage: 12, adaptability: 12 },
     startingResources: { budget: 0, influence: 2, volunteer: 0, material: 0, knowledge: 2 },
     proficientSkills: ['environmentalAssessment', 'coalitionBuilding', 'publicSpeaking'],
-    uniqueAbility: { name: 'Ecological Audit', description: 'Once per round, reveal hidden trigger tiles in adjacent zones.' },
+    uniqueAbility: { name: 'Ecological Audit', description: 'Once per season, reveal hidden trigger tiles in adjacent zones.' },
     goals: {
       character: { description: 'Preserve ecological integrity against competing interests', subGoals: [], totalWeight: 1 },
       survival: { description: 'Keep knowledge above 3 at all times', subGoals: [{ id: 'adv_surv_1', description: 'Knowledge >= 3', weight: 5, condition: { type: 'resource_threshold', params: { resource: 'knowledge', minimum: 3 } }, satisfied: true }], totalWeight: 5 },
@@ -220,17 +221,17 @@ const SKILL_LABELS: Record<SkillId, string> = {
   publicSpeaking: 'Public Speaking',
   regulatoryNavigation: 'Regulatory Navigation',
   environmentalAssessment: 'Environmental Assessment',
-  coalitionBuilding: 'Coalition Building',
+  coalitionBuilding: 'Alliance Building',
   crisisManagement: 'Crisis Management',
 };
 
 // ── Component ──────────────────────────────────────────────────
 
 const STEPS = [
-  'Site Selection',
-  'Role Assignment',
-  'Character Creation',
-  'Facilitator Briefing',
+  'The Park Story',
+  'Role Discovery',
+  'Character Shaping',
+  'Mission Briefing',
   'Standee Placement',
   'Pre-Game Survey',
 ];
@@ -353,14 +354,14 @@ export default function SetupScreen() {
     {
       title: 'The Rules',
       subtitle: 'How the Game Works',
-      text: 'Each round follows 7 phases: (1) Payment Day — receive profession income, (2) Event Roll — a 2d6 roll triggers random events, (3) Individual Action — play up to 2 cards solo, (4) Deliberation — negotiate, trade, and form coalitions, (5) Action Resolution — coalition combinations resolve, (6) Round-End Accounting — zones decay or regenerate, CWS calculated, (7) Level Check — the game advances when milestones are hit. There is NO single winner. You succeed or fail together. Cards can be played in series (1-3 cards with escalating bonuses) or as coalition combinations (2-5 players combining for powerful effects).',
+      text: 'Each season follows 7 phases: (1) Payment Day — receive profession income, (2) Event Roll — a 2d6 roll triggers random events, (3) Individual Action — play up to 2 cards solo, (4) Deliberation — negotiate, trade, and form alliances, (5) Action Resolution — alliance combinations resolve, (6) Season-End Accounting — zones decay or regenerate, SVS calculated, (7) Level Check — the game advances when milestones are hit. There is NO single winner. You succeed or fail together. Cards can be played in series (1-3 cards with escalating bonuses) or as alliance combinations (2-5 players combining for powerful effects).',
       icon: '\u{1F3B2}',
       highlightZones: [],
     },
     {
       title: 'The Mission',
       subtitle: 'Your Collective Objective',
-      text: `Restore Corporation Eco-Park to a functional, well-maintained, community-serving public space. Your target Community Welfare Score (CWS) is 80. You have ${totalRounds} rounds. The CWS is calculated from all players' utility scores, weighted by equity — lifting up the weakest player matters more than boosting the strongest. Every decision you make will be recorded for research into collaborative governance. The park — and the data — depend on you.`,
+      text: `Restore Corporation Eco-Park to a functional, well-maintained, community-serving public space. Your target Shared Vision Score (SVS) is 80. You have ${totalRounds} seasons. The SVS is calculated from all players' utility scores, weighted by equity — lifting up the weakest player matters more than boosting the strongest. Every decision you make will be recorded for research into collaborative governance. The park — and the data — depend on you.`,
       icon: '\u{1F3AF}',
       highlightZones: [],
     },
@@ -729,33 +730,18 @@ export default function SetupScreen() {
       {/* Step content */}
       <div className="max-w-5xl mx-auto px-6 pb-24">
         <AnimatePresence mode="wait">
-          {/* ── Step 0: Site Selection ─────────────────────── */}
+          {/* ── Step 0: The Park Story ─────────────────────── */}
           {step === 0 && (
             <motion.div key="step-0" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="space-y-6">
-              <p className="text-stone-500 text-xs uppercase tracking-wider">Step 1 of {STEPS.length}: Choose your site and configure the game</p>
-              <h2 className="text-2xl font-serif font-bold text-amber-300">Select Your Site</h2>
-              <div className="bg-stone-700/50 rounded-2xl border border-stone-600/50 overflow-hidden">
-                <div className="h-48 flex items-end p-6" style={{ background: 'linear-gradient(135deg, #2D5016 0%, #4A7C2E 50%, #2D5016 100%)' }}>
-                  <div>
-                    <span className="text-emerald-200/70 text-xs uppercase tracking-wider font-semibold">Madurai, Tamil Nadu</span>
-                    <h3 className="text-2xl font-bold text-white">Corporation Eco-Park</h3>
-                    <p className="text-emerald-100/80 text-sm mt-1">5.5 acres | 124 herbal tree varieties | 110-foot fountain</p>
-                  </div>
-                </div>
-                <div className="p-6 space-y-4">
-                  <p className="text-stone-300 text-sm leading-relaxed">
-                    Established around 2009 by the Madurai City Corporation, this eco-park was designed as a green lung for the city.
-                    It features a landmark 110-foot musical fountain, a boating pond, walking tracks, herbal gardens with 124 tree varieties,
-                    playgrounds, and exercise zones. Despite initial investment, competing stakeholder interests and bureaucratic challenges
-                    have left many zones in decline. Your team of 5 stakeholders must collaborate to restore it.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {['14 Zones', '5 Players', '7 Phases/Round', 'Cooperative'].map((tag) => (
-                      <span key={tag} className="bg-stone-600/50 text-stone-300 rounded-full px-3 py-1 text-xs font-medium">{tag}</span>
-                    ))}
-                  </div>
-                </div>
+              <p className="text-stone-500 text-xs uppercase tracking-wider">Step 1 of {STEPS.length}: The story of Corporation Eco-Park</p>
+
+              {/* Park Story Animation */}
+              <div className="rounded-2xl overflow-hidden border border-stone-600/50" style={{ height: '360px' }}>
+                <ParkStory onComplete={() => {/* user can also click Next button below */}} />
               </div>
+
+              {/* Game config below the story */}
+              <h3 className="text-lg font-serif font-bold text-amber-300">Configure Your Session</h3>
               {/* Game Config */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-stone-700/50 rounded-xl p-4 border border-stone-600/30">
@@ -1268,7 +1254,7 @@ export default function SetupScreen() {
                       handleNext();
                     }}
                   >
-                    Begin Round 1 {'\u2192'}
+                    Begin Season 1 {'\u2192'}
                   </motion.button>
                 </motion.div>
               )}

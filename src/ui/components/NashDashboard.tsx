@@ -48,8 +48,8 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-stone-700 sticky top-0 bg-stone-900/95 backdrop-blur-sm z-10">
           <div>
-            <h2 className="text-xl font-bold text-amber-300">Nash Equilibrium Dashboard</h2>
-            <p className="text-stone-500 text-xs">Round {nashOutput.round} — AI Backend Analysis (Part 6.2)</p>
+            <h2 className="text-xl font-bold text-amber-300">Shared Balance Point Dashboard</h2>
+            <p className="text-stone-500 text-xs">Season {nashOutput.round} — AI Backend Analysis (Part 6.2)</p>
           </div>
           {dne_achieved && (
             <div className="px-4 py-2 rounded-full bg-emerald-500/20 border border-emerald-500 text-emerald-300 text-sm font-bold animate-pulse">
@@ -105,7 +105,7 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
 
             {/* CWS Breakdown */}
             <div className="bg-stone-800/50 rounded-xl p-4 border border-stone-700/50">
-              <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">CWS Breakdown</h3>
+              <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">SVS Breakdown</h3>
               <div className="text-center mb-4">
                 <span className="text-4xl font-black text-amber-300">{cws?.total?.toFixed(1)}</span>
                 <span className="text-stone-500 text-sm ml-2">/ 75 target</span>
@@ -124,7 +124,7 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
                   <span className="font-mono">{cws?.cp_bonus}</span>
                 </div>
                 <div className="flex justify-between text-stone-200 font-bold border-t border-stone-600 pt-1 mt-1">
-                  <span>Total CWS</span>
+                  <span>Total SVS</span>
                   <span className="font-mono">{cws?.total?.toFixed(2)}</span>
                 </div>
               </div>
@@ -192,7 +192,7 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
                 </tbody>
               </table>
             </div>
-            <p className="text-[10px] text-stone-600 mt-2">B = Büchi objective (must be in sat every 2 rounds). B! = at risk of crisis state.</p>
+            <p className="text-[10px] text-stone-600 mt-2">B = Büchi objective (must be in sat every 2 seasons). B! = at risk of commitment consequence.</p>
           </div>
 
           {/* Row 3: Nash Check Panel + Recommendations */}
@@ -212,12 +212,12 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
             <div className="rounded-xl p-4 border bg-indigo-900/20 border-indigo-700/50">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-xl text-indigo-400">?</span>
-                <span className="text-xs font-bold text-stone-300 uppercase">Q2: No Profitable Deviation</span>
+                <span className="text-xs font-bold text-stone-300 uppercase">Q2: Chose Collaboration Over Solo</span>
               </div>
               <p className="text-stone-400 text-xs">
                 Ask Environment players: {nashOutput.nash_q2_ask?.map((r: RoleId) => ROLE_NAMES[r]).join(', ')}
               </p>
-              <p className="text-stone-500 text-[10px] mt-1">S-fixed (Admin, Investor) are NOT asked — strategies institutionally fixed.</p>
+              <p className="text-stone-500 text-[10px] mt-1">S-GUIDED (Admin, Investor) are NOT asked — strategies institutionally guided.</p>
             </div>
 
             {/* Q3 */}
@@ -230,7 +230,7 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
               </div>
               <p className="text-stone-400 text-xs">
                 Variance: {nash_q3?.variance?.toFixed(2)} {nash_q3?.variance <= 4 ? '≤' : '>'} 4
-                {' | '}CWS: {cws?.total?.toFixed(1)} {nash_q3?.cws_above_target ? '≥' : '<'} 75
+                {' | '}SVS: {cws?.total?.toFixed(1)} {nash_q3?.cws_above_target ? '≥' : '<'} 75
               </p>
             </div>
           </div>
@@ -239,7 +239,7 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
           <div className="grid grid-cols-2 gap-4">
             {/* Crisis State */}
             <div className="bg-stone-800/50 rounded-xl p-4 border border-stone-700/50">
-              <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Crisis State (Büchi Violations)</h3>
+              <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Commitment Consequence (Büchi Violations)</h3>
               {crisis_state?.players_at_risk?.length > 0 ? (
                 <div className="space-y-2">
                   {crisis_state.players_at_risk.map((v: any) => (
@@ -252,7 +252,7 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
                   ))}
                 </div>
               ) : (
-                <p className="text-emerald-400 text-xs">No players in crisis state.</p>
+                <p className="text-emerald-400 text-xs">No players facing commitment consequences.</p>
               )}
             </div>
 
@@ -266,7 +266,7 @@ export function NashDashboard({ nashOutput, onClose }: NashDashboardProps) {
                     Priority zone: <span className="text-amber-300">{optimal_next_action.priority_challenge}</span>
                   </p>
                   <p className="text-stone-400 text-xs">
-                    Predicted CWS increase: <span className="text-emerald-300">+{optimal_next_action.predicted_cws_increase}</span>
+                    Predicted SVS increase: <span className="text-emerald-300">+{optimal_next_action.predicted_cws_increase}</span>
                   </p>
                 </>
               ) : (

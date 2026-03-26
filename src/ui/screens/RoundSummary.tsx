@@ -93,10 +93,10 @@ export default function RoundSummary({ onNextRound, onFinalResults }: RoundSumma
           transition={{ delay: 0.2 }}
         >
           <h1 className="text-4xl font-serif font-bold text-amber-300">
-            Round {round} Summary
+            Season {round} Summary
           </h1>
           <p className="text-stone-400 mt-1">
-            {isLastRound ? 'Final round complete' : `${session.totalRounds - round} round${session.totalRounds - round > 1 ? 's' : ''} remaining`}
+            {isLastRound ? 'Final season complete' : `${session.totalRounds - round} season${session.totalRounds - round > 1 ? 's' : ''} remaining`}
           </p>
         </motion.div>
 
@@ -108,7 +108,7 @@ export default function RoundSummary({ onNextRound, onFinalResults }: RoundSumma
           transition={{ delay: 0.3 }}
         >
           <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">
-            Community Welfare Score
+            Shared Vision Score
           </h3>
           <div className="flex items-center gap-4 mb-3">
             <span className="text-3xl font-bold text-amber-300">{currentCWS}</span>
@@ -293,7 +293,7 @@ export default function RoundSummary({ onNextRound, onFinalResults }: RoundSumma
             whileTap={{ scale: 0.97 }}
             onClick={isLastRound ? onFinalResults : onNextRound}
           >
-            {isLastRound ? 'View Final Results' : 'Begin Next Round'}
+            {isLastRound ? 'View Final Results' : 'Begin Next Season'}
           </motion.button>
         </motion.div>
       </motion.div>

@@ -249,7 +249,7 @@ function ActionBar({
                        hover:bg-indigo-400 transition-colors shadow-md"
             onClick={() => useGameStore.setState({ showCoalitionModal: true })}
           >
-            Form Coalition
+            Form Alliance
           </button>
           <button
             className="px-4 py-2 rounded-lg bg-purple-500 text-white text-sm font-bold
@@ -286,7 +286,7 @@ function CWSBar({ current, target }: { current: number; target: number }) {
 
   return (
     <div className="flex items-center gap-3">
-      <span className="text-xs text-stone-400 uppercase tracking-wider font-semibold">CWS</span>
+      <span className="text-xs text-stone-400 uppercase tracking-wider font-semibold">SVS</span>
       <div className="w-40 h-4 bg-stone-700 rounded-full overflow-hidden relative">
         <motion.div
           className="h-full rounded-full"
@@ -1093,7 +1093,7 @@ export default function GameScreen() {
           <button
             className="w-10 h-10 rounded-full bg-amber-700/80 border border-amber-600 flex items-center justify-center hover:bg-amber-600 transition-colors"
             onClick={() => useGameStore.setState((s) => ({ showNashDashboard: !s.showNashDashboard }))}
-            title="Nash Equilibrium Dashboard"
+            title="Shared Balance Point Dashboard"
           >
             <span className="text-amber-200 text-sm font-bold">NE</span>
           </button>
@@ -1148,7 +1148,7 @@ export default function GameScreen() {
               <p className="text-stone-500 text-sm">No active challenge</p>
               {currentPhase === 'event_roll' && (
                 <p className="text-stone-600 text-xs mt-2">
-                  Draw a challenge card to reveal this round&apos;s obstacle
+                  Draw a challenge card to reveal this season&apos;s obstacle
                 </p>
               )}
             </div>
@@ -1526,7 +1526,7 @@ export default function GameScreen() {
                            hover:bg-amber-300 transition-colors"
                 onClick={advancePhase}
               >
-                {session.currentRound >= session.totalRounds ? 'Final Results' : 'Next Round'}
+                {session.currentRound >= session.totalRounds ? 'Final Results' : 'Next Season'}
               </button>
             </motion.div>
           </motion.div>

@@ -46,7 +46,7 @@ export function FacilitatorDashboard({ session, onClose }: FacilitatorDashboardP
         <div className="p-6 space-y-6">
           {/* CWS Trajectory */}
           <div className="bg-stone-800/50 rounded-xl p-4 border border-stone-700/50">
-            <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">CWS Trajectory</h3>
+            <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">SVS Trajectory</h3>
             <div className="flex items-end gap-2 h-24">
               {cwsHistory.map((h, i) => {
                 const maxCws = Math.max(...cwsHistory.map(x => x.score), 75);
@@ -123,7 +123,7 @@ export function FacilitatorDashboard({ session, onClose }: FacilitatorDashboardP
 
           {/* Trade/Payment Log */}
           <div className="bg-stone-800/50 rounded-xl p-4 border border-stone-700/50">
-            <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Payment Function Log p(i,j)</h3>
+            <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-3">Negotiated Exchange Log p(i,j)</h3>
             {completedTrades.length > 0 ? (
               <div className="space-y-1.5">
                 {completedTrades.map(t => {
@@ -173,7 +173,7 @@ export function FacilitatorDashboard({ session, onClose }: FacilitatorDashboardP
                   <span className="font-bold">Q2</span>: Ask {session.nashEngineOutput.nash_q2_ask?.join(', ')}
                 </div>
                 <div className={`rounded-lg p-2 ${session.nashEngineOutput.nash_q3.passed ? 'bg-emerald-900/20' : 'bg-red-900/20'}`}>
-                  <span className="font-bold">Q3</span>: var={session.nashEngineOutput.nash_q3.variance?.toFixed(1)} CWS={session.nashEngineOutput.cws?.total?.toFixed(1)}
+                  <span className="font-bold">Q3</span>: var={session.nashEngineOutput.nash_q3.variance?.toFixed(1)} SVS={session.nashEngineOutput.cws?.total?.toFixed(1)}
                 </div>
               </div>
             </div>

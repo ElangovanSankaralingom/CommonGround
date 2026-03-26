@@ -760,7 +760,7 @@ export default function Chapter6({ onNext, onBack }: ChapterProps) {
           className="px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:scale-105"
           style={{ color: '#4A3728', border: '1px solid rgba(139,111,71,0.3)' }}
         >
-          &larr; How a Round Works
+          &larr; How a Season Works
         </button>
         <button
           onClick={onNext}

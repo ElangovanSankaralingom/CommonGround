@@ -76,7 +76,7 @@ export const GameGraphView: React.FC<GameGraphViewProps> = ({ graph, currentRoun
 
           {/* VO Display */}
           <div className="text-center">
-            <p className="text-stone-500 text-xs uppercase tracking-wider">Collective Welfare (VO)</p>
+            <p className="text-stone-500 text-xs uppercase tracking-wider">Shared Vision (VO)</p>
             <p className="text-2xl font-bold text-amber-400">
               {vo.currentVO.toFixed(1)}
               <span className="text-stone-500 text-sm font-normal"> / {vo.maxPossibleVO.toFixed(1)}</span>
@@ -86,7 +86,7 @@ export const GameGraphView: React.FC<GameGraphViewProps> = ({ graph, currentRoun
 
           {/* Round slider */}
           <div className="flex items-center gap-3">
-            <span className="text-stone-400 text-xs">Round</span>
+            <span className="text-stone-400 text-xs">Season</span>
             <input
               type="range"
               min={1}

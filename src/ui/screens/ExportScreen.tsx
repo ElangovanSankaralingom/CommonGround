@@ -61,8 +61,8 @@ export default function ExportScreen() {
       },
       {
         id: 'logs',
-        label: 'Round & Game Logs',
-        description: 'Structured log entries for each round and game-level events',
+        label: 'Season & Game Logs',
+        description: 'Structured log entries for each season and game-level events',
         icon: '\u{1F4DD}',
         estimateKB: logsSize,
       },
@@ -249,7 +249,7 @@ export default function ExportScreen() {
               <h3 className="text-sm font-semibold text-stone-300 mb-2">CSV Bundle Export</h3>
               <p className="text-stone-500 text-sm leading-relaxed">
                 Multiple CSV files for easy import into spreadsheet applications, R, or Python.
-                Includes separate files for telemetry events, player stats per round, zone conditions,
+                Includes separate files for telemetry events, player stats per season, zone conditions,
                 trade logs, and survey responses.
               </p>
               <p className="text-stone-600 text-xs mt-2">

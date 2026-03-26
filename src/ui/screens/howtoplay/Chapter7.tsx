@@ -146,7 +146,7 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
         {/* CWS bar */}
         <div className="mb-4">
           <div className="flex justify-between text-xs font-medium mb-1" style={{ color: '#8B6F47' }}>
-            <span>CWS</span>
+            <span>SVS</span>
             <span>100%</span>
           </div>
           <CWSBar percent={100} color="linear-gradient(90deg, #27AE60, #2ECC71)" delay={0.8} />
@@ -161,11 +161,11 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
           transition={{ delay: 0.5 }}
         >
           <p className="text-sm font-semibold text-center mb-3" style={{ color: '#27AE60' }}>
-            CWS reached the target! All players' survival goals met. The park thrives!
+            SVS reached the target! All players' survival goals met. The park thrives!
           </p>
           <div className="space-y-1.5">
             {[
-              'CWS meets or exceeds the target score',
+              'SVS meets or exceeds the target score',
               'All 5 players achieved their survival goals',
               'Zone conditions improved across the board',
               'Equity bonus maximized through balanced outcomes',
@@ -252,7 +252,7 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
         {/* CWS bar at ~70% */}
         <div className="mb-4">
           <div className="flex justify-between text-xs font-medium mb-1" style={{ color: '#8B6F47' }}>
-            <span>CWS</span>
+            <span>SVS</span>
             <span>~72%</span>
           </div>
           <CWSBar percent={72} color="#E67E22" delay={0.5} />
@@ -267,7 +267,7 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
           transition={{ delay: 0.4 }}
         >
           <p className="text-sm font-semibold text-center" style={{ color: '#E67E22' }}>
-            CWS reached the target, but some players' survival goals were not met.
+            SVS reached the target, but some players' survival goals were not met.
             Progress was made, but inequitably.
           </p>
         </motion.div>
@@ -336,7 +336,7 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
         {/* CWS bar at ~30% */}
         <div className="mb-4">
           <div className="flex justify-between text-xs font-medium mb-1" style={{ color: '#8B6F47' }}>
-            <span>CWS</span>
+            <span>SVS</span>
             <span>~30%</span>
           </div>
           <CWSBar percent={30} color="#95A5A6" delay={0.5} />
@@ -351,7 +351,7 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
           transition={{ delay: 0.4 }}
         >
           <p className="text-sm font-semibold text-center" style={{ color: '#8B6F47' }}>
-            CWS fell short. But this outcome provides valuable research data
+            SVS fell short. But this outcome provides valuable research data
             about what barriers prevented collaboration.
           </p>
         </motion.div>
@@ -369,10 +369,10 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
           className="text-2xl font-bold mb-2 text-center"
           style={{ fontFamily: "'Playfair Display', serif", color: '#C75B39' }}
         >
-          CWS Formula Breakdown
+          SVS Formula Breakdown
         </h3>
         <p className="text-center mb-8 text-sm" style={{ color: '#6B5744' }}>
-          The Collective Welfare Score is computed step by step:
+          The Shared Vision Score is computed step by step:
         </p>
 
         <div className="space-y-4">
@@ -497,7 +497,7 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
                   Collaboration bonus = total CP earned by all players
                 </div>
                 <div className="text-xs mt-1" style={{ color: '#6B5744' }}>
-                  Every collaboration point earned throughout the game adds directly to CWS.
+                  Every collaboration point earned throughout the game adds directly to SVS.
                 </div>
               </div>
             </div>
@@ -521,7 +521,7 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
               </div>
               <div>
                 <div className="text-sm font-semibold" style={{ color: '#C75B39' }}>
-                  CWS = Weighted Sum + Equity Bonus + Collaboration Bonus
+                  SVS = Weighted Sum + Equity Bonus + Collaboration Bonus
                 </div>
                 <motion.div
                   className="mt-2 rounded-lg px-3 py-2 font-mono text-xs"
@@ -531,7 +531,7 @@ export default function Chapter7({ onNext, onBack }: ChapterProps) {
                   viewport={{ once: true }}
                   transition={{ delay: 0.8 }}
                 >
-                  CWS = &Sigma;(weight<sub>i</sub> &times; utility<sub>i</sub>) + equityBonus + collaborationBonus
+                  SVS = &Sigma;(weight<sub>i</sub> &times; utility<sub>i</sub>) + equityBonus + collaborationBonus
                 </motion.div>
               </div>
             </div>

@@ -74,9 +74,9 @@ export function BuchiWarningPanel({ players, zones, buchiHistory }: BuchiWarning
               {OBJECTIVE_LABELS[w.objective]} unsatisfied for {w.roundsOut} round{w.roundsOut > 1 ? 's' : ''}
             </span>
             {w.roundsOut >= 2 ? (
-              <span className="ml-auto text-red-400 font-bold animate-pulse">CRISIS STATE</span>
+              <span className="ml-auto text-red-400 font-bold animate-pulse">COMMITMENT CONSEQUENCE</span>
             ) : (
-              <span className="ml-auto text-orange-400">Crisis next round if unresolved</span>
+              <span className="ml-auto text-orange-400">Commitment consequence next season if unresolved</span>
             )}
           </motion.div>
         ))}

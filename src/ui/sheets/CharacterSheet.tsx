@@ -85,7 +85,7 @@ const SKILL_LABELS: Record<SkillId, string> = {
   publicSpeaking: 'Public Speaking',
   regulatoryNavigation: 'Regulatory Navigation',
   environmentalAssessment: 'Environmental Assessment',
-  coalitionBuilding: 'Coalition Building',
+  coalitionBuilding: 'Alliance Building',
   crisisManagement: 'Crisis Management',
 };
 

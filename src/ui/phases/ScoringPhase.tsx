@@ -41,13 +41,13 @@ type SubPhase = '5a' | '5b' | '5c' | '5d' | '5e' | '5f' | '5g';
 const SUB_PHASE_ORDER: SubPhase[] = ['5a', '5b', '5c', '5d', '5e', '5f', '5g'];
 
 const SUB_PHASE_TITLES: Record<SubPhase, string> = {
-  '5a': 'Zone Condition Updates',
-  '5b': 'Resource Regeneration',
-  '5c': 'Individual Utility',
-  '5d': 'Community Welfare Score',
-  '5e': 'Buchi Safety Check',
-  '5f': 'CP Awards & Level-Up',
-  '5g': 'Nash Check: The Referee Review',
+  '5a': 'How the Park Changed',
+  '5b': 'The Season\u2019s Gifts',
+  '5c': 'Where Each Stakeholder Stands',
+  '5d': 'Shared Vision Score',
+  '5e': 'Commitment Check',
+  '5f': 'Recognition & Growth',
+  '5g': 'The Park Guardian Speaks',
 };
 
 const SUB_PHASE_DURATIONS: Record<SubPhase, number> = {
@@ -74,6 +74,50 @@ const ROLE_INCOME_DESC: Record<RoleId, string> = {
 };
 
 const ALL_OBJECTIVES: ObjectiveId[] = ['safety', 'greenery', 'access', 'culture', 'revenue', 'community'];
+
+// ─── Narrative data ─────────────────────────────────────────────
+
+const ZONE_NARRATIVE_IMPROVED: Record<string, string> = {
+  playground: 'Children peek through the fence, wondering if it\u2019s safe to play again',
+  boating_pond: 'The algae is clearing\u2014light reaches the water again',
+  meadow: 'Wildflowers are returning to the meadow',
+  garden: 'New growth pushes through the soil',
+  pavilion: 'The pavilion echoes with gathering voices',
+  path: 'Footsteps return to the walkways',
+};
+const ZONE_NARRATIVE_DEGRADED = 'The neglect spreads\u2026';
+
+const OBJECTIVE_NARRATIVE: Record<ObjectiveId, string> = {
+  safety: 'Your family feels safer',
+  greenery: 'The park is greening again',
+  access: 'Pathways are walkable',
+  culture: 'Community art is displayed',
+  revenue: 'Investment is paying off',
+  community: 'Neighbors gather again',
+};
+
+const ROLE_NARRATIVE: Record<RoleId, string> = {
+  administrator: 'sees it working',
+  investor: 'sees potential',
+  designer: 'sees beauty',
+  citizen: 'feels belonging',
+  advocate: 'sees hope',
+};
+
+const AWARD_CATEGORIES = [
+  'Best Collaborator (most assists)',
+  'Alliance of the Season',
+  'Discovery Award',
+  'Growth Award',
+  'Equity Champion',
+];
+
+const END_CONDITION_LABELS: Record<string, string> = {
+  full_dne: 'Shared Balance Achieved \u2014 The park will thrive',
+  partial_success: 'Partial Vision \u2014 More work needed',
+  time_ends: 'The Season Ends \u2014 Your progress carries forward',
+  veto_deadlock: 'Some visions proved incompatible \u2014 an important finding',
+};
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -191,16 +235,24 @@ const Phase5a: React.FC<{ session: GameSession }> = ({ session }) => {
       </div>
       {changed.length > 0 ? (
         <div className="space-y-1">
-          {changed.map((c, i) => (
-            <FadeSlide key={c.zone.id} delay={i * 0.2}>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="font-medium text-gray-200">{c.zone.name}:</span>
-                {conditionBadge(c.prev)}<span className="text-gray-400">&rarr;</span>{conditionBadge(c.zone.condition)}
-              </div>
-            </FadeSlide>
-          ))}
+          {changed.map((c, i) => {
+            const improved = ['good', 'fair'].indexOf(c.zone.condition) < ['good', 'fair'].indexOf(c.prev);
+            const improvedActual = c.zone.condition === 'good' || (c.zone.condition === 'fair' && (c.prev === 'poor' || c.prev === 'critical'));
+            const narrative = improvedActual
+              ? (ZONE_NARRATIVE_IMPROVED[c.zone.id] || 'Things are looking up')
+              : ZONE_NARRATIVE_DEGRADED;
+            return (
+              <FadeSlide key={c.zone.id} delay={i * 0.2}>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-medium text-gray-200">{c.zone.name}:</span>
+                  {conditionBadge(c.prev)}<span className="text-gray-400">&rarr;</span>{conditionBadge(c.zone.condition)}
+                </div>
+                <p className="text-xs text-gray-400 italic ml-2 mt-0.5">{narrative}</p>
+              </FadeSlide>
+            );
+          })}
         </div>
-      ) : <p className="text-gray-400 text-sm text-center">No zone conditions changed this round.</p>}
+      ) : <p className="text-gray-400 text-sm text-center">No zone conditions changed this season.</p>}
     </div>
   );
 };
@@ -227,7 +279,7 @@ const Phase5b: React.FC<{ session: GameSession; players: Player[] }> = ({ sessio
       </div>
       {/* Player income */}
       <div className="space-y-2">
-        <h4 className="text-xs uppercase tracking-wide text-gray-500">Player Income</h4>
+        <h4 className="text-xs uppercase tracking-wide text-gray-500">Seasonal Allocation</h4>
         {players.map((p, i) => {
           const income = PROFESSION_INCOME[p.roleId];
           const entries = Object.entries(income.base).filter(([, v]) => v > 0);
@@ -335,6 +387,7 @@ const PlayerUtilityCard: React.FC<{
                 </span>
                 <span className="text-gray-500 mx-1">=</span>
                 <span className="font-medium text-white">{product}</span>
+                {sat && <span className="text-xs text-emerald-300 italic ml-2">{OBJECTIVE_NARRATIVE[obj]}</span>}
               </div>
             </FadeSlide>
           );
@@ -390,10 +443,13 @@ const Phase5d: React.FC<{
           {players.map(p => {
             const w = WELFARE_WEIGHTS[p.roleId];
             const u = utilities[p.roleId];
+            const maxW = Math.max(...Object.values(WELFARE_WEIGHTS));
             return (
               <div key={p.id} className="flex gap-2 text-sm text-gray-300">
                 <span className="w-24">{roleName(p.roleId)}</span>
                 <span>{w} &times; {u} = <strong className="text-white">{fmt(w * u)}</strong></span>
+                <span className="text-xs text-gray-500 italic ml-1">{ROLE_NARRATIVE[p.roleId]}</span>
+                {w === maxW && <span className="text-xs text-cyan-300 ml-1">Citizen&apos;s voice weighs most</span>}
               </div>
             );
           })}
@@ -428,7 +484,7 @@ const Phase5d: React.FC<{
       {/* Step 4 */}
       <FadeSlide delay={3}>
         <div className="bg-gray-800/50 rounded p-3 space-y-2">
-          <h4 className="text-xs uppercase tracking-wide text-green-400 font-bold">Step 4: TOTAL CWS</h4>
+          <h4 className="text-xs uppercase tracking-wide text-green-400 font-bold">Step 4: TOTAL SVS (Shared Vision Score)</h4>
           <div className="text-sm text-gray-300">
             {fmt(cws.weighted_sum)} + {fmt(cws.equity_bonus)} + {cws.cp_bonus} ={' '}
             <strong className="text-xl text-white">{fmt(cws.total)}</strong>
@@ -478,7 +534,7 @@ const Phase5e: React.FC<{
                 <span className="text-sm font-bold text-white">{roleName(p.roleId)}</span>
                 {hasCrisis && (
                   <span className="ml-auto text-xs bg-red-600 text-white px-2 py-0.5 rounded font-bold">
-                    -2 all abilities
+                    Consequences of broken promises: -2 all abilities
                   </span>
                 )}
               </div>
@@ -494,9 +550,9 @@ const Phase5e: React.FC<{
                     const rounds = hist[obj] || 0;
                     const sat = satObjectives[obj];
                     let status: string, color: string;
-                    if (sat || rounds === 0) { status = '\u2713 Safe'; color = 'text-green-400'; }
-                    else if (rounds === 1) { status = '\u26A0 Warning'; color = 'text-yellow-400'; }
-                    else { status = 'CRISIS STATE'; color = 'text-red-400'; }
+                    if (sat || rounds === 0) { status = '\u2713 Promises kept'; color = 'text-green-400'; }
+                    else if (rounds === 1) { status = '\u26A0 Commitment at risk'; color = 'text-yellow-400'; }
+                    else { status = 'Commitment Consequence'; color = 'text-red-400'; }
                     return (
                       <tr key={obj} className="border-t border-gray-700/50">
                         <td className="py-1 text-gray-300">{OBJECTIVE_LABELS[obj]}</td>
@@ -547,7 +603,7 @@ const Phase5f: React.FC<{
                   <div className="text-xs text-white font-bold pt-0.5">Total: +{totalAward} CP</div>
                 </div>
               ) : (
-                <div className="text-xs text-gray-500 ml-8">No CP this round</div>
+                <div className="text-xs text-gray-500 ml-8">No CP this season</div>
               )}
               {leveledUp && (
                 <motion.div
@@ -565,6 +621,19 @@ const Phase5f: React.FC<{
           </FadeSlide>
         );
       })}
+      {/* Award Categories */}
+      <FadeSlide delay={players.length * 0.15 + 0.3}>
+        <div className="bg-gray-800/50 rounded p-3 mt-2">
+          <h4 className="text-xs uppercase tracking-wide text-yellow-400 font-bold mb-2">Season Awards</h4>
+          <div className="space-y-1">
+            {AWARD_CATEGORIES.map((cat) => (
+              <div key={cat} className="text-xs text-gray-300 flex items-center gap-2">
+                <span className="text-yellow-400">&#9733;</span> {cat}
+              </div>
+            ))}
+          </div>
+        </div>
+      </FadeSlide>
     </div>
   );
 };
@@ -588,16 +657,16 @@ const Phase5g: React.FC<{
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-lg font-black text-white">
-        <span className="text-2xl">&#127937;</span> NASH CHECK: The Referee Review
+        <span className="text-2xl">&#127937;</span> The Park Guardian Speaks
       </div>
 
       {/* Q1 */}
       <FadeSlide delay={0}>
         <div className="bg-gray-800/50 rounded p-3 space-y-1">
           <h4 className="text-xs uppercase tracking-wide text-cyan-400 font-bold">
-            Q1 -- Individual Thresholds
+            Q1 -- Is everyone sustained?
           </h4>
-          <p className="text-[11px] text-gray-500 italic">Is everyone above survival?</p>
+          <p className="text-[11px] text-gray-500 italic">Can each stakeholder continue their work?</p>
           {utilEntries.map(([roleId, u]) => {
             const t = SURVIVAL_THRESHOLDS[roleId];
             const pass = u >= t;
@@ -620,10 +689,10 @@ const Phase5g: React.FC<{
       <FadeSlide delay={1}>
         <div className="bg-gray-800/50 rounded p-3 space-y-1">
           <h4 className="text-xs uppercase tracking-wide text-orange-400 font-bold">
-            Q2 -- No Profitable Deviation
+            Q2 -- Did anyone choose selfishly?
           </h4>
           <div className="text-xs text-gray-500 italic mb-1">
-            S-FIXED players ({fixedRoles.map(r => roleName(r)).join(', ')}): not reviewed -- institutionally constrained
+            Could any free stakeholder have done better alone? S-GUIDED players ({fixedRoles.map(r => roleName(r)).join(', ')}): not reviewed -- institutionally guided
           </div>
           {envRoles.map(roleId => {
             const actual = utilities[roleId] ?? 0;
@@ -633,7 +702,7 @@ const Phase5g: React.FC<{
               <div key={roleId} className="text-sm text-gray-300">
                 {roleName(roleId)}: actual={actual}, best solo={bestSolo}{' '}
                 <span className={pass ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
-                  {pass ? 'NO profitable deviation \u2713' : 'profitable deviation exists \u2717'}
+                  {pass ? 'Chose collaboration over solo \u2713' : 'solo path exists \u2717'}
                 </span>
               </div>
             );
@@ -650,9 +719,9 @@ const Phase5g: React.FC<{
       <FadeSlide delay={2}>
         <div className="bg-gray-800/50 rounded p-3 space-y-1">
           <h4 className="text-xs uppercase tracking-wide text-pink-400 font-bold">
-            Q3 -- Equity + CWS
+            Q3 -- Is the vision shared fairly?
           </h4>
-          <p className="text-[11px] text-gray-500 italic">Is it fair AND sufficient?</p>
+          <p className="text-[11px] text-gray-500 italic">Is the shared vision both equitable and sufficient?</p>
           <div className="text-sm text-gray-300">
             Variance: {fmt(nash_q3.variance)} &le; 4.00?{' '}
             <span className={nash_q3.variance <= 4 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
@@ -660,7 +729,7 @@ const Phase5g: React.FC<{
             </span>
           </div>
           <div className="text-sm text-gray-300">
-            CWS: {fmt(cws.total)} &ge; 75?{' '}
+            SVS: {fmt(cws.total)} &ge; 75?{' '}
             <span className={nash_q3.cws_above_target ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
               {nash_q3.cws_above_target ? 'YES' : 'NO'}
             </span>
@@ -676,13 +745,13 @@ const Phase5g: React.FC<{
         </div>
       </FadeSlide>
 
-      {/* DNE Verdict */}
+      {/* Shared Balance Verdict */}
       <FadeSlide delay={3.5}>
         {allPass ? (
           <div className="relative bg-gradient-to-r from-yellow-600/30 to-yellow-500/20 border-2 border-yellow-500 rounded-lg p-5 text-center overflow-hidden">
             <Confetti />
             <div className="text-2xl font-black text-yellow-400 mb-1">
-              &#127942; NASH EQUILIBRIUM ACHIEVED! DNE FOUND!
+              &#127942; SHARED BALANCE POINT ACHIEVED!
             </div>
             <div className="text-sm text-yellow-200">
               The park is restored. Every stakeholder found their balance.
@@ -690,7 +759,7 @@ const Phase5g: React.FC<{
           </div>
         ) : (
           <div className="bg-gray-800/70 border border-gray-600 rounded-lg p-4 space-y-2">
-            <div className="text-lg font-black text-gray-300">DNE Not Yet Achieved</div>
+            <div className="text-lg font-black text-gray-300">Shared Balance Not Yet Achieved</div>
             <div className="text-sm text-gray-400 space-y-1">
               {!nash_q1.passed && (
                 <div>Q1 failed: {nash_q1.failing_players.map(f =>
@@ -700,7 +769,7 @@ const Phase5g: React.FC<{
                 <div>Q3 failed: variance {fmt(nash_q3.variance)} exceeds equity band of 4.00</div>
               )}
               {!nash_q3.passed && !nash_q3.cws_above_target && (
-                <div>Q3 failed: CWS {fmt(cws.total)} below target of 75</div>
+                <div>Q3 failed: SVS {fmt(cws.total)} below target of 75</div>
               )}
             </div>
             {nashOutput.optimal_next_action.reasoning && (
@@ -769,8 +838,8 @@ export default function ScoringPhase({ session, players, roundCPAwards, onPhaseC
     <div ref={containerRef} className="relative max-w-2xl mx-auto px-4 py-6 space-y-6 overflow-y-auto max-h-[85vh]">
       {/* Header */}
       <div className="text-center">
-        <h2 className="text-2xl font-black text-white tracking-tight">Phase 5: Scoring & Nash Check</h2>
-        <p className="text-sm text-gray-400">Round {session.currentRound} of {session.totalRounds}</p>
+        <h2 className="text-2xl font-black text-white tracking-tight">Phase 5: Scoring & The Park Guardian</h2>
+        <p className="text-sm text-gray-400">Season {session.currentRound} of {session.totalRounds}</p>
       </div>
 
       {/* Sub-phase progress */}
@@ -825,6 +894,11 @@ export default function ScoringPhase({ session, players, roundCPAwards, onPhaseC
       {/* Final button */}
       {finished && (
         <FadeSlide delay={0.3}>
+          {isGameEnd && END_CONDITION_LABELS[endCondition] && (
+            <div className="text-center text-sm text-gray-300 italic mb-3">
+              {END_CONDITION_LABELS[endCondition]}
+            </div>
+          )}
           <div className="flex justify-center pt-4 pb-8">
             <button
               onClick={handleComplete}
@@ -834,7 +908,7 @@ export default function ScoringPhase({ session, players, roundCPAwards, onPhaseC
                   : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500'
               }`}
             >
-              {isGameEnd ? 'Proceed to Results \u2192' : 'Continue to Next Round \u2192'}
+              {isGameEnd ? 'Proceed to Results \u2192' : 'Continue to Next Season \u2192'}
             </button>
           </div>
         </FadeSlide>
@@ -842,7 +916,7 @@ export default function ScoringPhase({ session, players, roundCPAwards, onPhaseC
 
       <PhaseNavigation
         canContinue={finished}
-        continueLabel={isGameEnd ? 'Proceed to Results \u2192' : 'Continue to Next Round \u2192'}
+        continueLabel={isGameEnd ? 'Proceed to Results \u2192' : 'Continue to Next Season \u2192'}
         onContinue={() => {
           console.log('PHASE TRANSITION: Scoring →', isGameEnd ? 'Debrief' : 'Next Round');
           handleComplete();

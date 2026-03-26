@@ -119,7 +119,7 @@ export function SeriesBuilder({ players, activeChallenge, seriesCards, coalition
           </div>
           <div className="flex items-center justify-between text-[10px] mt-0.5">
             <span className="text-stone-500">Need: {'\u2265'} {threshold}</span>
-            {coalitionBonus > 0 && <span className="text-indigo-400">+{coalitionBonus} coalition</span>}
+            {coalitionBonus > 0 && <span className="text-indigo-400">+{coalitionBonus} alliance</span>}
             {multiRoleBonus > 0 && <span className="text-purple-400">+{multiRoleBonus} multi-role ({uniqueRoles.size} roles)</span>}
           </div>
         </div>

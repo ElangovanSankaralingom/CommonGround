@@ -175,7 +175,7 @@ const StagingArea: React.FC<StagingAreaProps> = ({
             </div>
             {series.coalitionPactActive && (
               <span className="bg-blue-100 text-blue-700 rounded-lg px-3 py-1.5 font-semibold">
-                Coalition Active
+                Alliance Active
               </span>
             )}
           </div>

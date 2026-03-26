@@ -31,7 +31,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
         totalWeight: 5,
       },
       mission: {
-        description: 'Contribute to raising the Collective Welfare Score to the target',
+        description: 'Contribute to raising the Shared Vision Score to the target',
         subGoals: [
           { id: 'adm_miss_1', description: 'Contribute to resolving at least 2 challenges', weight: 3, condition: { type: 'challenges_resolved', params: { minContributions: 2 } }, satisfied: false },
           { id: 'adm_miss_2', description: 'Ensure CWS reaches target', weight: 5, condition: { type: 'custom', params: { check: 'cws_target_met' } }, satisfied: false },

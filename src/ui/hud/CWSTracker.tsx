@@ -101,7 +101,7 @@ export function CWSTracker({ currentScore, targetScore, history }: CWSTrackerPro
       <div className="flex items-center gap-1.5">
         <span className="text-amber-400 text-lg">★</span>
         <span className="text-stone-300 text-sm font-semibold tracking-wide uppercase">
-          CWS
+          SVS
         </span>
       </div>
 

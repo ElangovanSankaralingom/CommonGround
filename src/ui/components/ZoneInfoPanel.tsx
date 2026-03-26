@@ -95,7 +95,7 @@ export function ZoneInfoPanel({ zone, players, adjacentZones, onClose, onNavigat
           </div>
           {zone.commonPoolConfig && (
             <p className="text-xs text-blue-400 mt-2">
-              Token: {zone.commonPoolConfig.tokenName} | Auto +{zone.commonPoolConfig.autoIncomePerRound}/round
+              Token: {zone.commonPoolConfig.tokenName} | Auto +{zone.commonPoolConfig.autoIncomePerRound}/season
               {!zone.investedThisRound && <span className="text-orange-400 ml-1">| Decay risk</span>}
             </p>
           )}

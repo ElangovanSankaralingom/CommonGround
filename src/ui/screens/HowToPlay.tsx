@@ -15,7 +15,7 @@ const CHAPTERS = [
   { id: 2, title: 'The Five Roles', accent: '#2E86AB' },
   { id: 3, title: 'The Board', accent: '#7BA05B' },
   { id: 4, title: 'The Cards', accent: '#E67E22' },
-  { id: 5, title: 'How a Round Works', accent: '#8E44AD' },
+  { id: 5, title: 'How a Season Works', accent: '#8E44AD' },
   { id: 6, title: 'Series & Combinations', accent: '#F4D03F' },
   { id: 7, title: 'Winning & Losing', accent: '#27AE60' },
   { id: 8, title: 'Quick Reference', accent: '#1B3A5C' },

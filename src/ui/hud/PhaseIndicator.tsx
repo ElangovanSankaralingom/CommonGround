@@ -38,7 +38,7 @@ const DISPLAY_PHASES: { label: string; number: string; enginePhases: GamePhase[]
     label: 'Scoring',
     number: '5',
     enginePhases: ['round_end_accounting', 'level_check', 'round_end'],
-    guidance: 'Zone conditions update, utilities recalculate, CWS updates, Nash check runs.',
+    guidance: 'Zone conditions update, utilities recalculate, SVS updates, Shared Balance check runs.',
   },
 ];
 
@@ -121,7 +121,7 @@ export function PhaseIndicator({ currentPhase, currentRound, totalRounds, gameLe
             initial={{ y: -8, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
           >
-            <span className="text-stone-400 text-xs uppercase tracking-wider font-semibold">Round</span>
+            <span className="text-stone-400 text-xs uppercase tracking-wider font-semibold">Season</span>
             <span className="text-lg font-bold text-amber-400">{currentRound}</span>
             <span className="text-stone-500 text-sm">/{totalRounds}</span>
           </motion.div>

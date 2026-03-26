@@ -14,12 +14,12 @@ const bannerConfig = {
   full_dne: {
     gradient: 'bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-600',
     text: 'text-stone-900',
-    title: 'FULL SUCCESS — Nash Equilibrium Achieved',
+    title: 'FULL SUCCESS — Shared Balance Point Achieved',
   },
   partial_success: {
     gradient: 'bg-gradient-to-r from-stone-400 via-stone-300 to-stone-400',
     text: 'text-stone-800',
-    title: 'PARTIAL SUCCESS — Progress made, but equilibrium not reached',
+    title: 'PARTIAL SUCCESS — Progress made, but balance not reached',
   },
   time_ends: {
     gradient: 'bg-gradient-to-r from-amber-800 via-amber-700 to-amber-800',
@@ -132,7 +132,7 @@ function EndGameBanner({
                 onClick={onNextRound}
                 className="px-6 py-3 rounded-xl bg-stone-700 text-white font-semibold shadow-lg"
               >
-                Continue to Next Round
+                Continue to Next Season
               </motion.button>
               <motion.button
                 whileHover={{ scale: 1.05 }}
@@ -179,8 +179,8 @@ function RoundTransitionScreen({
       className="flex flex-col items-center justify-center min-h-[60vh] p-8 space-y-8"
     >
       <h1 className="text-3xl font-bold text-stone-100">
-        Round {currentRound} Complete.{' '}
-        <span className="text-amber-400">Preparing Round {nextRound}...</span>
+        Season {currentRound} Complete.{' '}
+        <span className="text-amber-400">Preparing Season {nextRound}...</span>
       </h1>
 
       <div className="w-full max-w-md space-y-3 bg-stone-800/60 rounded-xl p-6 border border-stone-700">
@@ -203,7 +203,7 @@ function RoundTransitionScreen({
             exit={{ opacity: 0, height: 0 }}
             className="w-full max-w-md bg-red-900/40 border border-red-700 rounded-xl p-4 text-red-200 text-center"
           >
-            Unresolved challenges persist — difficulty +2 next round
+            Unresolved challenges persist — difficulty +2 next season
           </motion.div>
         )}
       </AnimatePresence>
@@ -214,7 +214,7 @@ function RoundTransitionScreen({
         onClick={onNextRound}
         className="px-8 py-4 rounded-xl text-lg font-bold bg-amber-600 hover:bg-amber-500 text-stone-900 shadow-lg transition-colors"
       >
-        Begin Round {nextRound} &rarr;
+        Begin Season {nextRound} &rarr;
       </motion.button>
     </motion.div>
   );

@@ -611,7 +611,7 @@ function EventCardsTab() {
       </AnimatePresence>
 
       <p className="text-sm mb-4" style={{ color: '#6B5339' }}>
-        Events are triggered by the die roll at the start of each round. They can help or hinder your progress.
+        Events are triggered by the die roll at the start of each season. They can help or hinder your progress.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {/* Negative column */}
@@ -681,7 +681,7 @@ function TradeCardsTab() {
 
   const TYPE_LABELS: Record<string, string> = {
     resource_swap: 'Resource Swap',
-    coalition_pact: 'Coalition Pact',
+    coalition_pact: 'Alliance Pact',
     mediation_request: 'Mediation Request',
     compromise: 'Compromise',
   };
@@ -934,7 +934,7 @@ export default function Chapter4({ onNext, onBack }: Chapter4Props) {
           className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
           style={{ background: '#E67E22' }}
         >
-          How a Round Works {'->'}
+          How a Season Works {'->'}
         </button>
       </div>
     </div>

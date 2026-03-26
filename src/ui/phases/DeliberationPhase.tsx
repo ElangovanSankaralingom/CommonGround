@@ -121,7 +121,7 @@ function ObjDash({ players, session }: { players: Player[]; session: GameSession
 	);
 }
 
-// ─── Action Sequence Builder ────────────────────────────────────
+// ─── Strategy Table ─────────────────────────────────────────────
 function SeqBuilder({ seq, setSeq, sel, setSel }: {
 	seq: (string | null)[]; setSeq: React.Dispatch<React.SetStateAction<(string | null)[]>>;
 	sel: string | null; setSel: React.Dispatch<React.SetStateAction<string | null>>;
@@ -135,7 +135,7 @@ function SeqBuilder({ seq, setSeq, sel, setSel }: {
 	const compat = (a: string | null, b: string | null): boolean | null => (!a || !b) ? null : (COMPAT[a] || []).includes(b);
 	return (
 		<div className="bg-gray-900/60 rounded-lg p-3 mb-3">
-			<h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Action Sequence Builder</h4>
+			<h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Strategy Table</h4>
 			<div className="flex gap-1.5 mb-3 flex-wrap">{TILES.map(t => (
 				<motion.button key={t.id} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => clickTile(t.id)}
 					className={`w-[60px] h-[40px] rounded flex flex-col items-center justify-center text-white text-[10px] font-bold cursor-pointer border-2 transition-all ${sel === t.id ? 'border-white ring-2 ring-white/40' : seq.includes(t.id) ? 'border-transparent opacity-40' : 'border-transparent'}`}
@@ -217,7 +217,7 @@ function TradePanel({ cp, players, session, onPropose, onAccept, onReject }: {
 	);
 }
 
-// ─── Coalition Panel ────────────────────────────────────────────
+// ─── Alliance Panel ─────────────────────────────────────────────
 function CoalPanel({ cp, players, session, onForm }: {
 	cp: Player; players: Player[]; session: GameSession; onForm: DeliberationPhaseProps['onFormCoalition'];
 }) {
@@ -229,7 +229,7 @@ function CoalPanel({ cp, players, session, onForm }: {
 	const toggle = (id: string) => setSel(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
 	return (
 		<div className="space-y-3">
-			<h5 className="text-xs font-bold text-gray-400">Form Coalition</h5>
+			<h5 className="text-xs font-bold text-gray-400">Forge Alliance</h5>
 			<div className="flex gap-1.5 flex-wrap">{others.map(p => (
 				<button key={p.id} onClick={() => toggle(p.id)} className={`px-2 py-1 rounded text-xs font-bold border-2 transition-all ${sel.includes(p.id) ? 'border-white ring-1 ring-white/30' : 'border-transparent'}`} style={{ backgroundColor: ROLE_COLORS[p.roleId] + '60' }}>{rn(p.roleId)}</button>
 			))}</div>
@@ -237,11 +237,11 @@ function CoalPanel({ cp, players, session, onForm }: {
 				<option value="">Select target zone...</option>
 				{zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
 			</select>
-			<button onClick={() => { onForm(sel, zone); setSel([]); }} disabled={!sel.length || !zone} className="w-full py-1.5 rounded bg-purple-600 text-white text-xs font-bold disabled:opacity-30 hover:bg-purple-500">Form Coalition</button>
+			<button onClick={() => { onForm(sel, zone); setSel([]); }} disabled={!sel.length || !zone} className="w-full py-1.5 rounded bg-purple-600 text-white text-xs font-bold disabled:opacity-30 hover:bg-purple-500">Forge Alliance</button>
 			{coals.map(c => (
 				<div key={c.id} className="bg-gray-800 rounded p-2 mb-1 text-xs text-gray-300 border-l-2 border-purple-400">
 					<div className="font-bold text-purple-300">{c.participants.map(p => rn(p.roleId)).join(' + ')}</div>
-					<div className="text-[10px] text-gray-500">+2 series bonus | Target: {session.board.zones[c.targetZoneId]?.name || c.targetZoneId}</div>
+					<div className="text-[10px] text-gray-500">+2 alliance bonus | Target: {session.board.zones[c.targetZoneId]?.name || c.targetZoneId}</div>
 				</div>
 			))}
 		</div>
@@ -259,7 +259,7 @@ function PromPanel({ cp, players, session, onPromise }: {
 	const proms: GamePromise[] = session.promises || [];
 	return (
 		<div className="space-y-3">
-			<h5 className="text-xs font-bold text-gray-400">Promise Board</h5>
+			<h5 className="text-xs font-bold text-gray-400">Promise Wall</h5>
 			{proms.length > 0 && <div className="space-y-1 max-h-[120px] overflow-y-auto">{proms.map(pr => {
 				const f = players.find(p => p.id === pr.fromPlayerId), t = players.find(p => p.id === pr.toPlayerId);
 				return (<div key={pr.id} className="rounded p-1.5 text-xs border-l-2" style={{ borderColor: ROLE_COLORS[f?.roleId || 'citizen'], backgroundColor: ROLE_COLORS[f?.roleId || 'citizen'] + '15' }}>
@@ -268,7 +268,7 @@ function PromPanel({ cp, players, session, onPromise }: {
 				</div>);
 			})}</div>}
 			<div className="bg-gray-800/60 rounded p-2 space-y-2">
-				<h6 className="text-[10px] font-bold text-gray-400 uppercase">Make Promise</h6>
+				<h6 className="text-[10px] font-bold text-gray-400 uppercase">Carve Commitment</h6>
 				<select value={to} onChange={e => setTo(e.target.value)} className="w-full bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600">
 					<option value="">Select player...</option>{others.map(p => <option key={p.id} value={p.id}>{rn(p.roleId)}</option>)}
 				</select>
@@ -278,7 +278,7 @@ function PromPanel({ cp, players, session, onPromise }: {
 					</select>
 					<input type="number" min={1} max={10} value={amt} onChange={e => setAmt(Number(e.target.value))} className="w-14 bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600 text-center" />
 				</div>
-				<button onClick={() => { if (to) { onPromise(to, res, amt); setTo(''); } }} disabled={!to} className="w-full py-1 rounded bg-amber-600 text-white text-xs font-bold disabled:opacity-30 hover:bg-amber-500">Post Promise</button>
+				<button onClick={() => { if (to) { onPromise(to, res, amt); setTo(''); } }} disabled={!to} className="w-full py-1 rounded bg-amber-600 text-white text-xs font-bold disabled:opacity-30 hover:bg-amber-500">Carve Commitment</button>
 			</div>
 		</div>
 	);
@@ -423,7 +423,7 @@ export default function DeliberationPhase(props: DeliberationPhaseProps) {
 			<AnimatePresence mode="wait">
 				{stage === 'intro' && (
 					<motion.div key="intro" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center h-[60vh] gap-4">
-						<motion.h1 className="text-4xl font-black tracking-tight" initial={{ scale: 0.8 }} animate={{ scale: 1 }}>Phase 3: Deliberation</motion.h1>
+						<motion.h1 className="text-4xl font-black tracking-tight" initial={{ scale: 0.8 }} animate={{ scale: 1 }}>Phase 3: See the Vision</motion.h1>
 						<p className="text-gray-400 text-lg text-center max-w-md">Negotiate, discover resources, and plan your strategy.</p>
 						<div className="text-2xl font-mono text-yellow-400">Timer: {ft(deliberationTimeRemaining)}</div>
 					</motion.div>
@@ -451,13 +451,13 @@ export default function DeliberationPhase(props: DeliberationPhaseProps) {
 						))}</div>
 						<div ref={slRef} className="relative flex w-full rounded-lg overflow-hidden border border-gray-700" style={{ height: '340px' }} onMouseMove={onSliderMove}>
 							<div className="overflow-hidden" style={{ width: `${slider}%` }}>
-								<div className="p-3 h-full"><div className="text-[10px] font-bold text-gray-400 uppercase mb-2 text-center">CURRENT STATE</div>{miniGrid(false)}</div>
+								<div className="p-3 h-full"><div className="text-[10px] font-bold text-gray-400 uppercase mb-2 text-center">What We Have</div>{miniGrid(false)}</div>
 							</div>
 							<div className="absolute top-0 bottom-0 w-1 bg-white/60 cursor-col-resize z-10 hover:bg-white" style={{ left: `${slider}%`, transform: 'translateX(-50%)' }} onMouseDown={() => { dragging.current = true; }}>
 								<div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-white border-2 border-gray-600 flex items-center justify-center text-gray-800 text-xs font-bold">⇔</div>
 							</div>
 							<div className="overflow-hidden" style={{ width: `${100 - slider}%` }}>
-								<div className="p-3 h-full"><div className="text-[10px] font-bold text-gray-400 uppercase mb-2 text-center">POTENTIAL STATE</div>{miniGrid(true)}</div>
+								<div className="p-3 h-full"><div className="text-[10px] font-bold text-gray-400 uppercase mb-2 text-center">What We Could Build</div>{miniGrid(true)}</div>
 							</div>
 						</div>
 						{ispyDone && (
@@ -480,7 +480,7 @@ export default function DeliberationPhase(props: DeliberationPhaseProps) {
 							{(['trading', 'coalition', 'promises', 'series'] as WTab[]).map(t => (
 								<button key={t} onClick={() => { setTab(t); setLastAct(p => ({ ...p, [currentPlayerId]: Date.now() })); }}
 									className={`px-3 py-1.5 rounded-t text-xs font-bold uppercase transition-colors ${tab === t ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
-									{t.charAt(0).toUpperCase() + t.slice(1)}
+									{{ trading: 'Exchange Market', coalition: 'Alliance Forge', promises: 'Promise Wall', series: 'Strategy Table' }[t]}
 								</button>
 							))}
 						</div>
@@ -490,7 +490,7 @@ export default function DeliberationPhase(props: DeliberationPhaseProps) {
 							{tab === 'promises' && <PromPanel cp={cp} players={players} session={session} onPromise={onMakePromise} />}
 							{tab === 'series' && (
 								<div className="text-sm text-gray-400">
-									<h5 className="text-xs font-bold text-gray-400 mb-2">Strategy Sequence Preview</h5>
+									<h5 className="text-xs font-bold text-gray-400 mb-2">Strategy Table Preview</h5>
 									<div className="flex gap-1 flex-wrap mb-3">
 										{seq.filter(Boolean).map((id, i) => { const t = TILES.find(a => a.id === id); return t ? <span key={i} className="px-2 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: t.color }}>{t.icon} {t.label}</span> : null; })}
 										{!seq.filter(Boolean).length && <span className="text-gray-600 text-xs italic">No tiles placed yet. Use the sequence builder above.</span>}
@@ -508,7 +508,7 @@ export default function DeliberationPhase(props: DeliberationPhaseProps) {
 						</div>
 						<AnimatePresence>{eqPrompt && (
 							<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center text-sm text-yellow-300 bg-yellow-900/30 rounded px-3 py-2">
-								{rn(players.find(p => p.id === eqPrompt)?.roleId || 'citizen')} hasn't interacted recently. Consider including their resources.
+								Every voice shapes the Shared Vision. {rn(players.find(p => p.id === eqPrompt)?.roleId || 'citizen')}, what does the park need from your perspective?
 							</motion.div>
 						)}</AnimatePresence>
 						<div className="flex items-center justify-between bg-gray-900/80 rounded-lg p-3">
@@ -532,12 +532,12 @@ export default function DeliberationPhase(props: DeliberationPhaseProps) {
 
 				{stage === 'summary' && (
 					<motion.div key="summary" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center h-[60vh] gap-3">
-						<h2 className="text-2xl font-bold text-gray-200">Deliberation Summary</h2>
+						<h2 className="text-2xl font-bold text-gray-200">Vision Planning Summary</h2>
 						<div className="bg-gray-800 rounded-lg p-6 w-full max-w-md space-y-2 text-sm">
 							{[
 								['Strategy Sequence', seq.filter(Boolean).length > 0 ? seq.filter(Boolean).map(id => TILES.find(t => t.id === id)?.label).join(' → ') : 'No strategy set'],
 								['Trades Completed', String((session.tradeOffers || []).filter(t => t.status === 'accepted' || t.status === 'completed').length)],
-								['Coalitions Formed', String((session.activeCoalitions || []).length)],
+								['Alliances Forged', String((session.activeCoalitions || []).length)],
 								['Promises Made', String((session.promises || []).length)],
 							].map(([label, val]) => (
 								<div key={label} className="flex justify-between text-gray-300">
@@ -554,7 +554,7 @@ export default function DeliberationPhase(props: DeliberationPhaseProps) {
 
 			<PhaseNavigation
 				canContinue={stage === 'strategy' || stage === 'summary'}
-				continueLabel="Continue to Phase 4: Action \u2192"
+				continueLabel="Continue to Phase 4: The Team Play \u2192"
 				onContinue={() => {
 					console.log('PHASE TRANSITION: Deliberation → Action');
 					onPhaseComplete();

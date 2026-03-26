@@ -186,7 +186,7 @@ const ChallengeDisplay: React.FC<ChallengeDisplayProps> = ({
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                     <path d="M6 2L10 8H2L6 2Z" fill="currentColor" />
                   </svg>
-                  <span className="font-semibold">Escalates +{challenge.escalationPerRound}/round</span>
+                  <span className="font-semibold">Escalates +{challenge.escalationPerRound}/season</span>
                 </div>
               )}
 
@@ -235,17 +235,17 @@ const ChallengeDisplay: React.FC<ChallengeDisplayProps> = ({
                   <div className="bg-emerald-900/30 rounded p-2">
                     <p className="text-emerald-400 text-xs font-bold">Full Success</p>
                     <p className="text-stone-300 text-xs">{challenge.hiddenBack.outcomes.full.description}</p>
-                    <p className="text-emerald-300 text-[10px]">CWS +{challenge.hiddenBack.outcomes.full.cwsBonus} | {challenge.hiddenBack.outcomes.full.zoneEffect}</p>
+                    <p className="text-emerald-300 text-[10px]">SVS +{challenge.hiddenBack.outcomes.full.cwsBonus} | {challenge.hiddenBack.outcomes.full.zoneEffect}</p>
                   </div>
                   <div className="bg-amber-900/30 rounded p-2">
                     <p className="text-amber-400 text-xs font-bold">Partial Success</p>
                     <p className="text-stone-300 text-xs">{challenge.hiddenBack.outcomes.partial.description}</p>
-                    <p className="text-amber-300 text-[10px]">CWS +{challenge.hiddenBack.outcomes.partial.cwsBonus} | {challenge.hiddenBack.outcomes.partial.zoneEffect}</p>
+                    <p className="text-amber-300 text-[10px]">SVS +{challenge.hiddenBack.outcomes.partial.cwsBonus} | {challenge.hiddenBack.outcomes.partial.zoneEffect}</p>
                   </div>
                   <div className="bg-red-900/30 rounded p-2">
                     <p className="text-red-400 text-xs font-bold">Failure</p>
                     <p className="text-stone-300 text-xs">{challenge.hiddenBack.outcomes.fail.description}</p>
-                    <p className="text-red-300 text-[10px]">CWS -{challenge.hiddenBack.outcomes.fail.cwsPenalty} | {challenge.hiddenBack.outcomes.fail.zoneEffect}</p>
+                    <p className="text-red-300 text-[10px]">SVS -{challenge.hiddenBack.outcomes.fail.cwsPenalty} | {challenge.hiddenBack.outcomes.fail.zoneEffect}</p>
                   </div>
                 </div>
 
