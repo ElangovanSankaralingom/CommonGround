@@ -38,20 +38,21 @@ const DOT_LAYOUTS: Record<number, [number, number][]> = {
   6: [[0, 0], [0, 1], [0, 2], [2, 0], [2, 1], [2, 2]],
 };
 
-function DieFace({ value, size = 80 }: { value: number; size?: number }) {
+function DieFace({ value, size = 120 }: { value: number; size?: number }) {
   const dots = DOT_LAYOUTS[Math.max(1, Math.min(6, value))] ?? DOT_LAYOUTS[1];
   const padding = size * 0.2;
   const cellSize = (size - padding * 2) / 2;
-  const dotSize = 10;
+  const dotSize = Math.round(size * 0.1);
 
   return (
     <div
-      className="relative rounded-xl shadow-lg"
+      className="relative rounded-2xl"
       style={{
         width: size,
         height: size,
-        backgroundColor: '#ffffff',
-        border: '2px solid rgba(0,0,0,0.15)',
+        backgroundColor: '#FAF7F0',
+        border: '3px solid #C4B69C',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.25), inset 0 2px 6px rgba(255,255,255,0.5)',
       }}
     >
       {dots.map(([col, row], i) => (
@@ -61,7 +62,8 @@ function DieFace({ value, size = 80 }: { value: number; size?: number }) {
           style={{
             width: dotSize,
             height: dotSize,
-            backgroundColor: '#333',
+            backgroundColor: '#2C2C2C',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
             left: padding + col * cellSize - dotSize / 2,
             top: padding + row * cellSize - dotSize / 2,
           }}
@@ -429,25 +431,36 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
 
             <h2 className="text-white text-2xl font-bold mb-8">Roll the Event Die</h2>
 
-            {/* Single d6 die */}
+            {/* Single d6 die — shake animation while rolling */}
             <motion.div
               className="cursor-pointer mb-8"
               animate={isRolling ? {
-                rotateX: [0, 720, 1080, 1440],
-                rotateY: [0, 540, 900, 1260],
-                scale: [1, 1.3, 0.9, 1.15, 1],
-              } : {}}
+                rotate: [0, -8, 6, -10, 8, -5, 7, -9, 5, 0],
+                x: [0, -4, 5, -6, 4, -3, 6, -5, 3, 0],
+                y: [0, 3, -4, 5, -3, 4, -5, 3, -4, 0],
+                scale: [1, 1.08, 0.95, 1.1, 0.97, 1.05, 0.98, 1.06, 1.02, 1],
+              } : {
+                rotate: 0,
+                x: 0,
+                y: 0,
+                scale: 1,
+              }}
               transition={isRolling ? {
-                duration: 1.5,
+                duration: 0.4,
+                repeat: Infinity,
+                ease: 'linear',
+              } : {
                 type: 'spring',
-                stiffness: 80,
-              } : {}}
-              style={{ perspective: 600 }}
+                stiffness: 300,
+                damping: 20,
+              }}
+              whileHover={!isRolling && !eventDieResult ? { scale: 1.08, y: -4 } : {}}
+              whileTap={!isRolling && !eventDieResult ? { scale: 0.95 } : {}}
               onClick={() => {
                 if (!isRolling && !eventDieResult) handleRoll();
               }}
             >
-              <DieFace value={shownValue} size={120} />
+              <DieFace value={shownValue} size={140} />
             </motion.div>
 
             {!isRolling && !eventDieResult && (
@@ -497,7 +510,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
             </motion.div>
 
             {/* For neutral: show Continue button immediately */}
-            {outcomeInfo.type === 'stable' && (
+            {outcomeInfo.type === 'stable' ? (
               <motion.button
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -508,6 +521,19 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
                 className="px-8 py-3 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-lg shadow-lg shadow-amber-500/30 transition-all"
               >
                 Continue &rarr;
+              </motion.button>
+            ) : (
+              /* For non-neutral: show a dimmed skip button after 3s in case auto-advance chain breaks */
+              <motion.button
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 0.6 }}
+                transition={{ delay: 3 }}
+                whileHover={{ opacity: 1, scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setStage('continue')}
+                className="mt-4 px-6 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm"
+              >
+                Skip to Continue &rarr;
               </motion.button>
             )}
           </motion.div>
