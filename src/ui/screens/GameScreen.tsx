@@ -20,7 +20,7 @@ import { CHALLENGE_CATEGORY_COLORS, WELFARE_WEIGHTS, OBJECTIVE_WEIGHTS, BUCHI_OB
 import { EventRollPhase } from '../phases/EventRollPhase';
 import { ChallengePhase } from '../phases/ChallengePhase';
 import DeliberationPhase from '../phases/DeliberationPhase';
-import BasketballPhase from '../phases/BasketballPhase';
+import RelayRacePhase from '../phases/RelayRacePhase';
 import ScoringPhase from '../phases/ScoringPhase';
 import RoundTransition from '../phases/RoundTransition';
 import { PhaseTransitionCard } from '../effects/PhaseTransitionCard';
@@ -756,7 +756,7 @@ export default function GameScreen() {
 
   // ── Gamified Flow State ────────────────────────────────────────
   const [gamifiedPhase, setGamifiedPhase] = useState<
-    'event_roll' | 'challenge' | 'deliberation' | 'basketball' | 'scoring' | 'round_transition' | 'phase_transition' | null
+    'event_roll' | 'challenge' | 'deliberation' | 'relay_race' | 'scoring' | 'round_transition' | 'phase_transition' | null
   >(null);
   const [phaseTransition, setPhaseTransition] = useState<{
     from: number; to: number; fromName: string; toName: string;
@@ -765,44 +765,20 @@ export default function GameScreen() {
   const [lastEndCondition, setLastEndCondition] = useState<string>('none');
   const [roundCPAwards, setRoundCPAwards] = useState<Record<string, { amount: number; reason: string }[]>>({});
 
-  // Auto-activate gamified phases based on game phase
-  // This is the FALLBACK — showPhaseTransition is the primary mechanism
+  // Gamified phase activation — ONLY activates when gamifiedPhase is null (no active gamified overlay)
+  // The primary mechanism is the showPhaseTransition chain called by each phase's onPhaseComplete.
+  // This useEffect only handles INITIAL activation (e.g., after payment day) and recovery from null state.
   React.useEffect(() => {
     if (!session) return;
-    // Don't interrupt phase transitions in progress
-    if (gamifiedPhase === 'phase_transition') return;
+    if (gamifiedPhase !== null) return; // Don't interfere if a gamified phase is already active
 
     const phase = session.currentPhase;
-    console.log('PHASE AUTO-ACTIVATE: session.currentPhase =', phase, '| gamifiedPhase =', gamifiedPhase);
-
-    if (phase === 'payment_day') {
-      // Payment Day handled by existing overlay, then manually transitions to event_roll
-    } else if (phase === 'event_roll' && gamifiedPhase !== 'event_roll') {
-      console.log('PHASE TRANSITION: auto-activating event_roll');
+    // Only auto-activate event_roll — everything else is driven by the onPhaseComplete chain
+    if (phase === 'event_roll') {
+      console.log('PHASE AUTO-ACTIVATE: event_roll (initial activation)');
       setGamifiedPhase('event_roll');
-    } else if (phase === 'deliberation' && gamifiedPhase !== 'deliberation') {
-      console.log('PHASE TRANSITION: auto-activating deliberation');
-      setGamifiedPhase('deliberation');
-    } else if ((phase === 'individual_action' || phase === 'action_resolution') && gamifiedPhase !== 'basketball' && gamifiedPhase !== 'scoring') {
-      if (getActiveChallenge()) {
-        console.log('PHASE TRANSITION: auto-activating basketball');
-        setGamifiedPhase('basketball');
-      } else {
-        console.log('PHASE TRANSITION: no challenge, skipping basketball → scoring');
-        advancePhase();
-      }
-    } else if (phase === 'round_end_accounting' && gamifiedPhase !== 'scoring') {
-      console.log('PHASE TRANSITION: auto-activating scoring');
-      setGamifiedPhase('scoring');
-    } else if (phase === 'level_check' && gamifiedPhase !== 'scoring') {
-      console.log('PHASE TRANSITION: auto-activating scoring for level_check');
-      setGamifiedPhase('scoring');
-    } else if (phase === 'round_end' && gamifiedPhase !== 'round_transition') {
-      console.log('PHASE TRANSITION: auto-activating round_transition');
-      setGamifiedPhase('round_transition');
-    } else if (phase === 'game_end' && gamifiedPhase !== 'round_transition') {
-      console.log('PHASE TRANSITION: auto-activating round_transition for game_end');
-      setLastEndCondition('time_ends');
+    } else if (phase === 'round_end' || phase === 'game_end') {
+      console.log('PHASE AUTO-ACTIVATE: round_transition');
       setGamifiedPhase('round_transition');
     }
   }, [session?.currentPhase, gamifiedPhase]);
@@ -896,59 +872,70 @@ export default function GameScreen() {
         )}
       </AnimatePresence>
 
-      {/* Phase 1: Event Roll (gamified) */}
+      {/* Phase 1: Event Roll */}
       {gamifiedPhase === 'event_roll' && (
         <div className="absolute inset-0 z-40">
           <EventRollPhase
             session={session}
             onPhaseComplete={() => {
-              // Transition: Event Roll → Challenge
-              if (activeChallenge) {
-                showPhaseTransition(1, 2, 'Event Roll', 'Challenge', 'challenge');
-              } else {
-                // No challenge drawn, skip to deliberation
-                showPhaseTransition(1, 3, 'Event Roll', 'Deliberation', 'deliberation');
-              }
-              advancePhase();
+              console.log('FLOW: Phase 1 complete → advancing engine + showing Phase 2');
+              advancePhase(); // engine: event_roll → individual_action or deliberation
+              // Gamified flow: always go to challenge investigation next
+              showPhaseTransition(1, 2, 'Event Roll', 'Investigate', 'challenge');
             }}
           />
         </div>
       )}
 
-      {/* Phase 2: Challenge + Treasure Hunt (gamified) */}
-      {gamifiedPhase === 'challenge' && activeChallenge && (
+      {/* Phase 2: Challenge + Treasure Hunt */}
+      {gamifiedPhase === 'challenge' && (
         <div className="absolute inset-0 z-40">
-          <ChallengePhase
-            session={session}
-            challenge={activeChallenge}
-            players={players}
-            onPhaseComplete={(results) => {
-              // Award CP from treasure hunt
-              const cpAwards: Record<string, { amount: number; reason: string }[]> = {};
-              for (const clue of results.cluesFound) {
-                if (!cpAwards[clue.finderId]) cpAwards[clue.finderId] = [];
-                cpAwards[clue.finderId].push({ amount: 1, reason: `Found ${clue.type} clue` });
-              }
-              if (results.allFound) {
-                for (const p of players) {
-                  if (!cpAwards[p.id]) cpAwards[p.id] = [];
-                  cpAwards[p.id].push({ amount: 2, reason: 'All 5 clues found (team bonus)' });
+          {activeChallenge ? (
+            <ChallengePhase
+              session={session}
+              challenge={activeChallenge}
+              players={players}
+              onPhaseComplete={(results) => {
+                console.log('FLOW: Phase 2 complete → showing Phase 3');
+                const cpAwards: Record<string, { amount: number; reason: string }[]> = {};
+                for (const clue of results.cluesFound) {
+                  if (!cpAwards[clue.finderId]) cpAwards[clue.finderId] = [];
+                  cpAwards[clue.finderId].push({ amount: 1, reason: `Found ${clue.type} clue` });
                 }
-              }
-              setRoundCPAwards(prev => {
-                const merged = { ...prev };
-                for (const [pid, awards] of Object.entries(cpAwards)) {
-                  merged[pid] = [...(merged[pid] || []), ...awards];
+                if (results.allFound) {
+                  for (const p of players) {
+                    if (!cpAwards[p.id]) cpAwards[p.id] = [];
+                    cpAwards[p.id].push({ amount: 2, reason: 'All 5 clues found (team bonus)' });
+                  }
                 }
-                return merged;
-              });
-              showPhaseTransition(2, 3, 'Challenge', 'Deliberation', 'deliberation');
-            }}
-          />
+                setRoundCPAwards(prev => {
+                  const merged = { ...prev };
+                  for (const [pid, awards] of Object.entries(cpAwards)) {
+                    merged[pid] = [...(merged[pid] || []), ...awards];
+                  }
+                  return merged;
+                });
+                showPhaseTransition(2, 3, 'Investigate', 'Plan Strategy', 'deliberation');
+              }}
+            />
+          ) : (
+            // No challenge — skip to deliberation
+            <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80">
+              <div className="text-center">
+                <p className="text-gray-300 text-lg mb-4">No challenge this season. Moving to strategy planning...</p>
+                <button
+                  className="px-6 py-3 bg-amber-500 text-black font-bold rounded-xl"
+                  onClick={() => showPhaseTransition(2, 3, 'Investigate', 'Plan Strategy', 'deliberation')}
+                >
+                  Continue {'\u2192'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Phase 3: I-Spy + Deliberation (gamified) */}
+      {/* Phase 3: I-Spy + Deliberation */}
       {gamifiedPhase === 'deliberation' && (
         <div className="absolute inset-0 z-40">
           <DeliberationPhase
@@ -957,8 +944,9 @@ export default function GameScreen() {
             currentPlayerId={currentPlayer?.id || players[0]?.id || ''}
             challenge={activeChallenge}
             onPhaseComplete={() => {
-              showPhaseTransition(3, 4, 'Deliberation', 'Action', 'basketball');
-              advancePhase();
+              console.log('FLOW: Phase 3 complete → advancing engine + showing Phase 4');
+              advancePhase(); // engine: deliberation → individual_action or action_resolution
+              showPhaseTransition(3, 4, 'Plan Strategy', 'Build the Path', 'relay_race');
             }}
             onProposeTrade={proposeTrade}
             onAcceptTrade={(tradeId) => useGameStore.getState().acceptTrade(tradeId)}
@@ -971,37 +959,54 @@ export default function GameScreen() {
         </div>
       )}
 
-      {/* Phase 4: Basketball Action Resolution (gamified) */}
-      {gamifiedPhase === 'basketball' && activeChallenge && (
+      {/* Phase 4: Relay Race Action Resolution */}
+      {gamifiedPhase === 'relay_race' && (
         <div className="absolute inset-0 z-40">
-          <BasketballPhase
-            session={session}
-            players={players}
-            challenge={activeChallenge}
-            onPhaseComplete={(result: any) => {
-              // Log resolution telemetry
-              console.log('Basketball resolution:', result);
-              setRoundCPAwards(prev => {
-                const merged = { ...prev };
-                if (result.teamPlayBonus) {
-                  for (const p of players) {
-                    if (!merged[p.id]) merged[p.id] = [];
-                    merged[p.id].push({ amount: 1, reason: 'Team play bonus (all contributed)' });
+          {activeChallenge ? (
+            <RelayRacePhase
+              session={session}
+              players={players}
+              challenge={activeChallenge}
+              onPhaseComplete={(result: any) => {
+                console.log('FLOW: Phase 4 complete → advancing engine + showing Phase 5');
+                setRoundCPAwards(prev => {
+                  const merged = { ...prev };
+                  if (result.teamPlayBonus) {
+                    for (const p of players) {
+                      if (!merged[p.id]) merged[p.id] = [];
+                      merged[p.id].push({ amount: 1, reason: 'Team play bonus (all contributed)' });
+                    }
                   }
-                }
-                return merged;
-              });
-              showPhaseTransition(4, 5, 'Action', 'Scoring', 'scoring');
-              advancePhase();
-            }}
-            onPlayCard={(cardId: string, targetZoneId?: string) => playCard(cardId, targetZoneId)}
-            onPassTurn={passTurn}
-            onUseAbility={() => useUniqueAbility()}
-          />
+                  return merged;
+                });
+                advancePhase(); // engine: action_resolution → round_end_accounting
+                showPhaseTransition(4, 5, 'Build the Path', 'Scoring', 'scoring');
+              }}
+              onPlayCard={(cardId: string, targetZoneId?: string) => playCard(cardId, targetZoneId)}
+              onPassTurn={passTurn}
+              onUseAbility={() => useUniqueAbility()}
+            />
+          ) : (
+            // No challenge — skip to scoring
+            <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80">
+              <div className="text-center">
+                <p className="text-gray-300 text-lg mb-4">No challenge to resolve. Moving to scoring...</p>
+                <button
+                  className="px-6 py-3 bg-amber-500 text-black font-bold rounded-xl"
+                  onClick={() => {
+                    advancePhase();
+                    showPhaseTransition(4, 5, 'Build the Path', 'Scoring', 'scoring');
+                  }}
+                >
+                  Continue {'\u2192'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Phase 5: Scoring (gamified) */}
+      {/* Phase 5: Scoring */}
       {gamifiedPhase === 'scoring' && (
         <div className="absolute inset-0 z-40">
           <ScoringPhase
@@ -1009,10 +1014,11 @@ export default function GameScreen() {
             players={players}
             roundCPAwards={roundCPAwards}
             onPhaseComplete={(nashOutput, endCondition) => {
+              console.log('FLOW: Phase 5 complete → round transition. endCondition:', endCondition);
               setLastNashOutput(nashOutput);
               setLastEndCondition(endCondition);
+              advancePhase(); // engine: round_end_accounting → level_check → round_end
               setGamifiedPhase('round_transition');
-              advancePhase();
             }}
           />
         </div>
@@ -1026,11 +1032,13 @@ export default function GameScreen() {
             endCondition={lastEndCondition as any}
             nashOutput={lastNashOutput}
             onNextRound={() => {
+              console.log('FLOW: Next round → resetting gamified phase, advancing engine');
               setGamifiedPhase(null);
               setRoundCPAwards({});
               advancePhase(); // Advances to next round's payment_day
             }}
             onDebrief={() => {
+              console.log('FLOW: Debrief → clearing gamified phase, advancing engine');
               setGamifiedPhase(null);
               advancePhase(); // Advances to debrief
             }}

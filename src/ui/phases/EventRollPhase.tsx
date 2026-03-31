@@ -1,863 +1,445 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store';
-import { GameSession, EventCard, ResourcePool, ResourceType } from '../../core/models/types';
+import type { GameSession, ResourceType, RoleId } from '../../core/models/types';
 import { ROLE_COLORS, RESOURCE_COLORS } from '../../core/models/constants';
-import { EVENT_CARDS } from '../../core/content/events';
+import { ALL_EVENT_CARDS, ZONE_NAMES, ZONE_ID_MAP, type WindsEventCard } from '../../core/content/eventDeck';
 import { PhaseNavigation } from '../effects/PhaseNavigation';
 
-// ─── Types ───────────────────────────────────────────────────────
+// ─── Module-level deck state (persists across component remounts) ────
+let deckState = {
+  available: [...ALL_EVENT_CARDS],
+  discarded: [] as WindsEventCard[],
+  initialized: false,
+  sessionId: '',
+};
 
+function initDeck(sessionId: string) {
+  if (!deckState.initialized || deckState.sessionId !== sessionId) {
+    deckState = {
+      available: [...ALL_EVENT_CARDS],
+      discarded: [],
+      initialized: true,
+      sessionId,
+    };
+    console.log('[PHASE 1] Deck initialized — 12 cards available');
+  }
+}
+
+function drawCard(type: 'negative' | 'neutral' | 'positive'): WindsEventCard {
+  let pool = deckState.available.filter(c => c.type === type);
+  if (pool.length === 0) {
+    const reshuffled = deckState.discarded.filter(c => c.type === type);
+    if (reshuffled.length > 0) {
+      deckState.available.push(...reshuffled);
+      deckState.discarded = deckState.discarded.filter(c => c.type !== type);
+      pool = deckState.available.filter(c => c.type === type);
+      console.log(`[PHASE 1] Reshuffled ${reshuffled.length} ${type} cards`);
+    }
+    if (pool.length === 0) pool = deckState.available.length > 0 ? deckState.available : [...ALL_EVENT_CARDS];
+  }
+  const card = pool[Math.floor(Math.random() * pool.length)];
+  deckState.available = deckState.available.filter(c => c.id !== card.id);
+  deckState.discarded.push(card);
+  console.log(`[PHASE 1] Drew card: ${card.name} (${card.type}) — ${deckState.available.length}/12 remaining`);
+  return card;
+}
+
+// ─── Die SVG component ──────────────────────────────────────────────
+const PIP_LAYOUTS: Record<number, [number, number][]> = {
+  1: [[70, 70]],
+  2: [[100, 40], [40, 100]],
+  3: [[100, 40], [70, 70], [40, 100]],
+  4: [[40, 40], [100, 40], [40, 100], [100, 100]],
+  5: [[40, 40], [100, 40], [70, 70], [40, 100], [100, 100]],
+  6: [[40, 40], [40, 70], [40, 100], [100, 40], [100, 70], [100, 100]],
+};
+
+function DieFace({ value, rolling }: { value: number; rolling: boolean }) {
+  const pips = PIP_LAYOUTS[value] || PIP_LAYOUTS[1];
+  return (
+    <motion.svg
+      width="120" height="120" viewBox="0 0 140 140"
+      animate={rolling ? { scale: [1, 1.1, 0.95, 1.08, 1], rotate: [0, 10, -8, 5, 0] } : { scale: 1 }}
+      transition={rolling ? { duration: 0.35, repeat: Infinity } : { duration: 0.3 }}
+    >
+      <rect x="4" y="4" width="132" height="132" rx="18" fill="#FAFAFA" stroke="#334155" strokeWidth="3" />
+      {pips.map(([cx, cy], i) => (
+        <circle key={i} cx={cx} cy={cy} r="12" fill="#1E293B" />
+      ))}
+    </motion.svg>
+  );
+}
+
+// ─── Types & constants ──────────────────────────────────────────────
+type Stage = 'intro' | 'rolling' | 'result_banner' | 'card_reveal' | 'effects' | 'ripple' | 'discard' | 'lesson' | 'continue';
+
+const TYPE_CONFIG = {
+  negative: { label: 'NEGATIVE EVENT', bg: 'rgba(220,38,38,0.08)', border: '#DC2626', cardBack: '#DC2626' },
+  neutral:  { label: 'STABLE SEASON',  bg: 'rgba(148,163,184,0.08)', border: '#64748B', cardBack: '#64748B' },
+  positive: { label: 'POSITIVE EVENT', bg: 'rgba(34,197,94,0.08)', border: '#22C55E', cardBack: '#22C55E' },
+};
+
+function rollToType(roll: number): 'negative' | 'neutral' | 'positive' {
+  if (roll <= 2) return 'negative';
+  if (roll <= 4) return 'neutral';
+  return 'positive';
+}
+
+const CONDITION_LABELS: Record<string, string> = { good: 'Good', fair: 'Fair', poor: 'Poor', critical: 'Critical', locked: 'Locked' };
+const CONDITION_ORDER = ['locked', 'critical', 'poor', 'fair', 'good'];
+
+function shiftCondition(current: string, delta: number): string {
+  const idx = CONDITION_ORDER.indexOf(current);
+  if (idx < 0) return current;
+  return CONDITION_ORDER[Math.max(0, Math.min(CONDITION_ORDER.length - 1, idx + delta))];
+}
+
+// ─── Main component ────────────────────────────────────────────────
 interface EventRollPhaseProps {
   session: GameSession;
   onPhaseComplete: () => void;
 }
 
-type Stage = 'intro' | 'rolling' | 'outcome' | 'card_draw' | 'impact' | 'discard' | 'continue';
-
-// ─── Resource helpers ────────────────────────────────────────────
-
-const RESOURCE_LABELS: Record<ResourceType, string> = {
-  budget: 'Budget',
-  influence: 'Influence',
-  volunteer: 'Volunteers',
-  material: 'Materials',
-  knowledge: 'Knowledge',
-};
-
-// ─── Die Face Component ──────────────────────────────────────────
-// Renders dot patterns on a 3x3 grid for values 1-6
-
-const DOT_LAYOUTS: Record<number, [number, number][]> = {
-  // [col, row] on 3x3 grid where 0=left/top, 1=center, 2=right/bottom
-  1: [[1, 1]],
-  2: [[2, 0], [0, 2]],
-  3: [[2, 0], [1, 1], [0, 2]],
-  4: [[0, 0], [2, 0], [0, 2], [2, 2]],
-  5: [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]],
-  6: [[0, 0], [0, 1], [0, 2], [2, 0], [2, 1], [2, 2]],
-};
-
-function DieFace({ value, size = 120 }: { value: number; size?: number }) {
-  const dots = DOT_LAYOUTS[Math.max(1, Math.min(6, value))] ?? DOT_LAYOUTS[1];
-  const padding = size * 0.2;
-  const cellSize = (size - padding * 2) / 2;
-  const dotSize = Math.round(size * 0.1);
-
-  return (
-    <div
-      className="relative rounded-2xl"
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: '#FAF7F0',
-        border: '3px solid #C4B69C',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.25), inset 0 2px 6px rgba(255,255,255,0.5)',
-      }}
-    >
-      {dots.map(([col, row], i) => (
-        <div
-          key={i}
-          className="absolute rounded-full"
-          style={{
-            width: dotSize,
-            height: dotSize,
-            backgroundColor: '#2C2C2C',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            left: padding + col * cellSize - dotSize / 2,
-            top: padding + row * cellSize - dotSize / 2,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ─── Card Back ───────────────────────────────────────────────────
-
-function CardBack({ type }: { type: 'negative' | 'positive' }) {
-  const bgColor = type === 'negative'
-    ? 'bg-gradient-to-br from-red-800 via-red-900 to-red-950'
-    : 'bg-gradient-to-br from-emerald-800 via-emerald-900 to-emerald-950';
-  const borderColor = type === 'negative' ? 'border-red-600/50' : 'border-emerald-600/50';
-
-  return (
-    <div className={`w-64 h-96 rounded-xl border-2 ${borderColor} ${bgColor} flex flex-col items-center justify-center shadow-2xl`}>
-      <div className="w-48 h-72 rounded-lg border border-white/20 flex flex-col items-center justify-center">
-        <div className="text-white/80 text-4xl font-bold mb-2">CG</div>
-        <div className="text-white/40 text-xs tracking-widest uppercase">Common Ground</div>
-        <div className="mt-4 w-12 h-12 rounded-full border-2 border-white/30 flex items-center justify-center">
-          <span className="text-white/60 text-lg">?</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Card Front ──────────────────────────────────────────────────
-
-function CardFront({ card, eventEntry }: {
-  card: EventCard;
-  eventEntry?: { zoneEffect: string; playerEffect: string };
-}) {
-  const isNeg = card.type === 'negative';
-  const borderColor = isNeg ? 'border-red-500' : 'border-emerald-500';
-  const gradFrom = isNeg ? 'from-red-950' : 'from-emerald-950';
-  const typeColor = isNeg ? 'text-red-400' : 'text-emerald-400';
-  const typeBg = isNeg ? 'bg-red-500/20' : 'bg-emerald-500/20';
-
-  return (
-    <div className={`w-64 h-96 rounded-xl border-2 ${borderColor} bg-gradient-to-br ${gradFrom} to-slate-900 flex flex-col shadow-2xl overflow-hidden`}>
-      <div className="px-4 pt-4 pb-2">
-        <div className={`inline-block px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide ${typeBg} ${typeColor} mb-2`}>
-          {card.type} event
-        </div>
-        <h3 className="text-white font-bold text-lg leading-tight">{card.name}</h3>
-      </div>
-
-      <div className={`mx-4 h-px ${isNeg ? 'bg-red-500/30' : 'bg-emerald-500/30'}`} />
-
-      <div className="px-4 py-3 flex-1 overflow-auto">
-        <p className="text-gray-300 text-sm leading-relaxed">{card.description}</p>
-      </div>
-
-      {card.flavorText && (
-        <div className="px-4 pb-2">
-          <p className="text-gray-500 text-xs italic leading-snug">"{card.flavorText}"</p>
-        </div>
-      )}
-
-      {eventEntry && (
-        <div className="px-4 pb-2">
-          <p className="text-gray-400 text-xs">Zone: {eventEntry.zoneEffect}</p>
-          <p className="text-gray-400 text-xs">Players: {eventEntry.playerEffect}</p>
-        </div>
-      )}
-
-      <div className="px-4 pb-4">
-        <div className="text-xs text-gray-400 font-semibold uppercase mb-1">Effects ({card.effects.length})</div>
-        {card.effects.slice(0, 3).map((effect, i) => (
-          <div key={i} className="text-xs text-gray-400 truncate">
-            {effect.type.replace(/_/g, ' ')} — {effect.target}
-          </div>
-        ))}
-        {card.effects.length > 3 && (
-          <div className="text-xs text-gray-500">+{card.effects.length - 3} more</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Resource Delta Line ─────────────────────────────────────────
-
-function ResourceDelta({ type, before, after }: { type: ResourceType; before: number; after: number }) {
-  const delta = after - before;
-  if (delta === 0) return null;
-  const color = delta > 0 ? '#22c55e' : '#ef4444';
-  const sign = delta > 0 ? '+' : '';
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: delta > 0 ? -20 : 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.4 }}
-      className="flex items-center gap-3 py-1"
-    >
-      <div
-        className="w-3 h-3 rounded-full"
-        style={{ backgroundColor: RESOURCE_COLORS[type] ?? '#888' }}
-      />
-      <span className="text-gray-300 text-sm w-24">{RESOURCE_LABELS[type]}</span>
-      <span className="text-gray-500 text-sm w-8 text-right">{before}</span>
-      <span className="text-gray-600 text-sm mx-1">&rarr;</span>
-      <span className="text-white text-sm w-8">{after}</span>
-      <motion.span
-        initial={{ scale: 0 }}
-        animate={{ scale: 1 }}
-        transition={{ delay: 0.2, type: 'spring', stiffness: 300 }}
-        className="text-sm font-bold ml-2"
-        style={{ color }}
-      >
-        {sign}{delta}
-      </motion.span>
-    </motion.div>
-  );
-}
-
-// ─── Mini Hex Board ──────────────────────────────────────────────
-
-function MiniHexBoard({ zones, affectedZoneIds, eventColor }: {
-  zones: Record<string, { id: string; name: string; gridPosition: { q: number; r: number } }>;
-  affectedZoneIds: string[];
-  eventColor: string;
-}) {
-  const zoneList = Object.values(zones);
-  if (zoneList.length === 0) return null;
-
-  const hexSize = 24;
-  const hexWidth = hexSize * 2;
-  const hexHeight = Math.sqrt(3) * hexSize;
-
-  return (
-    <div className="flex justify-center py-4">
-      <svg width={280} height={160} viewBox="-40 -20 280 160">
-        {zoneList.map((zone) => {
-          const cx = zone.gridPosition.q * hexWidth * 0.75 + 100;
-          const cy = zone.gridPosition.r * hexHeight + (zone.gridPosition.q % 2 === 0 ? 0 : hexHeight / 2) + 60;
-          const isAffected = affectedZoneIds.includes(zone.id);
-
-          return (
-            <g key={zone.id}>
-              {isAffected && (
-                <circle cx={cx} cy={cy} r={hexSize + 6} fill={eventColor} opacity={0.25}>
-                  <animate attributeName="r" values={`${hexSize + 4};${hexSize + 10};${hexSize + 4}`} dur="1.5s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.3;0.1;0.3" dur="1.5s" repeatCount="indefinite" />
-                </circle>
-              )}
-              <RegularHex cx={cx} cy={cy} size={hexSize} fill={isAffected ? eventColor + '40' : '#374151'} stroke={isAffected ? eventColor : '#4B5563'} />
-              <text x={cx} y={cy + 3} textAnchor="middle" fill={isAffected ? '#fff' : '#9CA3AF'} fontSize={7} fontWeight={isAffected ? 'bold' : 'normal'}>
-                {zone.name.length > 8 ? zone.name.slice(0, 7) + '..' : zone.name}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
-function RegularHex({ cx, cy, size, fill, stroke }: { cx: number; cy: number; size: number; fill: string; stroke: string }) {
-  const points = Array.from({ length: 6 }, (_, i) => {
-    const angle = (Math.PI / 3) * i - Math.PI / 6;
-    return `${cx + size * Math.cos(angle)},${cy + size * Math.sin(angle)}`;
-  }).join(' ');
-
-  return <polygon points={points} fill={fill} stroke={stroke} strokeWidth={1.5} />;
-}
-
-// ─── Main Component ──────────────────────────────────────────────
-
 export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps) {
+  const rollEventDie = useGameStore(s => s.rollEventDie);
   const [stage, setStage] = useState<Stage>('intro');
-  const [isRolling, setIsRolling] = useState(false);
-  const [displayValue, setDisplayValue] = useState(1);
-  const [isFlipped, setIsFlipped] = useState(false);
-  const [resourceSnapshots, setResourceSnapshots] = useState<{
-    playersBefore: Record<string, ResourcePool>;
-    zonesBefore: Record<string, ResourcePool>;
-  } | null>(null);
+  const [dieValue, setDieValue] = useState(1);
+  const [rolling, setRolling] = useState(false);
+  const [finalRoll, setFinalRoll] = useState<number | null>(null);
+  const [currentCard, setCurrentCard] = useState<WindsEventCard | null>(null);
+  const [cardFlipped, setCardFlipped] = useState(false);
+  const [effectLines, setEffectLines] = useState<string[]>([]);
+  const [visibleEffects, setVisibleEffects] = useState(0);
+  const [visibleRipples, setVisibleRipples] = useState(0);
+  const rollDone = useRef(false);
 
-  const rollEventDie = useGameStore((s) => s.rollEventDie);
-  const currentSession = useGameStore((s) => s.session);
-  const activeSession = currentSession ?? session;
+  useEffect(() => { initDeck(session.id); }, [session.id]);
+  useEffect(() => { console.log(`[PHASE 1] Stage: ${stage}`); }, [stage]);
 
-  const eventRollResult = activeSession.eventRollResult;
-  const eventDieResult = activeSession.eventDieResult;
-
-  // Determine the event card to show
-  const eventCard = useMemo<EventCard | null>(() => {
-    if (!eventRollResult) return null;
-    const isNegative = eventDieResult?.outcome === 'negative_event';
-    const matching = EVENT_CARDS.filter((c) => c.type === (isNegative ? 'negative' : 'positive'));
-    if (matching.length === 0) return null;
-    return matching[eventRollResult.total % matching.length];
-  }, [eventRollResult, eventDieResult]);
-
-  // Outcome classification using d6-mapped display value (from eventDieResult)
-  const outcomeInfo = useMemo(() => {
-    if (!eventDieResult) return null;
-    const v = eventDieResult.value;
-    if (v <= 2) {
-      return {
-        type: 'negative' as const,
-        tint: 'rgba(220,38,38,0.15)',
-        banner: '\u26A0\uFE0F NEGATIVE EVENT \u2014 A setback strikes the park',
-        bannerBg: 'bg-red-900/60',
-        bannerBorder: 'border-red-500/50',
-      };
+  const buildEffectLines = useCallback((card: WindsEventCard): string[] => {
+    const lines: string[] = [];
+    for (const eff of card.effects) {
+      const zoneName = eff.zoneId ? (ZONE_NAMES[eff.zoneId] || eff.zoneId) : '';
+      const zoneFullId = eff.zoneId ? (ZONE_ID_MAP[eff.zoneId] || eff.zoneId) : '';
+      const zone = zoneFullId ? session.board.zones[zoneFullId] : null;
+      switch (eff.type) {
+        case 'zone_condition_drop': {
+          const cur = zone?.condition || 'fair';
+          const next = shiftCondition(cur, -(eff.levels || 1));
+          lines.push(`${eff.zoneId} ${zoneName} Condition: ${CONDITION_LABELS[cur] || cur} \u2192 ${CONDITION_LABELS[next] || next}`);
+          break;
+        }
+        case 'zone_condition_up': {
+          const cur = zone?.condition || 'poor';
+          const next = shiftCondition(cur, (eff.levels || 1));
+          lines.push(`${eff.zoneId} ${zoneName} Condition: ${CONDITION_LABELS[cur] || cur} \u2192 ${CONDITION_LABELS[next] || next}`);
+          break;
+        }
+        case 'resource_loss': {
+          const cur = zone?.resources?.[eff.resourceType as keyof typeof zone.resources] ?? '?';
+          const amt = eff.amount || 0;
+          const next = typeof cur === 'number' ? Math.max(0, cur - amt) : '?';
+          lines.push(`${eff.zoneId} ${eff.resourceType}: ${cur} \u2192 ${next}`);
+          break;
+        }
+        case 'player_resource_loss': {
+          const player = Object.values(session.players).find(p => p.roleId === eff.roleId);
+          const rType = eff.resourceType as ResourceType;
+          const cur = player?.resources?.[rType] ?? '?';
+          const amt = eff.amount || 0;
+          const next = typeof cur === 'number' ? Math.max(0, cur - amt) : '?';
+          const roleName = eff.roleId ? eff.roleId.charAt(0).toUpperCase() + eff.roleId.slice(1) : '';
+          lines.push(`${roleName} ${rType}: ${cur} \u2192 ${next}`);
+          break;
+        }
+        case 'player_resource_gain': {
+          const player = Object.values(session.players).find(p => p.roleId === eff.roleId);
+          const rType = eff.resourceType as ResourceType;
+          const cur = player?.resources?.[rType] ?? '?';
+          const amt = eff.amount || 0;
+          const next = typeof cur === 'number' ? cur + amt : '?';
+          const roleName = eff.roleId ? eff.roleId.charAt(0).toUpperCase() + eff.roleId.slice(1) : '';
+          lines.push(`${roleName} ${rType}: ${cur} \u2192 ${next}`);
+          break;
+        }
+        case 'objective_threat': {
+          const obj = eff.objective || 'unknown';
+          lines.push(`${obj.charAt(0).toUpperCase() + obj.slice(1)} objective: AT RISK`);
+          break;
+        }
+      }
     }
-    if (v <= 4) {
-      return {
-        type: 'stable' as const,
-        tint: 'transparent',
-        banner: '\u2796 STABLE \u2014 No external disruption this season.',
-        bannerBg: 'bg-gray-800/60',
-        bannerBorder: 'border-gray-500/50',
-      };
-    }
-    return {
-      type: 'positive' as const,
-      tint: 'rgba(34,197,94,0.15)',
-      banner: '\u2B50 POSITIVE EVENT \u2014 An opportunity emerges',
-      bannerBg: 'bg-emerald-900/60',
-      bannerBorder: 'border-emerald-500/50',
-    };
-  }, [eventDieResult]);
+    return lines;
+  }, [session]);
 
-  // Map the 2d6 total to a d6 display value (1-6)
-  const finalDieValue = useMemo(() => {
-    if (!eventDieResult) return 1;
-    return Math.max(1, Math.min(6, eventDieResult.value));
-  }, [eventDieResult]);
+  // ─── Roll animation (3 phases: rapid, medium, slow) ───────────────
+  const handleRoll = useCallback(() => {
+    if (rolling || rollDone.current) return;
+    setRolling(true);
+    setStage('rolling');
+    console.log('[PHASE 1] Die roll initiated');
 
-  // ─── Auto-advance: intro → rolling ────────────────────────────
+    const result = Math.floor(Math.random() * 6) + 1;
+    let tick = 0;
+
+    const phase1 = setInterval(() => {
+      setDieValue(Math.floor(Math.random() * 6) + 1);
+      tick++;
+      if (tick >= 20) {
+        clearInterval(phase1);
+        let t2 = 0;
+        const phase2 = setInterval(() => {
+          setDieValue(Math.floor(Math.random() * 6) + 1);
+          t2++;
+          if (t2 >= 6) {
+            clearInterval(phase2);
+            let t3 = 0;
+            const phase3 = setInterval(() => {
+              setDieValue(Math.floor(Math.random() * 6) + 1);
+              t3++;
+              if (t3 >= 3) {
+                clearInterval(phase3);
+                setDieValue(result);
+                setRolling(false);
+                setFinalRoll(result);
+                rollDone.current = true;
+                console.log(`[PHASE 1] Die result: ${result}`);
+                rollEventDie();
+                setTimeout(() => setStage('result_banner'), 600);
+              }
+            }, 300);
+          }
+        }, 150);
+      }
+    }, 70);
+  }, [rolling, rollEventDie]);
+
+  // ─── Stage auto-advance timers ────────────────────────────────────
   useEffect(() => {
-    if (stage === 'intro') {
-      const t = setTimeout(() => setStage('rolling'), 1500);
+    if (stage === 'result_banner' && finalRoll !== null) {
+      const eventType = rollToType(finalRoll);
+      const card = drawCard(eventType);
+      setCurrentCard(card);
+      setEffectLines(buildEffectLines(card));
+      const t = setTimeout(() => setStage('card_reveal'), 1800);
       return () => clearTimeout(t);
     }
-  }, [stage]);
+  }, [stage, finalRoll, buildEffectLines]);
 
-  // ─── Auto-advance: outcome → card_draw (2s) for non-neutral ──
   useEffect(() => {
-    if (stage === 'outcome' && outcomeInfo) {
-      if (outcomeInfo.type === 'stable') return; // neutral shows continue immediately
-      const t = setTimeout(() => setStage('card_draw'), 2000);
+    if (stage === 'card_reveal' && !cardFlipped) {
+      const t = setTimeout(() => setCardFlipped(true), 800);
       return () => clearTimeout(t);
     }
-  }, [stage, outcomeInfo]);
-
-  // ─── Auto-advance: card_draw flip after 0.5s ─────────────────
-  useEffect(() => {
-    if (stage === 'card_draw' && !isFlipped) {
-      const t = setTimeout(() => setIsFlipped(true), 500);
+    if (stage === 'card_reveal' && cardFlipped) {
+      const t = setTimeout(() => setStage('effects'), 1000);
       return () => clearTimeout(t);
     }
-  }, [stage, isFlipped]);
+  }, [stage, cardFlipped]);
 
-  // ─── Auto-advance: discard → continue ─────────────────────────
+  useEffect(() => {
+    if (stage === 'effects' && effectLines.length > 0 && visibleEffects < effectLines.length) {
+      const t = setTimeout(() => setVisibleEffects(v => v + 1), 500);
+      return () => clearTimeout(t);
+    }
+    if (stage === 'effects' && (effectLines.length === 0 || visibleEffects >= effectLines.length)) {
+      const t = setTimeout(() => {
+        setStage(currentCard?.rippleEffects?.length ? 'ripple' : 'discard');
+      }, effectLines.length > 0 ? 800 : 400);
+      return () => clearTimeout(t);
+    }
+  }, [stage, visibleEffects, effectLines, currentCard]);
+
+  useEffect(() => {
+    if (stage === 'ripple' && currentCard?.rippleEffects) {
+      if (visibleRipples < currentCard.rippleEffects.length) {
+        const t = setTimeout(() => setVisibleRipples(v => v + 1), 500);
+        return () => clearTimeout(t);
+      }
+      const t = setTimeout(() => setStage('discard'), 800);
+      return () => clearTimeout(t);
+    }
+  }, [stage, visibleRipples, currentCard]);
+
   useEffect(() => {
     if (stage === 'discard') {
-      const t = setTimeout(() => setStage('continue'), 500);
+      const t = setTimeout(() => setStage('lesson'), 1200);
       return () => clearTimeout(t);
     }
   }, [stage]);
 
-  // ─── Die roll handler ─────────────────────────────────────────
-  const handleRoll = useCallback(() => {
-    if (isRolling) return;
-    setIsRolling(true);
-
-    // Snapshot resources before the roll
-    const playersBefore: Record<string, ResourcePool> = {};
-    const zonesBefore: Record<string, ResourcePool> = {};
-    for (const [pid, player] of Object.entries(activeSession.players)) {
-      playersBefore[pid] = { ...player.resources };
+  useEffect(() => {
+    if (stage === 'lesson') {
+      const t = setTimeout(() => setStage('continue'), 2000);
+      return () => clearTimeout(t);
     }
-    for (const zone of Object.values(activeSession.board.zones)) {
-      zonesBefore[zone.id] = { ...zone.resources };
-    }
-    setResourceSnapshots({ playersBefore, zonesBefore });
+  }, [stage]);
 
-    // Rapid random face values during tumble
-    const interval = setInterval(() => {
-      setDisplayValue(Math.floor(Math.random() * 6) + 1);
-    }, 80);
-
-    setTimeout(() => {
-      clearInterval(interval);
-      // Trigger the actual engine roll
-      rollEventDie();
-      setIsRolling(false);
-      // Short pause then show outcome
-      setTimeout(() => setStage('outcome'), 300);
-    }, 1500);
-  }, [isRolling, activeSession, rollEventDie]);
-
-  // ─── Render ────────────────────────────────────────────────────
-
-  // Value to show on the die face
-  const shownValue = isRolling ? displayValue : (eventDieResult ? finalDieValue : 1);
-
-  // Event color for impact visuals
-  const eventColor = outcomeInfo?.type === 'negative' ? '#dc2626' : '#22c55e';
+  // ─── Derived values ───────────────────────────────────────────────
+  const eventType = finalRoll !== null ? rollToType(finalRoll) : null;
+  const cfg = eventType ? TYPE_CONFIG[eventType] : null;
+  const showCard = stage !== 'intro' && stage !== 'rolling' && stage !== 'result_banner';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: stage === 'outcome' && outcomeInfo ? outcomeInfo.tint : 'rgba(0,0,0,0.92)' }}>
-      <AnimatePresence mode="wait">
+    <div style={{ minHeight: '100vh', background: cfg?.bg || '#0F172A', color: '#E2E8F0', padding: '2rem', fontFamily: 'system-ui, sans-serif' }}>
+      {/* Header */}
+      <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0 }}>Phase 1: Winds of Change</h1>
+        <p style={{ opacity: 0.6, margin: '0.25rem 0 0' }}>Round {session.currentRound} of {session.totalRounds}</p>
+      </div>
 
-        {/* ════════════════ INTRO ════════════════ */}
+      <AnimatePresence mode="wait">
+        {/* Intro */}
         {stage === 'intro' && (
-          <motion.div
-            key="intro"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.1 }}
-            transition={{ duration: 0.4 }}
-            className="flex flex-col items-center text-center"
-          >
-            <motion.h1
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.2 }}
-              className="text-5xl font-serif font-bold text-amber-400 mb-4"
-            >
-              Phase 1: The Winds of Change
-            </motion.h1>
-            <motion.p
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.5 }}
-              className="text-gray-300 text-lg italic"
-            >
-              External forces are at play. Roll the die to discover what changes.
-            </motion.p>
-            <motion.div
-              initial={{ scaleX: 0 }}
-              animate={{ scaleX: 1 }}
-              transition={{ delay: 0.7, duration: 0.8 }}
-              className="mt-6 h-0.5 w-64 bg-gradient-to-r from-transparent via-amber-400 to-transparent"
-            />
+          <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ textAlign: 'center', marginTop: '4rem' }}>
+            <p style={{ fontSize: '1.1rem', maxWidth: 500, margin: '0 auto 2rem' }}>
+              The city never stays still. Roll the die to see what forces sweep through the park this season.
+            </p>
+            <motion.div style={{ cursor: 'pointer', display: 'inline-block' }}
+              whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }} onClick={handleRoll}>
+              <DieFace value={dieValue} rolling={false} />
+              <p style={{ marginTop: '0.75rem', opacity: 0.7, fontSize: '0.9rem' }}>Click to roll</p>
+            </motion.div>
           </motion.div>
         )}
 
-        {/* ════════════════ ROLLING ════════════════ */}
+        {/* Rolling */}
         {stage === 'rolling' && (
-          <motion.div
-            key="rolling"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center"
-          >
-            {/* Wooden surface background */}
-            <div
-              className="absolute inset-0 -z-10 opacity-30"
-              style={{
-                background: 'linear-gradient(145deg, #5c3d1e 0%, #8b6914 30%, #6b4423 60%, #4a2c0a 100%)',
-              }}
-            />
+          <motion.div key="rolling" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ textAlign: 'center', marginTop: '4rem' }}>
+            <DieFace value={dieValue} rolling={true} />
+            <p style={{ marginTop: '1rem', opacity: 0.7 }}>Rolling...</p>
+          </motion.div>
+        )}
 
-            <h2 className="text-white text-2xl font-bold mb-8">Roll the Event Die</h2>
-
-            {/* Single d6 die — shake animation while rolling */}
-            <motion.div
-              className="cursor-pointer mb-8"
-              animate={isRolling ? {
-                rotate: [0, -8, 6, -10, 8, -5, 7, -9, 5, 0],
-                x: [0, -4, 5, -6, 4, -3, 6, -5, 3, 0],
-                y: [0, 3, -4, 5, -3, 4, -5, 3, -4, 0],
-                scale: [1, 1.08, 0.95, 1.1, 0.97, 1.05, 0.98, 1.06, 1.02, 1],
-              } : {
-                rotate: 0,
-                x: 0,
-                y: 0,
-                scale: 1,
-              }}
-              transition={isRolling ? {
-                duration: 0.4,
-                repeat: Infinity,
-                ease: 'linear',
-              } : {
-                type: 'spring',
-                stiffness: 300,
-                damping: 20,
-              }}
-              whileHover={!isRolling && !eventDieResult ? { scale: 1.08, y: -4 } : {}}
-              whileTap={!isRolling && !eventDieResult ? { scale: 0.95 } : {}}
-              onClick={() => {
-                if (!isRolling && !eventDieResult) handleRoll();
-              }}
-            >
-              <DieFace value={shownValue} size={140} />
+        {/* Result banner */}
+        {stage === 'result_banner' && cfg && (
+          <motion.div key="banner" initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ textAlign: 'center', marginTop: '3rem' }}>
+            <DieFace value={finalRoll!} rolling={false} />
+            <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}
+              style={{ marginTop: '1.5rem', padding: '0.75rem 2rem', borderRadius: 8, border: `2px solid ${cfg.border}`,
+                display: 'inline-block', fontSize: '1.4rem', fontWeight: 700, letterSpacing: '0.1em', color: cfg.border }}>
+              {cfg.label}
             </motion.div>
+            <p style={{ marginTop: '0.5rem', opacity: 0.5 }}>You rolled a {finalRoll}</p>
+          </motion.div>
+        )}
 
-            {!isRolling && !eventDieResult && (
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-gray-400 text-sm animate-pulse"
-              >
-                Tap the die to roll
+        {/* Card area (card_reveal through continue) */}
+        {showCard && currentCard && cfg && (
+          <motion.div key="card-area" initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ maxWidth: 560, margin: '0 auto' }}>
+            {/* Card with flip */}
+            <div style={{ perspective: 1000, marginBottom: '1.5rem' }}>
+              <motion.div animate={{ rotateY: cardFlipped ? 0 : 180 }} transition={{ duration: 0.6 }}
+                style={{ transformStyle: 'preserve-3d', position: 'relative' }}>
+                {/* Front face */}
+                <motion.div
+                  animate={stage === 'discard' ? { x: 300, opacity: 0, height: 0, marginBottom: 0, padding: 0 } : {}}
+                  transition={{ duration: 0.6 }}
+                  style={{ backfaceVisibility: 'hidden', background: '#1E293B', borderRadius: 12,
+                    border: `2px solid ${cfg.border}`, padding: '1.5rem', minHeight: 180 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <span style={{ fontSize: '1.2rem', fontWeight: 700 }}>{currentCard.name}</span>
+                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', padding: '2px 8px',
+                      borderRadius: 4, background: cfg.border + '22', color: cfg.border, fontWeight: 600 }}>
+                      {currentCard.type}
+                    </span>
+                  </div>
+                  <p style={{ margin: '0 0 0.75rem', lineHeight: 1.5, opacity: 0.85 }}>{currentCard.description}</p>
+                  {currentCard.affectedZone && (
+                    <p style={{ margin: 0, fontSize: '0.85rem', opacity: 0.6 }}>
+                      Affected zone: {ZONE_NAMES[currentCard.affectedZone] || currentCard.affectedZone}
+                    </p>
+                  )}
+                </motion.div>
+                {/* Back face */}
+                {!cardFlipped && (
+                  <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', transform: 'rotateY(180deg)',
+                    background: cfg.cardBack, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ fontSize: '2.5rem', fontWeight: 900, color: 'rgba(255,255,255,0.3)', fontFamily: 'serif' }}>CG</span>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+
+            {/* Effects list */}
+            {stage !== 'card_reveal' && effectLines.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', opacity: 0.5, marginBottom: '0.5rem' }}>Effects</h3>
+                {effectLines.slice(0, stage === 'effects' ? visibleEffects : effectLines.length).map((line, i) => (
+                  <motion.div key={i} initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
+                    style={{ padding: '0.4rem 0.75rem', marginBottom: 4, borderRadius: 6,
+                      background: 'rgba(255,255,255,0.04)', fontSize: '0.9rem', borderLeft: `3px solid ${cfg!.border}` }}>
+                    {line}
+                  </motion.div>
+                ))}
+              </div>
+            )}
+
+            {/* Ripple effects */}
+            {stage !== 'card_reveal' && stage !== 'effects' && currentCard.rippleEffects.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', opacity: 0.5, marginBottom: '0.5rem' }}>Ripple Effects</h3>
+                {currentCard.rippleEffects.slice(0, stage === 'ripple' ? visibleRipples : currentCard.rippleEffects.length).map((rip, i) => (
+                  <motion.div key={i} initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
+                    style={{ padding: '0.4rem 0.75rem', marginBottom: 4, borderRadius: 6,
+                      background: 'rgba(255,255,255,0.04)', fontSize: '0.9rem',
+                      borderLeft: `3px solid ${rip.effectType === 'warning' ? '#EF4444' : '#22C55E'}` }}>
+                    {rip.description}
+                  </motion.div>
+                ))}
+              </div>
+            )}
+
+            {/* Follow-up message */}
+            {(stage === 'lesson' || stage === 'continue') && currentCard.followUpMessage && (
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                style={{ fontSize: '0.9rem', padding: '0.75rem', background: 'rgba(255,255,255,0.04)',
+                  borderRadius: 8, marginBottom: '0.75rem', lineHeight: 1.5 }}>
+                {currentCard.followUpMessage}
               </motion.p>
             )}
 
-            {!isRolling && eventDieResult && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col items-center"
-              >
-                <div className="text-white text-4xl font-bold mb-2">{finalDieValue}</div>
+            {/* Deck counter */}
+            {(stage === 'discard' || stage === 'lesson' || stage === 'continue') && (
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 0.5 }}
+                style={{ fontSize: '0.8rem', textAlign: 'center', margin: '0.5rem 0' }}>
+                Event Deck: {deckState.available.length}/{ALL_EVENT_CARDS.length} remaining
+              </motion.p>
+            )}
+
+            {/* Spatial lesson */}
+            {(stage === 'lesson' || stage === 'continue') && (
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
+                style={{ fontStyle: 'italic', fontSize: '0.95rem', lineHeight: 1.6, textAlign: 'center',
+                  margin: '1rem 0', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                What this teaches: {currentCard.spatialLesson}
+              </motion.p>
+            )}
+
+            {/* Continue button */}
+            {stage === 'continue' && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={{ textAlign: 'center', marginTop: '1.5rem' }}>
+                <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+                  onClick={() => { console.log('[PHASE 1] Continuing to Phase 2'); onPhaseComplete(); }}
+                  style={{ padding: '0.9rem 2.5rem', fontSize: '1.05rem', fontWeight: 700,
+                    background: '#D97706', color: '#FFF', border: 'none', borderRadius: 10,
+                    cursor: 'pointer', letterSpacing: '0.02em' }}>
+                  Continue to Phase 2: Investigate the Ground &rarr;
+                </motion.button>
               </motion.div>
             )}
           </motion.div>
         )}
-
-        {/* ════════════════ OUTCOME ════════════════ */}
-        {stage === 'outcome' && outcomeInfo && (
-          <motion.div
-            key="outcome"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center text-center max-w-lg"
-          >
-            {/* Die result */}
-            <div className="mb-6">
-              <DieFace value={finalDieValue} size={60} />
-            </div>
-
-            {/* Banner */}
-            <motion.div
-              initial={{ scaleX: 0 }}
-              animate={{ scaleX: 1 }}
-              transition={{ delay: 0.2, duration: 0.5 }}
-              className={`px-8 py-4 rounded-lg border ${outcomeInfo.bannerBg} ${outcomeInfo.bannerBorder} mb-6`}
-            >
-              <h2 className="text-white text-xl font-bold tracking-wide">{outcomeInfo.banner}</h2>
-            </motion.div>
-
-            {/* For neutral: show Continue button immediately */}
-            {outcomeInfo.type === 'stable' ? (
-              <motion.button
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.6 }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setStage('continue')}
-                className="px-8 py-3 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-lg shadow-lg shadow-amber-500/30 transition-all"
-              >
-                Continue &rarr;
-              </motion.button>
-            ) : (
-              /* For non-neutral: show a dimmed skip button after 3s in case auto-advance chain breaks */
-              <motion.button
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 0.6 }}
-                transition={{ delay: 3 }}
-                whileHover={{ opacity: 1, scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setStage('continue')}
-                className="mt-4 px-6 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm"
-              >
-                Skip to Continue &rarr;
-              </motion.button>
-            )}
-          </motion.div>
-        )}
-
-        {/* ════════════════ CARD DRAW ════════════════ */}
-        {stage === 'card_draw' && eventCard && outcomeInfo && (
-          <motion.div
-            key="card_draw"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center"
-          >
-            {/* 3D flip container */}
-            <div
-              className="relative"
-              style={{ perspective: 1200, width: 256, height: 384 }}
-            >
-              <motion.div
-                animate={{ rotateY: isFlipped ? 180 : 0 }}
-                transition={{ duration: 0.8, ease: 'easeInOut' }}
-                style={{
-                  transformStyle: 'preserve-3d',
-                  width: '100%',
-                  height: '100%',
-                  position: 'relative',
-                }}
-              >
-                {/* Back face */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    width: '100%',
-                    height: '100%',
-                    backfaceVisibility: 'hidden',
-                  }}
-                >
-                  <CardBack type={outcomeInfo.type === 'negative' ? 'negative' : 'positive'} />
-                </div>
-
-                {/* Front face */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    width: '100%',
-                    height: '100%',
-                    backfaceVisibility: 'hidden',
-                    transform: 'rotateY(180deg)',
-                  }}
-                >
-                  <CardFront card={eventCard} eventEntry={eventRollResult?.eventEntry} />
-                </div>
-              </motion.div>
-            </div>
-
-            {isFlipped && (
-              <motion.button
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setStage('impact')}
-                className="mt-6 px-6 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors border border-white/20"
-              >
-                See Impact &rarr;
-              </motion.button>
-            )}
-          </motion.div>
-        )}
-
-        {/* ════════════════ IMPACT ════════════════ */}
-        {stage === 'impact' && eventRollResult && (
-          <motion.div
-            key="impact"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center max-w-4xl w-full px-4 max-h-[90vh] overflow-y-auto"
-          >
-            <h2 className="text-white text-2xl font-bold mb-2">Impact Assessment</h2>
-            <p className="text-gray-400 text-sm mb-6">{eventRollResult.eventEntry.name}</p>
-
-            {/* Split panels */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full mb-6">
-              {/* LEFT: Zone Impact */}
-              <motion.div
-                initial={{ x: -40, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="bg-white/5 rounded-xl border border-white/10 p-5"
-              >
-                <h3 className="text-amber-400 font-semibold text-sm uppercase tracking-wide mb-4">
-                  Zone Impact
-                </h3>
-                {eventRollResult.affectedZones.length > 0 ? (
-                  eventRollResult.affectedZones.map((zoneId) => {
-                    const zone = activeSession.board.zones[zoneId];
-                    if (!zone) return null;
-                    const zoneHexColor = eventColor;
-                    const beforeRes = resourceSnapshots?.zonesBefore[zoneId];
-                    const afterRes = zone.resources;
-
-                    return (
-                      <div key={zoneId} className="mb-4 last:mb-0">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-3 h-3 rounded" style={{ backgroundColor: zoneHexColor }} />
-                          <span className="text-white font-medium text-sm">{zone.name}</span>
-                        </div>
-                        <p className="text-gray-400 text-xs mb-2">{eventRollResult.eventEntry.zoneEffect}</p>
-                        {beforeRes && (Object.keys(beforeRes) as ResourceType[]).map((rt) => (
-                          <ResourceDelta
-                            key={rt}
-                            type={rt}
-                            before={beforeRes[rt]}
-                            after={afterRes[rt]}
-                          />
-                        ))}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-gray-500 text-sm italic">No zones directly affected</p>
-                )}
-              </motion.div>
-
-              {/* RIGHT: Player Impact */}
-              <motion.div
-                initial={{ x: 40, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: 0.4 }}
-                className="bg-white/5 rounded-xl border border-white/10 p-5"
-              >
-                <h3 className="text-cyan-400 font-semibold text-sm uppercase tracking-wide mb-4">
-                  Player Impact
-                </h3>
-                {eventRollResult.affectedPlayers.length > 0 ? (
-                  eventRollResult.affectedPlayers.map((playerId) => {
-                    const player = activeSession.players[playerId];
-                    if (!player) return null;
-                    const roleColor = ROLE_COLORS[player.roleId] ?? '#888';
-                    const beforeRes = resourceSnapshots?.playersBefore[playerId];
-                    const afterRes = player.resources;
-
-                    return (
-                      <div key={playerId} className="mb-4 last:mb-0">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: roleColor }} />
-                          <span className="text-white font-medium text-sm">{player.name}</span>
-                          <span
-                            className="text-xs px-1.5 py-0.5 rounded capitalize"
-                            style={{ color: roleColor, backgroundColor: roleColor + '20' }}
-                          >
-                            {player.roleId}
-                          </span>
-                        </div>
-                        <p className="text-gray-400 text-xs mb-2">{eventRollResult.eventEntry.playerEffect}</p>
-                        {beforeRes && (Object.keys(beforeRes) as ResourceType[]).map((rt) => (
-                          <ResourceDelta
-                            key={rt}
-                            type={rt}
-                            before={beforeRes[rt]}
-                            after={afterRes[rt]}
-                          />
-                        ))}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-gray-500 text-sm italic">No players directly affected</p>
-                )}
-              </motion.div>
-            </div>
-
-            {/* BOTTOM: Mini hex board */}
-            <div className="w-full bg-white/5 rounded-xl border border-white/10 p-3 mb-6">
-              <MiniHexBoard
-                zones={activeSession.board.zones}
-                affectedZoneIds={eventRollResult.affectedZones}
-                eventColor={eventColor}
-              />
-            </div>
-
-            {/* Ripple Effect Visualization */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.8 }}
-              className="w-full bg-white/5 rounded-xl border border-white/10 p-4 mb-4"
-            >
-              <h3 className="text-amber-400 text-sm font-semibold uppercase tracking-wide mb-3">
-                Ripple Effect — How this event cascades
-              </h3>
-              <div className="space-y-2">
-                {eventRollResult.affectedZones.map((zoneId) => {
-                  const adjacentZones = activeSession.board.adjacency[zoneId] || [];
-                  return adjacentZones.slice(0, 2).map((adjId) => {
-                    const adjZone = activeSession.board.zones[adjId];
-                    if (!adjZone) return null;
-                    return (
-                      <motion.div
-                        key={`${zoneId}-${adjId}`}
-                        initial={{ x: -20, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        transition={{ delay: 1.0 }}
-                        className="flex items-center gap-2 text-gray-300 text-sm"
-                      >
-                        <span className="text-gray-500">↳</span>
-                        <span>{activeSession.board.zones[zoneId]?.name}</span>
-                        <span className="text-gray-500">→</span>
-                        <span>{adjZone.name}</span>
-                        <span className="text-gray-500 text-xs">
-                          ({adjZone.condition} — at risk)
-                        </span>
-                      </motion.div>
-                    );
-                  });
-                })}
-              </div>
-              {outcomeInfo?.type === 'positive' && (
-                <p className="text-emerald-400/70 text-xs mt-3 italic">
-                  But resources alone can't fix the park. You'll need expertise, volunteers, and shared vision.
-                </p>
-              )}
-              {outcomeInfo?.type === 'negative' && (
-                <p className="text-red-400/70 text-xs mt-3 italic">
-                  The park's systems are connected. Neglect in one zone risks others.
-                </p>
-              )}
-            </motion.div>
-
-            <motion.button
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.6 }}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setStage('discard')}
-              className="px-6 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors border border-white/20"
-            >
-              Continue &rarr;
-            </motion.button>
-          </motion.div>
-        )}
-
-        {/* ════════════════ DISCARD ════════════════ */}
-        {stage === 'discard' && eventCard && (
-          <motion.div
-            key="discard"
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center"
-          >
-            <motion.div
-              initial={{ x: 0, opacity: 1, scale: 1 }}
-              animate={{ x: 300, opacity: 0, scale: 0.5 }}
-              transition={{ duration: 0.5, ease: 'easeIn' }}
-            >
-              <CardFront card={eventCard} eventEntry={eventRollResult?.eventEntry} />
-            </motion.div>
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-              className="mt-6 text-gray-500 text-sm"
-            >
-              Discarded: Event Deck {Math.max(0, EVENT_CARDS.length - (activeSession.currentRound))}/{EVENT_CARDS.length} remaining
-            </motion.p>
-          </motion.div>
-        )}
-
-        {/* ════════════════ CONTINUE ════════════════ */}
-        {stage === 'continue' && (
-          <motion.div
-            key="continue"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center text-center"
-          >
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ type: 'spring', stiffness: 200 }}
-              className="w-16 h-16 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mb-6"
-            >
-              <span className="text-amber-400 text-2xl">&#10003;</span>
-            </motion.div>
-
-            <h2 className="text-white text-2xl font-bold mb-2">The Winds Have Spoken</h2>
-            <p className="text-gray-400 text-sm mb-8">
-              {eventRollResult
-                ? `${eventRollResult.eventEntry.name} has been resolved`
-                : 'No event this season'}
-            </p>
-
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={onPhaseComplete}
-              className="px-8 py-3 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-lg shadow-lg shadow-amber-500/30 transition-all"
-            >
-              Continue to Phase 2: Investigate &rarr;
-            </motion.button>
-          </motion.div>
-        )}
-
       </AnimatePresence>
 
-      {/* Universal bottom navigation */}
-      <PhaseNavigation
-        canContinue={stage === 'continue' || stage === 'impact' || stage === 'discard'}
-        continueLabel="Continue to Phase 2: Investigate \u2192"
-        onContinue={() => {
-          console.log('PHASE TRANSITION: Event Roll → Challenge');
-          onPhaseComplete();
-        }}
-        onSkip={() => {
-          console.log('PHASE SKIP: Skipping Event Roll');
-          onPhaseComplete();
-        }}
-        skipLabel="Skip Event Roll"
-      />
+      {/* Bottom navigation */}
+      <div style={{ marginTop: '2rem' }}>
+        <PhaseNavigation onContinue={onPhaseComplete} canContinue={stage === 'continue'} continueLabel="Next Phase \u2192" />
+      </div>
     </div>
   );
 }

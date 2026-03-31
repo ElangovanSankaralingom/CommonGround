@@ -11,34 +11,34 @@ interface PhaseIndicatorProps {
 // Map the spec's 5 phases to the internal engine phases
 const DISPLAY_PHASES: { label: string; number: string; enginePhases: GamePhase[]; guidance: string }[] = [
   {
-    label: 'Event Roll',
+    label: 'Winds of Change',
     number: '1',
     enginePhases: ['payment_day', 'event_roll'],
-    guidance: 'The facilitator rolls a d6 to determine if an external event affects the game.',
+    guidance: 'External forces are at play. Roll the die to discover what changes this season.',
   },
   {
-    label: 'Challenge',
+    label: 'Investigate',
     number: '2',
-    enginePhases: [],  // Challenge is drawn during event_roll in our engine
-    guidance: 'A challenge card is drawn. Study the problem and ask clarifying questions.',
+    enginePhases: [],
+    guidance: 'A challenge emerges. Explore the zone to uncover clues and understand the problem.',
   },
   {
-    label: 'Deliberation',
+    label: 'See the Vision',
     number: '3',
     enginePhases: ['deliberation'],
-    guidance: 'Negotiate, trade resources, form coalitions, and plan your card series.',
+    guidance: 'Discover resources, form alliances, trade, and plan your strategy together.',
   },
   {
-    label: 'Action',
+    label: 'Build the Path',
     number: '4',
     enginePhases: ['individual_action', 'action_resolution'],
-    guidance: 'Players take turns playing cards. Lowest utility player acts first.',
+    guidance: 'Work together as a relay team. Each player runs their segment of the path to solution.',
   },
   {
-    label: 'Scoring',
+    label: 'Park Guardian',
     number: '5',
     enginePhases: ['round_end_accounting', 'level_check', 'round_end'],
-    guidance: 'Zone conditions update, utilities recalculate, SVS updates, Shared Balance check runs.',
+    guidance: 'The Park Guardian reviews: Is everyone sustained? Is the vision shared fairly?',
   },
 ];
 
