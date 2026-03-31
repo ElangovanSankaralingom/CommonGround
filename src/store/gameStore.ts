@@ -84,6 +84,7 @@ interface GameStoreState {
   audioEnabled: boolean;
   musicEnabled: boolean;
   highContrastMode: boolean;
+  playerEffectiveness: Record<string, Record<string, number>> | null;
 
   // Setup actions
   initializeGame: (config: GameConfig, playerAssignments: { name: string; roleId: RoleId }[]) => void;
@@ -178,6 +179,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   audioEnabled: true,
   musicEnabled: true,
   highContrastMode: false,
+  playerEffectiveness: null,
 
   // ── Setup Actions ─────────────────────────────────────────────
 
@@ -284,6 +286,23 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const updatedSession = startPhase(session, 'payment_day');
     console.log('TRANSITION CHAIN: startPhase complete → phase:', updatedSession.currentPhase, 'status:', updatedSession.status);
 
+    // Calculate resource effectiveness from ability scores
+    const effectiveness: Record<string, Record<string, number>> = {};
+    const RESOURCE_ABILITY_MAP: Record<string, string> = {
+      budget: 'authority',
+      knowledge: 'technicalKnowledge',
+      volunteer: 'communityTrust',
+      material: 'adaptability',
+      influence: 'politicalLeverage',
+    };
+    for (const [pid, player] of Object.entries(updatedSession.players)) {
+      effectiveness[pid] = {};
+      for (const [resource, ability] of Object.entries(RESOURCE_ABILITY_MAP)) {
+        const score = (player.abilities as any)[ability] || 10;
+        effectiveness[pid][resource] = Math.round((score / 20) * 100);
+      }
+    }
+
     if (telemetryRecorder) {
       telemetryRecorder.record(
         updatedSession.currentRound,
@@ -298,6 +317,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set({
       session: { ...updatedSession, status: 'playing' },
       showPaymentDay: true,
+      playerEffectiveness: effectiveness,
       animationQueue: [
         ...get().animationQueue,
         {

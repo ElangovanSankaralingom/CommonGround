@@ -5,6 +5,8 @@ import type { GameSession, ResourceType, RoleId } from '../../core/models/types'
 import { ROLE_COLORS, RESOURCE_COLORS } from '../../core/models/constants';
 import { ALL_EVENT_CARDS, ZONE_NAMES, ZONE_ID_MAP, type WindsEventCard } from '../../core/content/eventDeck';
 import { PhaseNavigation } from '../effects/PhaseNavigation';
+import { sounds } from '../../utils/sounds';
+import { tokenFlyAway, tokenFlyIn, diceShake, diceLand } from '../../utils/animations';
 
 // ─── Module-level deck state (persists across component remounts) ────
 let deckState = {
@@ -178,6 +180,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
     if (rolling || rollDone.current) return;
     setRolling(true);
     setStage('rolling');
+    sounds.playDiceRoll();
     console.log('[PHASE 1] Die roll initiated');
 
     const result = Math.floor(Math.random() * 6) + 1;
@@ -202,6 +205,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
                 clearInterval(phase3);
                 setDieValue(result);
                 setRolling(false);
+                sounds.playDiceLand();
                 setFinalRoll(result);
                 rollDone.current = true;
                 console.log(`[PHASE 1] Die result: ${result}`);
@@ -222,6 +226,8 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
       const card = drawCard(eventType);
       setCurrentCard(card);
       setEffectLines(buildEffectLines(card));
+      if (eventType === 'negative') sounds.playNegativeEvent();
+      else if (eventType === 'positive') sounds.playPositiveEvent();
       const t = setTimeout(() => setStage('card_reveal'), 1800);
       return () => clearTimeout(t);
     }
@@ -229,7 +235,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
 
   useEffect(() => {
     if (stage === 'card_reveal' && !cardFlipped) {
-      const t = setTimeout(() => setCardFlipped(true), 800);
+      const t = setTimeout(() => { setCardFlipped(true); sounds.playCardFlip(); }, 800);
       return () => clearTimeout(t);
     }
     if (stage === 'card_reveal' && cardFlipped) {
@@ -240,7 +246,17 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
 
   useEffect(() => {
     if (stage === 'effects' && effectLines.length > 0 && visibleEffects < effectLines.length) {
-      const t = setTimeout(() => setVisibleEffects(v => v + 1), 500);
+      const t = setTimeout(() => {
+        setVisibleEffects(v => v + 1);
+        if (currentCard) {
+          const eff = currentCard.effects[visibleEffects];
+          if (eff && (eff.type === 'player_resource_gain' || eff.type === 'zone_condition_up')) {
+            sounds.playTokenGain();
+          } else if (eff && (eff.type === 'player_resource_loss' || eff.type === 'resource_loss' || eff.type === 'zone_condition_drop')) {
+            sounds.playTokenLoss();
+          }
+        }
+      }, 500);
       return () => clearTimeout(t);
     }
     if (stage === 'effects' && (effectLines.length === 0 || visibleEffects >= effectLines.length)) {
@@ -424,7 +440,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
             {stage === 'continue' && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={{ textAlign: 'center', marginTop: '1.5rem' }}>
                 <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
-                  onClick={() => { console.log('[PHASE 1] Continuing to Phase 2'); onPhaseComplete(); }}
+                  onClick={() => { sounds.playButtonClick(); console.log('[PHASE 1] Continuing to Phase 2'); onPhaseComplete(); }}
                   style={{ padding: '0.9rem 2.5rem', fontSize: '1.05rem', fontWeight: 700,
                     background: '#D97706', color: '#FFF', border: 'none', borderRadius: 10,
                     cursor: 'pointer', letterSpacing: '0.02em' }}>
@@ -438,7 +454,7 @@ export function EventRollPhase({ session, onPhaseComplete }: EventRollPhaseProps
 
       {/* Bottom navigation */}
       <div style={{ marginTop: '2rem' }}>
-        <PhaseNavigation onContinue={onPhaseComplete} canContinue={stage === 'continue'} continueLabel="Next Phase \u2192" />
+        <PhaseNavigation onContinue={() => { sounds.playButtonClick(); onPhaseComplete(); }} canContinue={stage === 'continue'} continueLabel="Next Phase \u2192" />
       </div>
     </div>
   );

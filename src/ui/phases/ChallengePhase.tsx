@@ -1,1044 +1,303 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type {
-  GameSession,
-  ChallengeCard,
-  Player,
-  RoleId,
-  AbilityId,
-  ResourceType,
-} from '../../core/models/types';
-import { CHALLENGE_CATEGORY_COLORS, ROLE_COLORS } from '../../core/models/constants';
-import { ZoneIllustration, ZONE_CLUE_POSITIONS } from '../zones/ZoneIllustrations';
+import type { GameSession, ChallengeCard, Player, RoleId } from '../../core/models/types';
+import { ROLE_COLORS, CHALLENGE_CATEGORY_COLORS } from '../../core/models/constants';
+import { getHiddenObjectsForZone, HiddenObject } from '../../core/content/featureTiles';
 import { PhaseNavigation } from '../effects/PhaseNavigation';
+import { sounds } from '../../utils/sounds';
 
 // ─── Types ──────────────────────────────────────────────────────
-
-export interface TreasureHuntResults {
-  cluesFound: { clueId: string; finderId: string; type: string }[];
+export interface InvestigationResult {
+  relevantFound: string[];
+  irrelevantClicked: { objectId: string; teachingEffect: string }[];
   totalFound: number;
-  allFound: boolean;
+  teachingMoments: number;
   cpAwarded: Record<string, number>;
 }
-
 interface ChallengePhaseProps {
   session: GameSession;
   challenge: ChallengeCard;
   players: Player[];
-  onPhaseComplete: (results: TreasureHuntResults) => void;
+  onPhaseComplete: (results: InvestigationResult) => void;
+}
+type Stage = 'intro' | 'card' | 'scene' | 'summary' | 'continue';
+interface ObjectState { obj: HiddenObject; status: 'hidden' | 'found_relevant' | 'found_irrelevant'; finderId: string | null; }
+
+const TURN_SEC = 15, TIMER_PEN = 3, LOCKOUT_MS = 3000, DISTRACT_R = 0.6;
+const CLUE_ICO: Record<string, string> = { consequence: '\u26A0\uFE0F', capability: '\u{1F9E0}', outcome: '\u{1F3AF}', resource: '\u{1F4E6}', connection: '\u{1F517}', evidence: '\u{1F50D}', blueprint: '\u{1F5FA}\uFE0F' };
+const EFF_LBL: Record<string, string> = { timer_loss: 'Lost 3s', distracted: 'Next reveal truncated', awareness_gain: 'Awareness gained', turn_consumed: 'Brief lockout', bureaucratic: 'Bureaucratic Thinking!' };
+const S = { box: (bg: string, bdr: string) => ({ width: '100%' as const, background: bg, border: `1px solid ${bdr}`, borderRadius: 12, padding: 20, marginBottom: 16 }) };
+
+function ZoneBackground({ zoneId }: { zoneId: string }) {
+  if (zoneId.includes('pond') || zoneId.includes('boat')) return (<>
+    <rect width="800" height="500" fill="#0D2B3E" />
+    <path d="M0 300Q200 270 400 310Q600 350 800 290L800 500L0 500Z" fill="#0A3D5C" opacity="0.6" />
+    <path d="M0 340Q200 310 400 350Q600 380 800 330" stroke="#1A6B8A" strokeWidth="2" fill="none" opacity="0.4" />
+    <path d="M0 360Q250 330 500 370Q700 400 800 350" stroke="#1A6B8A" strokeWidth="1.5" fill="none" opacity="0.3" />
+  </>);
+  if (zoneId.includes('herb') || zoneId.includes('garden')) return (<>
+    <rect width="800" height="500" fill="#0F2E1A" />
+    <ellipse cx="200" cy="350" rx="80" ry="50" fill="#1A4D2E" opacity="0.5" />
+    <ellipse cx="600" cy="300" rx="100" ry="60" fill="#1A4D2E" opacity="0.4" />
+    <path d="M400 400Q410 350 400 300M400 350Q430 340 450 360M400 330Q370 320 360 340" stroke="#2D6B3F" strokeWidth="2" fill="none" opacity="0.5" />
+  </>);
+  if (zoneId.includes('play') || zoneId.includes('restroom')) return (<>
+    <rect width="800" height="500" fill="#1A1A2E" />
+    <rect x="150" y="200" width="120" height="150" fill="#252545" opacity="0.5" rx="4" />
+    <rect x="500" y="250" width="160" height="120" fill="#252545" opacity="0.4" rx="4" />
+    <polygon points="210,200 210,160 270,200" fill="#2A2A4A" opacity="0.4" />
+  </>);
+  if (zoneId.includes('track') || zoneId.includes('fiber') || zoneId.includes('path')) return (<>
+    <rect width="800" height="500" fill="#1E1A14" />
+    <path d="M50 450Q200 400 350 420Q500 440 650 380Q750 340 800 350" stroke="#4A3E30" strokeWidth="6" fill="none" opacity="0.5" />
+    <path d="M0 250Q150 230 300 260Q500 290 700 240L800 260" stroke="#3D3228" strokeWidth="3" fill="none" opacity="0.3" />
+  </>);
+  return (<><rect width="800" height="500" fill="#141422" /><circle cx="200" cy="250" r="80" fill="#1C1C35" opacity="0.3" /><circle cx="600" cy="300" r="100" fill="#1C1C35" opacity="0.25" /></>);
 }
 
-type Stage =
-  | 'intro'
-  | 'card_draw'
-  | 'exploration_intro'
-  | 'exploration'
-  | 'results'
-  | 'continue';
-
-type ClueType = 'consequence' | 'capability' | 'outcome' | 'resource' | 'connection';
-
-interface ClueObject {
-  id: string;
-  type: ClueType;
-  x: number;
-  y: number;
-  content: string;
-  found: boolean;
-  finderId: string | null;
+function DifficultyDots({ level }: { level: number }) {
+  return <span style={{ letterSpacing: 2 }}>{Array.from({ length: 5 }, (_, i) => <span key={i} style={{ color: i < level ? '#F59E0B' : '#4B5563' }}>{'\u25CF'}</span>)}</span>;
 }
 
-// ─── Constants ──────────────────────────────────────────────────
-
-const CLUE_TYPE_COLORS: Record<ClueType, string> = {
-  consequence: '#EF4444',
-  capability: '#3B82F6',
-  outcome: '#F59E0B',
-  resource: '#22C55E',
-  connection: '#A855F7',
-};
-
-const CLUE_TYPE_LABELS: Record<ClueType, string> = {
-  consequence: 'CONSEQUENCE',
-  capability: 'STAKEHOLDERS',
-  outcome: 'OUTCOMES',
-  resource: 'HIDDEN SUPPLY',
-  connection: 'CONNECTION',
-};
-
-const TURN_SECONDS = 15;
-const TOTAL_CLUES = 5;
-const PROXIMITY_PX = 60;
-const CLUE_RADIUS = 24;
-
-/** Role-specific advantage: certain clue types glow bigger for certain roles */
-const ROLE_CLUE_ADVANTAGE: Record<string, string[]> = {
-  citizen: ['consequence', 'resource'],
-  designer: ['capability', 'connection'],
-  advocate: ['resource', 'connection'],
-  administrator: ['outcome', 'consequence'],
-  investor: ['resource', 'outcome'],
-};
-
-const ABILITY_DISPLAY: Record<AbilityId, string> = {
-  authority: 'Authority',
-  resourcefulness: 'Resourcefulness',
-  communityTrust: 'Community Trust',
-  technicalKnowledge: 'Technical Knowledge',
-  politicalLeverage: 'Political Leverage',
-  adaptability: 'Adaptability',
-};
-
-const ROLE_DISPLAY: Record<RoleId, string> = {
-  administrator: 'Administrator',
-  designer: 'Designer',
-  citizen: 'Citizen',
-  investor: 'Investor',
-  advocate: 'Advocate',
-};
-
-const RESOURCE_ICONS: Record<ResourceType, string> = {
-  budget: '\u{1F4B0}',
-  influence: '\u{1F3DB}',
-  volunteer: '\u{1F91D}',
-  material: '\u{1F9F1}',
-  knowledge: '\u{1F4DA}',
-};
-
-// ─── Helpers ────────────────────────────────────────────────────
-
-function generateClues(
-  challenge: ChallengeCard,
-  session: GameSession,
-  players: Player[],
-  zoneId: string
-): ClueObject[] {
-  const positions = ZONE_CLUE_POSITIONS[zoneId] ?? [
-    { id: 'c1', x: 150, y: 200, type: 'consequence' },
-    { id: 'c2', x: 400, y: 150, type: 'capability' },
-    { id: 'c3', x: 600, y: 300, type: 'outcome' },
-    { id: 'c4', x: 250, y: 400, type: 'resource' },
-    { id: 'c5', x: 550, y: 350, type: 'connection' },
-  ];
-
-  // 1. Consequence
-  const consequenceText = challenge.failureConsequences
-    .map((c) => {
-      switch (c.type) {
-        case 'cws_penalty':
-          return `SVS penalty: -${c.params.amount ?? '?'}`;
-        case 'zone_degrade':
-          return `Zone degrades by ${c.params.levels ?? 1} level(s)`;
-        case 'resource_loss':
-          return `Resource loss: ${Object.entries(c.params).map(([k, v]) => `${k}: ${v}`).join(', ')}`;
-        case 'new_problem':
-          return `New problem emerges: ${c.params.problem || 'unknown'}`;
-        case 'lock_zone':
-          return `Zone locked for ${c.params.duration ?? '?'} rounds`;
-        case 'status_effect':
-          return `Status effect: ${c.params.effect || 'debuff'} applied`;
-        case 'difficulty_increase':
-          return `Difficulty increases by ${c.params.amount || 2}`;
-        default:
-          return `Effect: ${c.type}`;
-      }
-    })
-    .join('. ');
-
-  // 2. Capability / Stakeholders
-  const checks = challenge.requirements.abilityChecks;
-  const capabilityLines: string[] = [];
-  if (checks.length > 0) {
-    for (const check of checks) {
-      for (const p of players) {
-        const score = p.abilities[check.ability];
-        const pass = score >= check.threshold;
-        const roleColor = ROLE_COLORS[p.roleId];
-        capabilityLines.push(
-          `${ROLE_DISPLAY[p.roleId]}: ${ABILITY_DISPLAY[check.ability]} ${score}/${check.threshold} ${pass ? '\u2713' : '\u2717'}`
-        );
-      }
-    }
-  } else {
-    capabilityLines.push('No specific ability checks required.');
-  }
-
-  // 3. Outcome tiers
-  const outcomeText =
-    'Full Success: exceed threshold by 4+ | Partial: 1-3 above | Narrow: exact match | Failure: below threshold';
-
-  // 4. Resource
-  const zone = session.board.zones[zoneId];
-  const primaryRes = zone?.primaryResourceType ?? 'budget';
-  const resourceText = `+1 ${primaryRes.charAt(0).toUpperCase() + primaryRes.slice(1)} Token added to zone!`;
-
-  // 5. Connection
-  const adjacency = session.board.adjacency[zoneId] ?? [];
-  const adjNames = adjacency
-    .map((id) => session.board.zones[id]?.name ?? id)
-    .join(', ');
-  const connectionText = adjacency.length > 0
-    ? `This zone connects to ${adjNames}. Improvements here cascade.`
-    : 'This zone has no direct adjacencies mapped.';
-
-  const typeOrder: ClueType[] = ['consequence', 'capability', 'outcome', 'resource', 'connection'];
-  const contents = [
-    `CONSEQUENCE: If unresolved: ${consequenceText || 'Unknown consequences.'}`,
-    `STAKEHOLDERS: ${capabilityLines.join(' | ')}`,
-    `OUTCOMES: ${outcomeText}`,
-    `HIDDEN SUPPLY: ${resourceText}`,
-    `CONNECTION: ${connectionText}`,
-  ];
-
-  return typeOrder.map((type, i) => {
-    const pos = positions.find((p) => p.type === type) ?? positions[i];
-    return {
-      id: pos?.id ?? `clue_${type}`,
-      type,
-      x: pos?.x ?? 100 + i * 140,
-      y: pos?.y ?? 250,
-      content: contents[i],
-      found: false,
-      finderId: null,
-    };
-  });
-}
-
-// ─── Sub-components ─────────────────────────────────────────────
-
-const DifficultyDots: React.FC<{ rating: number }> = ({ rating }) => (
-  <div className="flex gap-1 items-center">
-    {Array.from({ length: 5 }).map((_, i) => (
-      <span key={i} className="text-lg leading-none">
-        {i < rating ? '\u25CF' : '\u25CB'}
-      </span>
-    ))}
-  </div>
-);
-
-const CluePopup: React.FC<{
-  clue: ClueObject;
-  type: ClueType;
-  onClose: () => void;
-}> = ({ clue, type, onClose }) => (
-  <motion.div
-    initial={{ opacity: 0, scale: 0.8 }}
-    animate={{ opacity: 1, scale: 1 }}
-    exit={{ opacity: 0, scale: 0.8 }}
-    className="fixed inset-0 z-50 flex items-center justify-center"
-    style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
-    onClick={onClose}
-  >
-    <motion.div
-      className="bg-gray-900 border-2 rounded-xl p-6 max-w-lg w-full mx-4"
-      style={{ borderColor: CLUE_TYPE_COLORS[type] }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="flex items-center gap-3 mb-4">
-        <div
-          className="w-4 h-4 rounded-full"
-          style={{ backgroundColor: CLUE_TYPE_COLORS[type] }}
-        />
-        <h3
-          className="text-lg font-bold"
-          style={{ color: CLUE_TYPE_COLORS[type] }}
-        >
-          {CLUE_TYPE_LABELS[type]}
-        </h3>
-      </div>
-      <p className="text-gray-200 text-sm leading-relaxed whitespace-pre-wrap">
-        {clue.content}
-      </p>
-      <button
-        onClick={onClose}
-        className="mt-4 w-full py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white text-sm transition-colors"
-      >
-        Close
-      </button>
-    </motion.div>
-  </motion.div>
-);
-
-const TimerBar: React.FC<{ secondsLeft: number; total: number }> = ({
-  secondsLeft,
-  total,
-}) => {
-  const pct = (secondsLeft / total) * 100;
-  const color = pct > 50 ? '#22C55E' : pct > 25 ? '#F59E0B' : '#EF4444';
-  return (
-    <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
-      <motion.div
-        className="h-full rounded-full"
-        style={{ backgroundColor: color }}
-        animate={{ width: `${pct}%` }}
-        transition={{ duration: 0.3 }}
-      />
-    </div>
-  );
-};
+const Badge = ({ show, color, label }: { show: boolean; color: string; label: string }) =>
+  show ? <span style={{ fontSize: 11, color, background: `${color}26`, padding: '2px 8px', borderRadius: 4 }}>{label}</span> : null;
 
 // ─── Main Component ─────────────────────────────────────────────
-
-export function ChallengePhase({
-  session,
-  challenge,
-  players,
-  onPhaseComplete,
-}: ChallengePhaseProps) {
+export function ChallengePhase({ session, challenge, players, onPhaseComplete }: ChallengePhaseProps) {
   const [stage, setStage] = useState<Stage>('intro');
   const [cardFlipped, setCardFlipped] = useState(false);
-
-  // Determine affected zone
-  const zoneId = challenge.publicFace.zoneId || challenge.affectedZoneIds[0] || '';
-  const zoneName = challenge.publicFace.zoneName || session.board.zones[zoneId]?.name || zoneId;
-
-  // Exploration state
-  const [clues, setClues] = useState<ClueObject[]>(() =>
-    generateClues(challenge, session, players, zoneId)
-  );
-  const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
-  const [secondsLeft, setSecondsLeft] = useState(TURN_SECONDS);
-  const [activeCluePopup, setActiveCluePopup] = useState<ClueObject | null>(null);
-  const [huntComplete, setHuntComplete] = useState(false);
-  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
-  const [viewOffsetX, setViewOffsetX] = useState(0);
-  const explorationRef = useRef<HTMLDivElement>(null);
+  const zoneId = challenge.affectedZoneIds[0] || 'default';
+  const allObjects = useMemo(() => getHiddenObjectsForZone(zoneId), [zoneId]);
+  const sortedPlayers = useMemo(() => [...players].sort((a, b) => a.utilityScore - b.utilityScore), [players]);
+  const [objStates, setObjStates] = useState<ObjectState[]>(() => allObjects.map(obj => ({ obj, status: 'hidden', finderId: null })));
+  const [pIdx, setPIdx] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(TURN_SEC);
+  const [popup, setPopup] = useState<{ text: string; type: 'relevant' | 'irrelevant'; effect?: string } | null>(null);
+  const [locked, setLocked] = useState(false);
+  const [distracted, setDistracted] = useState(false);
+  const [awareness, setAwareness] = useState(false);
+  const [bureaucratic, setBureaucratic] = useState(false);
+  const [cpMap, setCpMap] = useState<Record<string, number>>({});
+  const [flash, setFlash] = useState(false);
+  const [done, setDone] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Sort players by utility ascending (lowest first)
-  const turnOrder = useMemo(
-    () => [...players].sort((a, b) => a.utilityScore - b.utilityScore),
-    [players]
-  );
+  useEffect(() => { if (stage === 'intro') { const t = setTimeout(() => setStage('card'), 1500); return () => clearTimeout(t); } }, [stage]);
 
-  const currentPlayer = turnOrder[currentPlayerIndex] ?? null;
+  const advancePlayer = useCallback(() => {
+    setPopup(null); setDistracted(false); setAwareness(false); setBureaucratic(false); setLocked(false);
+    if (pIdx >= sortedPlayers.length - 1) { setDone(true); setTimeout(() => setStage('summary'), 800); }
+    else setPIdx(p => p + 1);
+  }, [pIdx, sortedPlayers.length]);
 
-  // ── Stage auto-transitions ───────────────────────────────────
   useEffect(() => {
-    if (stage === 'intro') {
-      const t = setTimeout(() => setStage('card_draw'), 1500);
-      return () => clearTimeout(t);
-    }
-    if (stage === 'exploration_intro') {
-      const t = setTimeout(() => setStage('exploration'), 1000);
-      return () => clearTimeout(t);
-    }
-  }, [stage]);
-
-  // Card flip animation trigger
-  useEffect(() => {
-    if (stage === 'card_draw') {
-      const t = setTimeout(() => setCardFlipped(true), 400);
-      return () => clearTimeout(t);
-    }
-  }, [stage]);
-
-  // ── Turn timer ───────────────────────────────────────────────
-  useEffect(() => {
-    if (stage !== 'exploration' || huntComplete || activeCluePopup) return;
-
+    if (stage !== 'scene' || done) return;
+    setTimeLeft(TURN_SEC);
     timerRef.current = setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          advanceTurn();
-          return TURN_SECONDS;
-        }
-        return prev - 1;
-      });
+      setTimeLeft(prev => { if (prev <= 1) { clearInterval(timerRef.current!); advancePlayer(); return 0; } return prev - 1; });
     }, 1000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [stage, pIdx, done]);
 
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, currentPlayerIndex, huntComplete, activeCluePopup]);
-
-  // ── Turn advance ─────────────────────────────────────────────
-  const advanceTurn = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setSecondsLeft(TURN_SECONDS);
-
-    if (currentPlayerIndex + 1 < turnOrder.length) {
-      setCurrentPlayerIndex((prev) => prev + 1);
+  const handleClick = useCallback((idx: number) => {
+    if (stage !== 'scene' || locked || done) return;
+    const st = objStates[idx]; if (st.status !== 'hidden') return;
+    const player = sortedPlayers[pIdx], obj = st.obj, next = [...objStates];
+    if (obj.relevant) {
+      next[idx] = { ...st, status: 'found_relevant', finderId: player.id };
+      let text = obj.revealText;
+      if (distracted) { text = text.slice(0, Math.floor(text.length * DISTRACT_R)) + '...'; setDistracted(false); }
+      if (awareness) { text += ' [BONUS: Enhanced awareness from previous mistake]'; setAwareness(false); }
+      setPopup({ text, type: 'relevant' });
+      sounds.playTokenGain();
+      setCpMap(prev => ({ ...prev, [player.id]: (prev[player.id] || 0) + 1 }));
     } else {
-      setHuntComplete(true);
-      setStage('results');
+      next[idx] = { ...st, status: 'found_irrelevant', finderId: player.id };
+      const eff = obj.teachingEffect || 'timer_loss';
+      setPopup({ text: obj.teachingText || 'Not relevant.', type: 'irrelevant', effect: eff });
+      sounds.playTokenLoss();
+      if (eff === 'timer_loss') { setTimeLeft(p => Math.max(0, p - (obj.timerPenalty || TIMER_PEN))); setFlash(true); setTimeout(() => setFlash(false), 500); }
+      else if (eff === 'distracted') setDistracted(true);
+      else if (eff === 'awareness_gain') setAwareness(true);
+      else if (eff === 'turn_consumed') { setLocked(true); setTimeout(() => setLocked(false), LOCKOUT_MS); }
+      else if (eff === 'bureaucratic') setBureaucratic(true);
     }
-  }, [currentPlayerIndex, turnOrder.length]);
+    setObjStates(next);
+  }, [stage, locked, done, objStates, sortedPlayers, pIdx, distracted, awareness]);
 
-  // ── Mouse tracking for proximity hint ────────────────────────
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (huntComplete || !explorationRef.current) return;
-      const rect = explorationRef.current.getBoundingClientRect();
-      // The SVG viewBox is 800x500. Map mouse to viewBox coords.
-      const svgWidth = rect.width;
-      const svgHeight = rect.height;
-      const mx = ((e.clientX - rect.left) / svgWidth) * 800;
-      const my = ((e.clientY - rect.top) / svgHeight) * 500;
-      setMousePos({ x: mx, y: my });
-    },
-    [huntComplete]
-  );
+  const results = useMemo((): InvestigationResult => {
+    const rel = objStates.filter(s => s.status === 'found_relevant').map(s => s.obj.id);
+    const irr = objStates.filter(s => s.status === 'found_irrelevant').map(s => ({ objectId: s.obj.id, teachingEffect: s.obj.teachingEffect || 'timer_loss' }));
+    return { relevantFound: rel, irrelevantClicked: irr, totalFound: rel.length, teachingMoments: irr.length, cpAwarded: cpMap };
+  }, [objStates, cpMap]);
 
-  // ── Clue click handler ───────────────────────────────────────
-  const handleClueClick = useCallback(
-    (clueId: string) => {
-      if (!currentPlayer || huntComplete) return;
-
-      const clue = clues.find((c) => c.id === clueId);
-      if (!clue || clue.found) return;
-
-      const updatedClue = { ...clue, found: true, finderId: currentPlayer.id };
-
-      setClues((prev) =>
-        prev.map((c) => (c.id === clueId ? updatedClue : c))
-      );
-
-      setActiveCluePopup(updatedClue);
-    },
-    [currentPlayer, clues, huntComplete]
-  );
-
-  const closeCluePopup = useCallback(() => {
-    setActiveCluePopup(null);
-  }, []);
-
-  // ── Panorama scrolling ───────────────────────────────────────
-  const scrollLeft = useCallback(() => {
-    setViewOffsetX((prev) => Math.min(prev + 200, 0));
-  }, []);
-
-  const scrollRight = useCallback(() => {
-    setViewOffsetX((prev) => Math.max(prev - 200, -400));
-  }, []);
-
-  // ── Proximity computation for each clue ──────────────────────
-  const getClueProximity = useCallback(
-    (clue: ClueObject): number => {
-      if (!mousePos || clue.found) return 0;
-      const dx = mousePos.x - clue.x;
-      const dy = mousePos.y - clue.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > PROXIMITY_PX) return 0;
-      return 1 - dist / PROXIMITY_PX; // 0..1, 1 = right on top
-    },
-    [mousePos]
-  );
-
-  // ── Compute results ──────────────────────────────────────────
-  const results = useMemo((): TreasureHuntResults => {
-    const found = clues.filter((c) => c.found);
-    const allFound = found.length === TOTAL_CLUES;
-
-    const cpAwarded: Record<string, number> = {};
-    players.forEach((p) => {
-      cpAwarded[p.id] = 0;
-    });
-    found.forEach((c) => {
-      if (c.finderId) {
-        cpAwarded[c.finderId] = (cpAwarded[c.finderId] || 0) + 1;
-      }
-    });
-    if (allFound) {
-      players.forEach((p) => {
-        cpAwarded[p.id] = (cpAwarded[p.id] || 0) + 2;
-      });
-    }
-
-    return {
-      cluesFound: found.map((c) => ({
-        clueId: c.id,
-        finderId: c.finderId || '',
-        type: c.type,
-      })),
-      totalFound: found.length,
-      allFound,
-      cpAwarded,
-    };
-  }, [clues, players]);
-
-  // ── Count mandatory unfound ──────────────────────────────────
-  const mandatoryTypes: ClueType[] = ['consequence', 'capability', 'outcome'];
-  const mandatoryUnfound = clues.filter(
-    (c) => mandatoryTypes.includes(c.type) && !c.found
-  );
-
-  // ── Render: Intro ────────────────────────────────────────────
-
-  const renderIntro = () => (
-    <motion.div
-      key="intro"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="flex flex-col items-center justify-center h-full gap-4"
-    >
-      <motion.div
-        initial={{ scale: 0.8 }}
-        animate={{ scale: 1 }}
-        className="text-center"
-      >
-        <h1 className="text-4xl font-bold text-amber-400 mb-2">
-          Phase 2: Challenge
-        </h1>
-        <p className="text-gray-300 text-lg">
-          A new problem emerges. Investigate to understand it.
-        </p>
-      </motion.div>
-      <motion.div
-        className="w-16 h-1 bg-amber-500 rounded-full"
-        initial={{ width: 0 }}
-        animate={{ width: 64 }}
-        transition={{ duration: 1 }}
-      />
-    </motion.div>
-  );
-
-  // ── Render: Card Draw (3D flip) ──────────────────────────────
-
-  const renderCardDraw = () => {
-    const face = challenge.publicFace;
-    const catColor =
-      CHALLENGE_CATEGORY_COLORS[face.category] || face.categoryColor || '#6B7280';
-
-    return (
-      <motion.div
-        key="card_draw"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="flex flex-col items-center justify-center h-full gap-6 px-4"
-      >
-        {/* 3D Card flip container */}
-        <div style={{ perspective: 1200 }}>
-          <motion.div
-            className="relative w-80"
-            style={{ transformStyle: 'preserve-3d' }}
-            animate={{ rotateY: cardFlipped ? 0 : 180 }}
-            transition={{ duration: 0.7, ease: 'easeInOut' }}
-          >
-            {/* Front face (public) */}
-            <div
-              className="bg-gray-900 border-2 rounded-xl p-6 shadow-2xl"
-              style={{
-                backfaceVisibility: 'hidden',
-                borderColor: catColor,
-              }}
-            >
-              {/* Category badge + Difficulty dots */}
-              <div className="flex items-center justify-between mb-4">
-                <span
-                  className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-white"
-                  style={{ backgroundColor: catColor }}
-                >
-                  {face.category}
-                </span>
-                <DifficultyDots rating={face.difficultyRating} />
-              </div>
-
-              {/* Name */}
-              <h2 className="text-xl font-bold text-white mb-1">
-                {challenge.name}
-              </h2>
-
-              {/* Zone badge */}
-              <div className="flex items-center gap-2 mb-3">
-                <span
-                  className="px-2 py-0.5 rounded text-xs font-medium text-white"
-                  style={{ backgroundColor: catColor + '66' }}
-                >
-                  {face.zoneName}
-                </span>
-              </div>
-
-              {/* Problem description */}
-              <p className="text-gray-200 text-sm leading-relaxed mb-4">
-                {face.problemDescription}
-              </p>
-
-              {/* Resources required */}
-              <div className="mb-4">
-                <h4 className="text-xs text-gray-500 uppercase tracking-wider mb-2">
-                  Resources Required
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {face.resourcesRequired.map((r) => (
-                    <span
-                      key={r.type}
-                      className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-300 flex items-center gap-1"
-                    >
-                      <span>{RESOURCE_ICONS[r.type] || ''}</span>
-                      {r.displayName} x{r.amount}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Flavor text */}
-              {face.flavorText && (
-                <p className="text-gray-500 italic text-xs border-l-2 border-gray-700 pl-3 mb-4">
-                  {face.flavorText}
-                </p>
-              )}
-            </div>
-
-            {/* Card back (shown before flip) */}
-            <div
-              className="absolute inset-0 bg-gray-800 border-2 border-gray-600 rounded-xl flex items-center justify-center"
-              style={{
-                backfaceVisibility: 'hidden',
-                transform: 'rotateY(180deg)',
-              }}
-            >
-              <div className="text-center">
-                <div className="text-6xl mb-4 opacity-40">?</div>
-                <p className="text-gray-400 text-sm uppercase tracking-widest">
-                  Challenge Card
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-
-        {/* Investigate Zone button */}
-        {cardFlipped && (
-          <motion.button
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            onClick={() => setStage('exploration_intro')}
-            className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
-          >
-            Investigate Zone &rarr;
-          </motion.button>
-        )}
-      </motion.div>
-    );
-  };
-
-  // ── Render: Exploration Intro ────────────────────────────────
-
-  const renderExplorationIntro = () => (
-    <motion.div
-      key="exploration_intro"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="flex flex-col items-center justify-center h-full gap-4"
-    >
-      <h2 className="text-3xl font-bold text-cyan-400">
-        Entering {zoneName}...
-      </h2>
-      <p className="text-gray-300 text-lg">
-        Look for clues to understand this challenge.
-      </p>
-    </motion.div>
-  );
-
-  // ── Render: Exploration (immersive zone) ─────────────────────
-
-  const renderExploration = () => {
-    const foundCount = clues.filter((c) => c.found).length;
-    const foundClueIds = clues.filter((c) => c.found).map((c) => c.id);
-
-    // Build cluePositions for ZoneIllustration, but we handle click ourselves via overlay
-    const cluePositionsForIllustration = clues.map((c) => ({
-      id: c.id,
-      x: c.x,
-      y: c.y,
-      found: c.found,
-      type: c.type as 'consequence' | 'capability' | 'outcome' | 'resource' | 'connection',
-    }));
-
-    return (
-      <motion.div
-        key="exploration"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="flex flex-col h-full"
-      >
-        {/* Header: current player + turn info */}
-        {currentPlayer && !huntComplete && (
-          <div className="flex items-center gap-3 px-4 py-3 bg-gray-900/80 border-b border-gray-800">
-            <div
-              className="w-4 h-4 rounded-full flex-shrink-0"
-              style={{ backgroundColor: ROLE_COLORS[currentPlayer.roleId] || '#6B7280' }}
-            />
-            <span className="text-white font-semibold">
-              {currentPlayer.name}
-            </span>
-            <span className="text-gray-400 text-sm">
-              ({ROLE_DISPLAY[currentPlayer.roleId]})
-            </span>
-            <div className="flex-1" />
-            <span className="text-gray-400 text-sm">
-              Player {currentPlayerIndex + 1} of {turnOrder.length}
-            </span>
-            <span className="text-gray-500 mx-2">|</span>
-            <span className="text-gray-400 text-sm">
-              Clues: {foundCount}/{TOTAL_CLUES}
-            </span>
-          </div>
-        )}
-
-        {/* Timer bar */}
-        {currentPlayer && !huntComplete && (
-          <div className="px-4 py-2 bg-gray-900/60">
-            <div className="flex justify-between text-xs text-gray-500 mb-1">
-              <span>Time remaining</span>
-              <span>{secondsLeft}s</span>
-            </div>
-            <TimerBar secondsLeft={secondsLeft} total={TURN_SECONDS} />
-          </div>
-        )}
-
-        {/* Full-screen zone illustration with panorama scroll */}
-        <div className="flex-1 relative overflow-hidden bg-gray-950">
-          {/* Left arrow */}
-          {viewOffsetX < 0 && (
-            <button
-              onClick={scrollLeft}
-              className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-xl transition-colors"
-            >
-              &larr;
-            </button>
-          )}
-          {/* Right arrow */}
-          {viewOffsetX > -400 && (
-            <button
-              onClick={scrollRight}
-              className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-xl transition-colors"
-            >
-              &rarr;
-            </button>
-          )}
-
-          <div
-            ref={explorationRef}
-            className="relative"
-            style={{
-              width: '150%',
-              transform: `translateX(${viewOffsetX}px)`,
-              transition: 'transform 0.3s ease-out',
-            }}
-            onMouseMove={handleMouseMove}
-          >
-            {/* Zone illustration as background */}
-            <ZoneIllustration
-              zoneId={zoneId}
-              cluePositions={[]}
-              foundClues={[]}
-              activePlayerId={null}
-              onClueClick={() => {}}
-            />
-
-            {/* Overlay: interactive clue hotspots */}
-            <svg
-              viewBox="0 0 800 500"
-              className="absolute inset-0 w-full h-full"
-              style={{ pointerEvents: 'none' }}
-            >
-              {clues.map((clue) => {
-                const proximity = getClueProximity(clue);
-                const isNearby = proximity > 0;
-                // Role-specific advantage: advantaged clue types are bigger & brighter
-                const hasAdvantage =
-                  currentPlayer &&
-                  (ROLE_CLUE_ADVANTAGE[currentPlayer.roleId] ?? []).includes(clue.type);
-                const effectiveRadius = hasAdvantage ? 32 : CLUE_RADIUS;
-                const idleOpacity = hasAdvantage ? 0.5 : 0.25;
-                const baseOpacity = clue.found ? 0.9 : idleOpacity + proximity * 0.35;
-                const scale = clue.found ? 1 : 1 + proximity * 0.3;
-                const glowRadius = effectiveRadius + proximity * 12;
-
-                return (
-                  <g key={clue.id} style={{ pointerEvents: 'auto' }}>
-                    {/* Proximity glow ring */}
-                    {!clue.found && isNearby && (
-                      <circle
-                        cx={clue.x}
-                        cy={clue.y}
-                        r={glowRadius}
-                        fill="none"
-                        stroke={CLUE_TYPE_COLORS[clue.type]}
-                        strokeWidth={2}
-                        opacity={proximity * 0.6}
-                      />
-                    )}
-
-                    {/* Pulse ring for unfound clues */}
-                    {!clue.found && (
-                      <circle
-                        cx={clue.x}
-                        cy={clue.y}
-                        r={effectiveRadius}
-                        fill={CLUE_TYPE_COLORS[clue.type]}
-                        opacity={baseOpacity}
-                        style={{
-                          transform: `scale(${scale})`,
-                          transformOrigin: `${clue.x}px ${clue.y}px`,
-                          animation: isNearby ? 'none' : 'zone-clue-pulse 2s ease-in-out infinite',
-                          cursor: huntComplete ? 'default' : 'pointer',
-                        }}
-                        onClick={() => {
-                          if (!clue.found && !huntComplete) {
-                            handleClueClick(clue.id);
-                          }
-                        }}
-                      />
-                    )}
-
-                    {/* Found clue marker */}
-                    {clue.found && (
-                      <>
-                        <circle
-                          cx={clue.x}
-                          cy={clue.y}
-                          r={effectiveRadius}
-                          fill={CLUE_TYPE_COLORS[clue.type]}
-                          opacity={0.85}
-                          stroke="white"
-                          strokeWidth={2}
-                        />
-                        <text
-                          x={clue.x}
-                          y={clue.y + 5}
-                          textAnchor="middle"
-                          fill="white"
-                          fontSize={14}
-                          fontWeight="bold"
-                          style={{ pointerEvents: 'none' }}
-                        >
-                          {CLUE_TYPE_LABELS[clue.type].charAt(0)}
-                        </text>
-                      </>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-        </div>
-
-        {/* Turn order footer */}
-        {!huntComplete && (
-          <div className="flex gap-2 items-center justify-center py-3 bg-gray-900/80 border-t border-gray-800">
-            {turnOrder.map((p, idx) => (
-              <div
-                key={p.id}
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                  idx === currentPlayerIndex
-                    ? 'ring-2 ring-white scale-110'
-                    : idx < currentPlayerIndex
-                    ? 'opacity-40'
-                    : 'opacity-70'
-                }`}
-                style={{
-                  backgroundColor: ROLE_COLORS[p.roleId] || '#6B7280',
-                  color: 'white',
-                }}
-                title={`${p.name} (${ROLE_DISPLAY[p.roleId]})`}
-              >
-                {p.name.charAt(0).toUpperCase()}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Clue popup overlay */}
-        <AnimatePresence>
-          {activeCluePopup && (
-            <CluePopup
-              clue={activeCluePopup}
-              type={activeCluePopup.type}
-              onClose={closeCluePopup}
-            />
-          )}
-        </AnimatePresence>
-      </motion.div>
-    );
-  };
-
-  // ── Render: Results ──────────────────────────────────────────
-
-  const renderResults = () => {
-    const { totalFound, allFound, cpAwarded } = results;
-
-    return (
-      <motion.div
-        key="results"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="flex flex-col items-center justify-center h-full gap-6 px-4 py-8 overflow-y-auto"
-      >
-        <h2 className="text-3xl font-bold text-white">Investigation Complete</h2>
-        <p className="text-xl text-gray-300">
-          <span className="text-amber-400 font-bold">{totalFound}</span>/{TOTAL_CLUES} clues found
-        </p>
-
-        {allFound && (
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            className="px-4 py-2 bg-green-900/50 border border-green-500 rounded-lg text-green-400 text-sm font-semibold"
-          >
-            All clues found! +2 bonus CP for everyone
-          </motion.div>
-        )}
-
-        {/* Clue list */}
-        <div className="w-full max-w-md space-y-2">
-          {clues.map((clue) => {
-            const finder = clue.finderId
-              ? players.find((p) => p.id === clue.finderId)
-              : null;
-
-            return (
-              <div
-                key={clue.id}
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg ${
-                  clue.found ? 'bg-gray-800' : 'bg-gray-900 opacity-60'
-                }`}
-              >
-                <div
-                  className="w-3 h-3 rounded-full flex-shrink-0"
-                  style={{
-                    backgroundColor: clue.found
-                      ? CLUE_TYPE_COLORS[clue.type]
-                      : '#4B5563',
-                  }}
-                />
-                <span
-                  className="text-sm font-medium flex-1"
-                  style={{
-                    color: clue.found ? CLUE_TYPE_COLORS[clue.type] : '#6B7280',
-                  }}
-                >
-                  {CLUE_TYPE_LABELS[clue.type]}
-                </span>
-                {clue.found && finder ? (
-                  <span className="text-xs text-green-400 flex items-center gap-1">
-                    <span className="text-green-500">{'\u2713'}</span>
-                    <span style={{ color: ROLE_COLORS[finder.roleId] || '#9CA3AF' }}>
-                      {finder.name}
-                    </span>
-                  </span>
-                ) : (
-                  <span className="text-xs text-red-400 flex items-center gap-1">
-                    <span className="text-red-500">{'\u2717'}</span>
-                    Information missing
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Warning for mandatory unfound clues */}
-        {mandatoryUnfound.length > 0 && (
-          <div className="w-full max-w-md px-4 py-3 bg-amber-900/30 border border-amber-600/50 rounded-lg">
-            <p className="text-amber-400 text-sm font-medium">
-              {'\u26A0\uFE0F'} Proceeding with incomplete information
-            </p>
-            <p className="text-amber-300/70 text-xs mt-1">
-              {mandatoryUnfound.length} mandatory clue{mandatoryUnfound.length > 1 ? 's' : ''} not found.
-              This may affect deliberation quality.
-            </p>
-          </div>
-        )}
-
-        {/* CP awards info */}
-        <div className="w-full max-w-md">
-          <p className="text-xs text-gray-500 text-center mb-2">
-            +1 CP per clue found. All 5 = +2 bonus CP shared.
-          </p>
-          <h4 className="text-xs text-gray-500 uppercase tracking-wider mb-2 text-center">
-            CP Awarded
-          </h4>
-          <div className="flex flex-wrap justify-center gap-3">
-            {players.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center gap-2 px-3 py-1 bg-gray-800 rounded-lg"
-              >
-                <div
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: ROLE_COLORS[p.roleId] || '#6B7280' }}
-                />
-                <span className="text-sm text-gray-300">{p.name}</span>
-                <span className="text-sm font-bold text-amber-400">
-                  +{cpAwarded[p.id] || 0} CP
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <button
-          onClick={() => setStage('continue')}
-          className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded-lg transition-colors mt-2"
-        >
-          Continue
-        </button>
-      </motion.div>
-    );
-  };
-
-  // ── Render: Continue ─────────────────────────────────────────
-
-  const renderContinue = () => (
-    <motion.div
-      key="continue"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="flex flex-col items-center justify-center h-full gap-6"
-    >
-      <h2 className="text-2xl font-bold text-white">Ready for Deliberation</h2>
-      <p className="text-gray-400">
-        Use what you learned to negotiate a plan of action.
-      </p>
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => onPhaseComplete(results)}
-        className="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-lg rounded-xl transition-colors shadow-lg"
-      >
-        Continue to Phase 3: Deliberation &rarr;
-      </motion.button>
-    </motion.div>
-  );
-
-  // ── Main render ──────────────────────────────────────────────
+  const totalRel = allObjects.filter(o => o.relevant).length;
+  const curPlayer = sortedPlayers[pIdx] as Player | undefined;
+  const timerPct = (timeLeft / TURN_SEC) * 100;
+  const catColor = CHALLENGE_CATEGORY_COLORS[challenge.category] || '#6B7280';
+  const goldBtn = { borderRadius: 14, fontSize: 16, fontWeight: 700 as const, background: 'linear-gradient(135deg,#F59E0B,#F4D03F)', color: '#1C1917', border: 'none', cursor: 'pointer' as const };
 
   return (
-    <div className="relative w-full h-full min-h-screen bg-gray-950 text-white overflow-y-auto">
+    <div style={{ minHeight: '100vh', background: '#0A0A14', color: '#E5E7EB', fontFamily: 'system-ui,sans-serif' }}>
       <AnimatePresence mode="wait">
-        {stage === 'intro' && renderIntro()}
-        {stage === 'card_draw' && renderCardDraw()}
-        {stage === 'exploration_intro' && renderExplorationIntro()}
-        {stage === 'exploration' && renderExploration()}
-        {stage === 'results' && renderResults()}
-        {stage === 'continue' && renderContinue()}
-      </AnimatePresence>
+        {stage === 'intro' && (
+          <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+            <motion.h1 initial={{ y: 30 }} animate={{ y: 0 }} style={{ fontSize: 42, fontWeight: 800, color: '#F59E0B', margin: 0 }}>Phase 2</motion.h1>
+            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { delay: 0.3 } }} style={{ fontSize: 20, color: '#9CA3AF', marginTop: 8 }}>Investigate the Ground</motion.p>
+          </motion.div>
+        )}
 
-      <PhaseNavigation
-        canContinue={stage === 'continue' || stage === 'results'}
-        continueLabel="Continue to Phase 3: Deliberation \u2192"
-        onContinue={() => {
-          console.log('PHASE TRANSITION: Challenge → Deliberation');
-          onPhaseComplete(results);
-        }}
-        showBack={false}
-        onSkip={() => {
-          console.log('PHASE SKIP: Skipping exploration');
-          onPhaseComplete(results);
-        }}
-        skipLabel="Skip Exploration"
-      />
+        {stage === 'card' && (
+          <motion.div key="card" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 24 }}>
+            <motion.div onClick={() => { setCardFlipped(true); sounds.playCardFlip(); }} animate={{ rotateY: cardFlipped ? 0 : 180 }} transition={{ duration: 0.6 }}
+              style={{ width: 380, minHeight: 420, background: 'rgba(25,25,45,0.95)', borderRadius: 20, border: `2px solid ${catColor}`, padding: 32, cursor: cardFlipped ? 'default' : 'pointer', boxShadow: `0 0 40px ${catColor}33` }}>
+              {!cardFlipped ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', transform: 'rotateY(180deg)' }}>
+                  <p style={{ fontSize: 18, color: '#6B7280' }}>Click to reveal challenge</p>
+                </div>
+              ) : (<div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <span style={{ background: catColor, color: '#fff', padding: '4px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, textTransform: 'uppercase' }}>{challenge.category}</span>
+                  <DifficultyDots level={challenge.difficulty} />
+                </div>
+                <h2 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 8px', color: '#F1F5F9' }}>{challenge.name}</h2>
+                <p style={{ fontSize: 13, color: '#9CA3AF', marginBottom: 12 }}>Zone: {challenge.publicFace?.zoneName || zoneId}</p>
+                <p style={{ fontSize: 15, lineHeight: 1.6, color: '#D1D5DB', marginBottom: 20 }}>{challenge.description}</p>
+                {challenge.publicFace?.resourcesRequired && (
+                  <div style={{ marginBottom: 20 }}>
+                    <p style={{ fontSize: 12, color: '#6B7280', marginBottom: 6 }}>Required Resources:</p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {challenge.publicFace.resourcesRequired.map((r, i) => (
+                        <span key={i} style={{ background: 'rgba(255,255,255,0.06)', padding: '4px 10px', borderRadius: 6, fontSize: 13 }}>{r.displayName}: {r.amount}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={() => setStage('scene')}
+                  style={{ ...goldBtn, width: '100%', padding: '14px 0', marginTop: 8 }}>Enter Zone &rarr;</motion.button>
+              </div>)}
+            </motion.div>
+          </motion.div>
+        )}
+
+        {stage === 'scene' && (
+          <motion.div key="scene" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '16px 16px 80px' }}>
+            {curPlayer && !done && (
+              <div style={{ width: '100%', maxWidth: 820, marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ width: 14, height: 14, borderRadius: '50%', background: ROLE_COLORS[curPlayer.roleId], display: 'inline-block' }} />
+                    <span style={{ fontWeight: 700, fontSize: 16 }}>{curPlayer.name}</span>
+                    <span style={{ fontSize: 13, color: '#9CA3AF' }}>({curPlayer.roleId})</span>
+                  </div>
+                  <span style={{ fontSize: 14, color: '#9CA3AF' }}>Player {pIdx + 1} of {sortedPlayers.length}</span>
+                </div>
+                <div style={{ width: '100%', height: 8, background: 'rgba(255,255,255,0.08)', borderRadius: 4, overflow: 'hidden' }}>
+                  <motion.div animate={{ width: `${timerPct}%` }} transition={{ duration: 0.3 }}
+                    style={{ height: '100%', borderRadius: 4, background: timerPct > 30 ? '#22C55E' : timerPct > 15 ? '#F59E0B' : '#EF4444' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                  <span style={{ fontSize: 12, color: '#6B7280' }}>{timeLeft}s remaining</span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Badge show={distracted} color="#F59E0B" label="Distracted" />
+                    <Badge show={awareness} color="#22C55E" label="+Awareness" />
+                    <Badge show={bureaucratic} color="#A78BFA" label="Bureaucratic Thinking" />
+                    <Badge show={locked} color="#EF4444" label="Locked" />
+                  </div>
+                </div>
+              </div>
+            )}
+            <div style={{ position: 'relative', width: '100%', maxWidth: 820, border: flash ? '2px solid #EF4444' : '2px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden', transition: 'border-color 0.2s' }}>
+              <svg viewBox="0 0 800 500" style={{ width: '100%', display: 'block' }}>
+                <ZoneBackground zoneId={zoneId} />
+                {objStates.map((st, idx) => {
+                  const cx = (st.obj.x / 100) * 800, cy = (st.obj.y / 100) * 500;
+                  const h = st.status === 'hidden', r = st.status === 'found_relevant', ir = st.status === 'found_irrelevant';
+                  return (
+                    <g key={st.obj.id} onClick={() => h && handleClick(idx)} style={{ cursor: h ? 'pointer' : 'default' }}>
+                      <circle cx={cx} cy={cy} r={28} fill={r ? 'rgba(34,197,94,0.35)' : ir ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.12)'}
+                        stroke={r ? '#22C55E' : ir ? '#EF4444' : 'rgba(255,255,255,0.25)'} strokeWidth={2}>
+                        {h && <animate attributeName="opacity" values="0.4;0.8;0.4" dur="2s" repeatCount="indefinite" />}
+                      </circle>
+                      {r && <text x={cx} y={cy + 5} textAnchor="middle" fontSize="18" fill="#22C55E">{'\u2713'}</text>}
+                      {ir && <text x={cx} y={cy + 5} textAnchor="middle" fontSize="18" fill="#EF4444">{'\u2717'}</text>}
+                      {h && <text x={cx} y={cy + 4} textAnchor="middle" fontSize="10" fill="rgba(255,255,255,0.5)">?</text>}
+                    </g>);
+                })}
+              </svg>
+              <AnimatePresence>
+                {popup && (
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                    style={{ position: 'absolute', bottom: 12, left: 12, right: 12, padding: 16, borderRadius: 12, background: popup.type === 'relevant' ? 'rgba(20,60,30,0.95)' : 'rgba(60,20,20,0.95)', border: `1px solid ${popup.type === 'relevant' ? '#22C55E' : '#EF4444'}`, backdropFilter: 'blur(8px)', maxHeight: 160, overflow: 'auto' }}>
+                    <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: '#E5E7EB' }}>{popup.text}</p>
+                    {popup.effect && <p style={{ margin: '8px 0 0', fontSize: 12, color: '#F59E0B', fontWeight: 600 }}>Effect: {EFF_LBL[popup.effect] || popup.effect}</p>}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+
+        {stage === 'summary' && (
+          <motion.div key="summary" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 100px', maxWidth: 700, margin: '0 auto' }}>
+            <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 32, color: '#F1F5F9' }}>Investigation Complete</h2>
+            <div style={S.box('rgba(34,197,94,0.08)', 'rgba(34,197,94,0.2)')}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#22C55E', margin: '0 0 12px' }}>Relevant Clues Found: {results.relevantFound.length}/{totalRel}</h3>
+              {objStates.filter(s => s.status === 'found_relevant').map(s => (
+                <div key={s.obj.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ color: '#22C55E' }}>{'\u2713'}</span>
+                  <span style={{ fontSize: 14 }}>{CLUE_ICO[s.obj.clueType || ''] || ''} {s.obj.name}</span>
+                </div>))}
+            </div>
+            {results.irrelevantClicked.length > 0 && (
+              <div style={S.box('rgba(239,68,68,0.08)', 'rgba(239,68,68,0.2)')}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#EF4444', margin: '0 0 12px' }}>Irrelevant Clicked: {results.irrelevantClicked.length}</h3>
+                {objStates.filter(s => s.status === 'found_irrelevant').map(s => (
+                  <div key={s.obj.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ color: '#EF4444' }}>{'\u2717'}</span>
+                    <span style={{ fontSize: 14 }}>{s.obj.name}</span>
+                    <span style={{ fontSize: 12, color: '#F59E0B', marginLeft: 'auto' }}>{EFF_LBL[s.obj.teachingEffect || ''] || ''}</span>
+                  </div>))}
+              </div>
+            )}
+            <div style={S.box('rgba(255,255,255,0.04)', 'rgba(255,255,255,0.08)')}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#F59E0B', margin: '0 0 12px' }}>CP Awarded</h3>
+              {sortedPlayers.map(p => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: ROLE_COLORS[p.roleId], display: 'inline-block' }} />
+                  <span style={{ fontSize: 14 }}>{p.name}</span>
+                  <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#F59E0B' }}>+{cpMap[p.id] || 0} CP</span>
+                </div>))}
+            </div>
+            {(() => {
+              const unfound = objStates.filter(s => s.status === 'hidden' && s.obj.relevant);
+              if (!unfound.length) return null;
+              return (<div style={S.box('rgba(245,158,11,0.08)', 'rgba(245,158,11,0.2)')}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#F59E0B', margin: '0 0 12px' }}>Information Gaps</h3>
+                {unfound.map(s => (
+                  <div key={s.obj.id} style={{ fontSize: 14, color: '#D1D5DB', marginBottom: 6 }}>
+                    Information Gap &mdash; you'll proceed without knowing <span style={{ color: '#F59E0B', fontWeight: 600 }}>[{s.obj.clueType || 'clue'}]</span>
+                  </div>))}
+              </div>);
+            })()}
+            <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={() => { sounds.playButtonClick(); setStage('continue'); }}
+              style={{ ...goldBtn, marginTop: 32, padding: '14px 36px' }}>Continue &rarr;</motion.button>
+          </motion.div>
+        )}
+
+        {stage === 'continue' && (
+          <motion.div key="continue" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+            <h2 style={{ fontSize: 24, fontWeight: 700, color: '#F1F5F9', marginBottom: 8 }}>Continue to Phase 3: Build Your Vision</h2>
+            <p style={{ fontSize: 15, color: '#9CA3AF', marginBottom: 32 }}>{results.relevantFound.length}/{totalRel} clues found &bull; {results.teachingMoments} teaching moments</p>
+            <PhaseNavigation canContinue onContinue={() => onPhaseComplete(results)} continueLabel="Continue to Phase 3: Build Your Vision &rarr;" onSkip={() => onPhaseComplete(results)} skipLabel="Skip &rarr;" />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

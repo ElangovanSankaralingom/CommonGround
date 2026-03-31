@@ -26,6 +26,7 @@ import {
   type NashEngineOutput,
 } from '../../core/engine/nashEngine';
 import { PhaseNavigation } from '../effects/PhaseNavigation';
+import { sounds } from '../../utils/sounds';
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -596,7 +597,8 @@ const Phase5f: React.FC<{
                   {awards.map((a, i) => (
                     <motion.div key={i} className="text-xs text-gray-300"
                       initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: pi * 0.15 + i * 0.1 }}>
+                      transition={{ delay: pi * 0.15 + i * 0.1 }}
+                      onAnimationComplete={() => sounds.playTokenGain()}>
                       <span className="text-green-400 font-bold">+{a.amount}</span>{' '}{a.reason}
                     </motion.div>
                   ))}
@@ -608,7 +610,8 @@ const Phase5f: React.FC<{
               {leveledUp && (
                 <motion.div
                   className="mt-2 bg-yellow-500/20 border border-yellow-500 rounded px-3 py-1.5 text-center"
-                  initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.5, type: 'spring' }}>
+                  initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.5, type: 'spring' }}
+                  onAnimationComplete={() => sounds.playCelebration()}>
                   <div className="text-yellow-400 font-black text-sm">LEVEL UP!</div>
                   <div className="text-xs text-yellow-300">
                     Level {currentLevel} &rarr; {currentLevel + 1}
@@ -829,6 +832,7 @@ export default function ScoringPhase({ session, players, roundCPAwards, onPhaseC
   }, [currentSubIdx]);
 
   const handleComplete = useCallback(() => {
+    sounds.playButtonClick();
     onPhaseComplete(nashOutput, endCondition);
   }, [onPhaseComplete, nashOutput, endCondition]);
 

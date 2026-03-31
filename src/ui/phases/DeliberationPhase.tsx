@@ -1,573 +1,605 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-	GameSession, Player, ResourcePool, ResourceType, RoleId,
-	ChallengeCard, Promise as GamePromise,
+  GameSession, Player, ResourceType, RoleId, ChallengeCard,
 } from '../../core/models/types';
 import {
-	ROLE_COLORS, RESOURCE_COLORS,
-	BUCHI_OBJECTIVES, OBJECTIVE_WEIGHTS, ObjectiveId,
-	SURVIVAL_THRESHOLDS, PLAYER_TYPE,
+  ROLE_COLORS, RESOURCE_COLORS, BUCHI_OBJECTIVES,
 } from '../../core/models/constants';
+import {
+  FeatureTile, getFeatureTilesForZone, RESOURCE_ABILITY_MAP,
+} from '../../core/content/featureTiles';
 import { PhaseNavigation } from '../effects/PhaseNavigation';
+import { sounds } from '../../utils/sounds';
 
-// ─── Types & Constants ──────────────────────────────────────────
-interface DeliberationPhaseProps {
-	session: GameSession; players: Player[]; currentPlayerId: string;
-	challenge: ChallengeCard | null; onPhaseComplete: () => void;
-	onProposeTrade: (targetId: string, offering: Partial<ResourcePool>, requesting: Partial<ResourcePool>) => void;
-	onAcceptTrade: (tradeId: string) => void; onRejectTrade: (tradeId: string) => void;
-	onFormCoalition: (partnerIds: string[], targetZoneId: string) => void;
-	onMakePromise: (toPlayerId: string, resource: ResourceType, amount: number) => void;
-	onEndDeliberation: () => void; deliberationTimeRemaining: number;
+interface VisionBoardResult {
+  tiles: FeatureTile[];
+  objectivesCovered: string[];
+  collaborativeVisionScore: number;
+  passHistory: { playerId: string; tileId: string; passQuality: number; passed: boolean }[];
+  threshold: number;
 }
-type Stage = 'intro' | 'ispy' | 'strategy' | 'summary';
-type WTab = 'trading' | 'coalition' | 'promises' | 'series';
-interface ISpyDiff { zoneId: string; resource: ResourceType; found: boolean; foundBy: string | null; }
+interface BallPassingPhaseProps {
+  session: GameSession;
+  players: Player[];
+  challenge: ChallengeCard | null;
+  onPhaseComplete: (result: VisionBoardResult) => void;
+  deliberationTimeRemaining: number;
+}
+type Stage = 'intro' | 'ispy' | 'vision' | 'locked';
 
-const RI: Record<ResourceType, string> = { knowledge: '🌳', budget: '💰', volunteer: '👤', material: '🔧', influence: '⭐' };
-const RL: Record<ResourceType, string> = { budget: 'Budget', influence: 'Influence', volunteer: 'Volunteer', material: 'Material', knowledge: 'Knowledge' };
-const RT: ResourceType[] = ['budget', 'influence', 'volunteer', 'material', 'knowledge'];
-const CC: Record<string, string> = { good: '#22C55E', fair: '#EAB308', poor: '#F97316', critical: '#EF4444', locked: '#6B7280' };
-const TILES = [
-	{ id: 'assess', label: 'ASSESS', color: '#3B82F6', icon: '🔍' },
-	{ id: 'plan', label: 'PLAN', color: '#8B5CF6', icon: '📋' },
-	{ id: 'design', label: 'DESIGN', color: '#06B6D4', icon: '✏️' },
-	{ id: 'fund', label: 'FUND', color: '#EAB308', icon: '💵' },
-	{ id: 'build', label: 'BUILD', color: '#92400E', icon: '🏗️' },
-	{ id: 'maintain', label: 'MAINTAIN', color: '#6B7280', icon: '🔧' },
-	{ id: 'protect', label: 'PROTECT', color: '#22C55E', icon: '🛡️' },
-	{ id: 'mobilize', label: 'MOBILIZE', color: '#F97316', icon: '📢' },
-];
-const COMPAT: Record<string, string[]> = {
-	assess: ['plan', 'design'], plan: ['design', 'fund', 'assess'], design: ['build', 'plan', 'assess'],
-	fund: ['build', 'plan', 'maintain'], build: ['maintain', 'design', 'fund'],
-	maintain: ['protect', 'build', 'fund'], protect: ['mobilize', 'maintain'], mobilize: ['assess', 'protect'],
+const OBJ_ICONS: Record<string, string> = {
+  safety: '🛡️', greenery: '🌿', access: '♿', culture: '🎭', revenue: '💰', community: '👥',
 };
-const OBJ: ObjectiveId[] = ['safety', 'greenery', 'access', 'culture', 'revenue', 'community'];
-const OC: Record<ObjectiveId, string> = { safety: '#EF4444', greenery: '#22C55E', access: '#3B82F6', culture: '#A855F7', revenue: '#EAB308', community: '#F97316' };
-const IST = 15;
+const OBJ_COLORS: Record<string, string> = {
+  safety: '#EF4444', greenery: '#22C55E', access: '#3B82F6', culture: '#A855F7', revenue: '#EAB308', community: '#F97316',
+};
+const ISPY_TIME = 15;
 
-function rng(seed: number) { let s = seed; return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; }
-function rn(r: RoleId) { return r.charAt(0).toUpperCase() + r.slice(1); }
-function ft(sec: number) { return `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`; }
-function buchi(s: GameSession, pid: string, rid: RoleId): 'safe' | 'warning' | 'crisis' {
-	const h = s.buchiHistory?.[pid]; if (!h) return 'safe';
-	let mx = 0; for (const o of (BUCHI_OBJECTIVES[rid] || [])) { mx = Math.max(mx, h[o] || 0); }
-	return mx >= 2 ? 'crisis' : mx >= 1 ? 'warning' : 'safe';
+function playerPos(idx: number, total: number, r: number) {
+  const a = (idx * (360 / total) - 90) * (Math.PI / 180);
+  return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+}
+function getDiffMult(r: number) { return r <= 2 ? 1.2 : r === 3 ? 1.5 : r === 4 ? 1.8 : 2.0; }
+function calcInclusivity(tile: FeatureTile, pid: string, players: Player[]): number {
+  let n = 0;
+  for (const p of players) {
+    if (p.id === pid) continue;
+    if ((BUCHI_OBJECTIVES[p.roleId] || []).some(o => tile.objectivesServed.includes(o))) n++;
+  }
+  return n >= 2 ? 1 : n === 1 ? 0.5 : 0;
+}
+function calcResEfficiency(tile: FeatureTile, players: Player[]): number {
+  const types = Object.keys(tile.cost) as ResourceType[];
+  if (!types.length) return 1;
+  let m = 0;
+  for (const rt of types) {
+    const ak = RESOURCE_ABILITY_MAP[rt] as keyof Player['abilities'];
+    let mx = 0;
+    for (const p of players) { const s = (p.abilities as any)[ak] ?? 0; if (s > mx) mx = s; }
+    if (mx >= 12) m++;
+  }
+  const r = m / types.length;
+  return r >= 0.9 ? 1 : r >= 0.5 ? 0.5 : 0;
+}
+function calcVCS(board: FeatureTile[], tile: FeatureTile): number {
+  const o = new Set<string>();
+  for (const t of board) t.objectivesServed.forEach(x => o.add(x));
+  tile.objectivesServed.forEach(x => o.add(x));
+  return o.size >= 3 ? 1 : o.size === 2 ? 0.5 : 0;
+}
+function tileCostSum(tiles: FeatureTile[]): number {
+  let s = 0;
+  for (const t of tiles) for (const v of Object.values(t.cost)) s += (v as number) || 0;
+  return s;
 }
 
-// ─── Objective Dashboard ────────────────────────────────────────
-function ObjDash({ players, session }: { players: Player[]; session: GameSession }) {
-	const overlaps: { a: Player; b: Player; obj: ObjectiveId; c: number }[] = [];
-	const conflicts: { a: Player; b: Player; obj: ObjectiveId }[] = [];
-	for (let i = 0; i < players.length; i++) for (let j = i + 1; j < players.length; j++) {
-		const [pa, pb] = [players[i], players[j]];
-		const [wa, wb] = [OBJECTIVE_WEIGHTS[pa.roleId], OBJECTIVE_WEIGHTS[pb.roleId]];
-		for (const o of OBJ) {
-			if (wa[o] >= 3 && wb[o] >= 3) overlaps.push({ a: pa, b: pb, obj: o, c: wa[o] + wb[o] });
-			if ((wa[o] > 0 && wb[o] < 0) || (wa[o] < 0 && wb[o] > 0)) conflicts.push({ a: pa, b: pb, obj: o });
-		}
-	}
-	return (
-		<div className="w-full bg-gray-900/80 rounded-lg p-3 mb-3">
-			<h3 className="text-sm font-bold text-gray-300 mb-2 uppercase tracking-wider">Objective Dashboard</h3>
-			<div className="flex gap-2 overflow-x-auto pb-1">
-				{players.map(p => {
-					const w = OBJECTIVE_WEIGHTS[p.roleId], th = SURVIVAL_THRESHOLDS[p.roleId];
-					const bs = buchi(session, p.id, p.roleId), pt = PLAYER_TYPE[p.roleId];
-					const bc = { safe: '#22C55E', warning: '#EAB308', crisis: '#EF4444' };
-					const bl = { safe: 'Safe', warning: 'Warning', crisis: 'CRISIS' };
-					return (
-						<div key={p.id} className="min-w-[170px] rounded-lg p-2 bg-gray-800" style={{ borderLeft: `3px solid ${ROLE_COLORS[p.roleId]}` }}>
-							<div className="flex items-center gap-1 mb-1">
-								<span className="text-sm font-bold" style={{ color: ROLE_COLORS[p.roleId] }}>{rn(p.roleId)}</span>
-								<span className="text-[10px] px-1 rounded bg-gray-700 text-gray-300 ml-auto">{pt}</span>
-							</div>
-							<div className="space-y-0.5 mb-1.5">{OBJ.map(o => (
-								<div key={o} className="flex items-center gap-1">
-									<span className="text-[9px] text-gray-400 w-[42px] truncate capitalize">{o}</span>
-									<div className="flex-1 h-2 bg-gray-700 rounded overflow-hidden">
-										<div className="h-full rounded" style={{ width: `${Math.max(0, (w[o] / 5) * 100)}%`, backgroundColor: w[o] < 0 ? '#EF4444' : OC[o] }} />
-									</div>
-									<span className="text-[9px] text-gray-400 w-3 text-right">{w[o]}</span>
-								</div>
-							))}</div>
-							<div className="flex items-center gap-1 text-xs mb-1">
-								<span className="text-gray-400">U:</span><span className="font-bold text-white">{p.utilityScore}</span>
-								<span className="text-gray-500">/</span><span className="text-gray-400">{th}</span>
-								<span className={p.utilityScore >= th ? 'text-green-400' : 'text-red-400'}>{p.utilityScore >= th ? '✓' : '✗'}</span>
-							</div>
-							<span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: bc[bs] + '30', color: bc[bs] }}>{bl[bs]}</span>
-						</div>
-					);
-				})}
-			</div>
-			{(overlaps.length > 0 || conflicts.length > 0) && (
-				<div className="mt-2 flex flex-wrap gap-2 text-[10px]">
-					{overlaps.slice(0, 4).map((o, i) => (
-						<span key={i} className="px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-300">
-							{rn(o.a.roleId)} {o.obj}({OBJECTIVE_WEIGHTS[o.a.roleId][o.obj]}) ↔ {rn(o.b.roleId)} {o.obj}({OBJECTIVE_WEIGHTS[o.b.roleId][o.obj]}): Combined {o.c}
-						</span>
-					))}
-					{conflicts.slice(0, 3).map((c, i) => (
-						<span key={`c${i}`} className="px-1.5 py-0.5 rounded bg-red-900/40 text-red-300">
-							{rn(c.a.roleId)} ←✗→ {rn(c.b.roleId)}: {c.obj} CONFLICT
-						</span>
-					))}
-				</div>
-			)}
-		</div>
-	);
+function ISpyMini({ players, onComplete }: { players: Player[]; onComplete: () => void }) {
+  const [playerIdx, setPlayerIdx] = useState(0);
+  const [timer, setTimer] = useState(ISPY_TIME);
+  const [found, setFound] = useState<number[]>([]);
+  const diffs = useMemo(() => {
+    const spots: { x: number; y: number }[] = [];
+    for (let i = 0; i < 7; i++) spots.push({ x: 15 + (i % 4) * 22, y: 20 + Math.floor(i / 4) * 30 });
+    return spots;
+  }, []);
+
+  useEffect(() => {
+    const iv = setInterval(() => setTimer(t => {
+      if (t <= 1) {
+        if (playerIdx >= players.length - 1) { clearInterval(iv); onComplete(); return 0; }
+        setPlayerIdx(i => i + 1); setFound([]); return ISPY_TIME;
+      }
+      return t - 1;
+    }), 1000);
+    return () => clearInterval(iv);
+  }, [playerIdx, players.length, onComplete]);
+
+  const p = players[playerIdx];
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="text-sm text-gray-400">
+        <span style={{ color: ROLE_COLORS[p.roleId] }} className="font-bold">{p.name}</span>
+        {' — '}Find the differences! {timer}s
+      </div>
+      <div className="flex gap-6">
+        {[0, 1].map(grid => (
+          <div key={grid} className="relative w-[200px] h-[140px] bg-gray-800 rounded-lg border border-gray-700">
+            {diffs.map((d, i) => (
+              <div key={i} onClick={() => { if (grid === 1 && !found.includes(i)) setFound([...found, i]); }}
+                className="absolute w-4 h-4 rounded-full cursor-pointer transition-all"
+                style={{
+                  left: `${d.x}%`, top: `${d.y}%`,
+                  background: grid === 0 ? '#4B5563' : (found.includes(i) ? '#22C55E' : '#6366F1'),
+                  opacity: grid === 0 ? 0.5 : 0.8,
+                  boxShadow: found.includes(i) ? '0 0 8px #22C55E' : 'none',
+                }}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="text-xs text-gray-500">Player {playerIdx + 1}/{players.length} — Found {found.length}/7</div>
+    </div>
+  );
 }
 
-// ─── Strategy Table ─────────────────────────────────────────────
-function SeqBuilder({ seq, setSeq, sel, setSel }: {
-	seq: (string | null)[]; setSeq: React.Dispatch<React.SetStateAction<(string | null)[]>>;
-	sel: string | null; setSel: React.Dispatch<React.SetStateAction<string | null>>;
-}) {
-	const clickTile = (id: string) => { setSel(sel === id ? null : id); };
-	const clickSlot = (i: number) => {
-		if (!sel) { setSeq(p => { const n = [...p]; n[i] = null; return n; }); return; }
-		setSeq(p => { const n = [...p]; const ex = n.indexOf(sel); if (ex >= 0) n[ex] = null; n[i] = sel; return n; });
-		setSel(null);
-	};
-	const compat = (a: string | null, b: string | null): boolean | null => (!a || !b) ? null : (COMPAT[a] || []).includes(b);
-	return (
-		<div className="bg-gray-900/60 rounded-lg p-3 mb-3">
-			<h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Strategy Table</h4>
-			<div className="flex gap-1.5 mb-3 flex-wrap">{TILES.map(t => (
-				<motion.button key={t.id} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => clickTile(t.id)}
-					className={`w-[60px] h-[40px] rounded flex flex-col items-center justify-center text-white text-[10px] font-bold cursor-pointer border-2 transition-all ${sel === t.id ? 'border-white ring-2 ring-white/40' : seq.includes(t.id) ? 'border-transparent opacity-40' : 'border-transparent'}`}
-					style={{ backgroundColor: t.color }}>
-					<span className="text-sm leading-none">{t.icon}</span><span>{t.label}</span>
-				</motion.button>
-			))}</div>
-			<div className="flex gap-1 items-center">{seq.map((sid, i) => {
-				const t = sid ? TILES.find(x => x.id === sid) : null;
-				const nxt = i < seq.length - 1 ? seq[i + 1] : null;
-				const c = compat(sid, nxt);
-				return (<React.Fragment key={i}>
-					<motion.button whileHover={{ scale: 1.05 }} onClick={() => clickSlot(i)}
-						className={`w-[60px] h-[40px] rounded flex flex-col items-center justify-center text-[10px] font-bold border-2 border-dashed transition-all ${t ? 'border-transparent text-white' : 'border-gray-600 text-gray-500'} ${!t && sel ? 'border-yellow-400 bg-yellow-400/10' : ''}`}
-						style={t ? { backgroundColor: t.color } : {}}>
-						{t ? <><span className="text-sm leading-none">{t.icon}</span><span>{t.label}</span></> : <span>{i + 1}</span>}
-					</motion.button>
-					{i < seq.length - 1 && <span className="text-xs">{c === true ? '🟢' : c === false ? '❌' : '—'}</span>}
-				</React.Fragment>);
-			})}</div>
-		</div>
-	);
-}
+export default function BallPassingPhase({
+  session, players, challenge, onPhaseComplete, deliberationTimeRemaining,
+}: BallPassingPhaseProps) {
+  const [stage, setStage] = useState<Stage>('intro');
+  const [boardTiles, setBoardTiles] = useState<FeatureTile[]>([]);
+  const [passHistory, setPassHistory] = useState<VisionBoardResult['passHistory']>([]);
+  const [activePlayerIdx, setActivePlayerIdx] = useState(0);
+  const [selectedTile, setSelectedTile] = useState<FeatureTile | null>(null);
+  const [ballPos, setBallPos] = useState({ x: 0, y: 0 });
+  type BallState = 'idle' | 'success' | 'drop' | 'goal_success' | 'goal_partial' | 'goal_fail';
+  const [ballAnim, setBallAnim] = useState<BallState>('idle');
+  const [message, setMessage] = useState('');
+  const [consecutiveDrops, setConsecutiveDrops] = useState(0);
+  const [showFinalize, setShowFinalize] = useState(false);
+  const [finalizeAttempted, setFinalizeAttempted] = useState(false);
+  const [extraCycle, setExtraCycle] = useState(false);
+  const ballRef = useRef<HTMLDivElement>(null);
+  const sortedPlayers = useMemo(() => [...players].sort((a, b) => a.utilityScore - b.utilityScore), [players]);
+  const activePlayer = sortedPlayers[activePlayerIdx % sortedPlayers.length];
 
-// ─── Trading Panel ──────────────────────────────────────────────
-function TradePanel({ cp, players, session, onPropose, onAccept, onReject }: {
-	cp: Player; players: Player[]; session: GameSession;
-	onPropose: DeliberationPhaseProps['onProposeTrade'];
-	onAccept: (id: string) => void; onReject: (id: string) => void;
-}) {
-	const [off, setOff] = useState<Partial<ResourcePool>>({});
-	const [req, setReq] = useState<Partial<ResourcePool>>({});
-	const [tid, setTid] = useState<string | null>(null);
-	const others = players.filter(p => p.id !== cp.id);
-	const trades = session.tradeOffers || [];
-	const adj = (pool: 'o' | 'r', res: ResourceType, d: number) => {
-		const set = pool === 'o' ? setOff : setReq;
-		set(prev => { const c = (prev[res] || 0) + d; if (c <= 0) { const n = { ...prev }; delete n[res]; return n; } if (pool === 'o' && c > cp.resources[res]) return prev; return { ...prev, [res]: c }; });
-	};
-	const submit = () => { if (!tid || !Object.keys(off).length) return; onPropose(tid, off, req); setOff({}); setReq({}); };
-	const resRow = (pool: 'o' | 'r', vals: Partial<ResourcePool>) => RT.map(r => (
-		<div key={r} className="flex items-center gap-1 text-xs text-gray-300 mb-0.5">
-			<span className="w-16 truncate">{RL[r]}</span>
-			<button onClick={() => adj(pool, r, -1)} className="px-1 bg-gray-700 rounded">-</button>
-			<span className="w-4 text-center font-bold">{vals[r] || 0}</span>
-			<button onClick={() => adj(pool, r, 1)} className="px-1 bg-gray-700 rounded">+</button>
-		</div>
-	));
-	return (
-		<div className="space-y-3">
-			<div><h5 className="text-xs font-bold text-gray-400 mb-1">Your Resources</h5>
-				<div className="flex gap-1.5 flex-wrap">{RT.map(r => (
-					<div key={r} className="px-2 py-1 rounded text-xs font-bold text-white" style={{ backgroundColor: RESOURCE_COLORS[r] + 'CC' }}>{RI[r]} {cp.resources[r]}</div>
-				))}</div></div>
-			<div><h5 className="text-xs font-bold text-gray-400 mb-1">Trade With</h5>
-				<div className="flex gap-1.5">{others.map(p => (
-					<button key={p.id} onClick={() => setTid(p.id)} className={`px-2 py-1 rounded text-xs font-bold border-2 transition-all ${tid === p.id ? 'border-white text-white' : 'border-transparent text-gray-400'}`} style={{ backgroundColor: ROLE_COLORS[p.roleId] + '40' }}>{rn(p.roleId)}</button>
-				))}</div></div>
-			<div className="grid grid-cols-2 gap-2">
-				<div className="bg-green-900/20 rounded p-2"><h5 className="text-[10px] font-bold text-green-400 mb-1">OFFERING</h5>{resRow('o', off)}</div>
-				<div className="bg-red-900/20 rounded p-2"><h5 className="text-[10px] font-bold text-red-400 mb-1">REQUESTING</h5>{resRow('r', req)}</div>
-			</div>
-			<button onClick={submit} disabled={!tid || !Object.keys(off).length} className="w-full py-1.5 rounded bg-blue-600 text-white text-xs font-bold disabled:opacity-30 hover:bg-blue-500">Propose Trade</button>
-			{trades.filter(t => t.status === 'pending').map(t => {
-				const pr = players.find(p => p.id === t.proposerId);
-				return (<div key={t.id} className="bg-gray-800 rounded p-2 mb-1 text-xs text-gray-300">
-					<span className="font-bold" style={{ color: ROLE_COLORS[pr?.roleId || 'citizen'] }}>{rn(pr?.roleId || 'citizen')}</span>
-					{' offers '}{Object.entries(t.offering).map(([k, v]) => `${v} ${k}`).join(', ')}{' for '}{Object.entries(t.requesting).map(([k, v]) => `${v} ${k}`).join(', ')}
-					{t.targetId === cp.id && <div className="flex gap-1 mt-1">
-						<button onClick={() => onAccept(t.id)} className="px-2 py-0.5 bg-green-600 rounded text-white text-[10px] font-bold">Accept</button>
-						<button onClick={() => onReject(t.id)} className="px-2 py-0.5 bg-red-600 rounded text-white text-[10px] font-bold">Reject</button>
-					</div>}
-				</div>);
-			})}
-			{trades.filter(t => t.status === 'accepted' || t.status === 'completed').map(t => (
-				<div key={t.id} className="text-[10px] text-green-400">✓ Trade completed</div>
-			))}
-		</div>
-	);
-}
+  const zoneId = challenge?.publicFace?.zoneId || session.config?.siteId || '_default';
+  const availableTiles = useMemo(() => {
+    const tiles = getFeatureTilesForZone(zoneId);
+    const placedIds = new Set(boardTiles.map(t => t.id));
+    return tiles.filter(t => !placedIds.has(t.id));
+  }, [zoneId, boardTiles]);
 
-// ─── Alliance Panel ─────────────────────────────────────────────
-function CoalPanel({ cp, players, session, onForm }: {
-	cp: Player; players: Player[]; session: GameSession; onForm: DeliberationPhaseProps['onFormCoalition'];
-}) {
-	const [sel, setSel] = useState<string[]>([]);
-	const [zone, setZone] = useState('');
-	const others = players.filter(p => p.id !== cp.id);
-	const zones = Object.values(session.board.zones);
-	const coals = session.activeCoalitions || [];
-	const toggle = (id: string) => setSel(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
-	return (
-		<div className="space-y-3">
-			<h5 className="text-xs font-bold text-gray-400">Forge Alliance</h5>
-			<div className="flex gap-1.5 flex-wrap">{others.map(p => (
-				<button key={p.id} onClick={() => toggle(p.id)} className={`px-2 py-1 rounded text-xs font-bold border-2 transition-all ${sel.includes(p.id) ? 'border-white ring-1 ring-white/30' : 'border-transparent'}`} style={{ backgroundColor: ROLE_COLORS[p.roleId] + '60' }}>{rn(p.roleId)}</button>
-			))}</div>
-			<select value={zone} onChange={e => setZone(e.target.value)} className="w-full bg-gray-800 text-gray-300 text-xs rounded px-2 py-1.5 border border-gray-700">
-				<option value="">Select target zone...</option>
-				{zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
-			</select>
-			<button onClick={() => { onForm(sel, zone); setSel([]); }} disabled={!sel.length || !zone} className="w-full py-1.5 rounded bg-purple-600 text-white text-xs font-bold disabled:opacity-30 hover:bg-purple-500">Forge Alliance</button>
-			{coals.map(c => (
-				<div key={c.id} className="bg-gray-800 rounded p-2 mb-1 text-xs text-gray-300 border-l-2 border-purple-400">
-					<div className="font-bold text-purple-300">{c.participants.map(p => rn(p.roleId)).join(' + ')}</div>
-					<div className="text-[10px] text-gray-500">+2 alliance bonus | Target: {session.board.zones[c.targetZoneId]?.name || c.targetZoneId}</div>
-				</div>
-			))}
-		</div>
-	);
-}
+  const uniqueObjsCovered = useMemo(() => {
+    const s = new Set<string>();
+    boardTiles.forEach(t => t.objectivesServed.forEach(o => s.add(o)));
+    return [...s];
+  }, [boardTiles]);
 
-// ─── Promise Panel ──────────────────────────────────────────────
-function PromPanel({ cp, players, session, onPromise }: {
-	cp: Player; players: Player[]; session: GameSession; onPromise: DeliberationPhaseProps['onMakePromise'];
-}) {
-	const [to, setTo] = useState('');
-	const [res, setRes] = useState<ResourceType>('budget');
-	const [amt, setAmt] = useState(1);
-	const others = players.filter(p => p.id !== cp.id);
-	const proms: GamePromise[] = session.promises || [];
-	return (
-		<div className="space-y-3">
-			<h5 className="text-xs font-bold text-gray-400">Promise Wall</h5>
-			{proms.length > 0 && <div className="space-y-1 max-h-[120px] overflow-y-auto">{proms.map(pr => {
-				const f = players.find(p => p.id === pr.fromPlayerId), t = players.find(p => p.id === pr.toPlayerId);
-				return (<div key={pr.id} className="rounded p-1.5 text-xs border-l-2" style={{ borderColor: ROLE_COLORS[f?.roleId || 'citizen'], backgroundColor: ROLE_COLORS[f?.roleId || 'citizen'] + '15' }}>
-					<span className="font-bold" style={{ color: ROLE_COLORS[f?.roleId || 'citizen'] }}>{rn(f?.roleId || 'citizen')}</span> → <span className="font-bold" style={{ color: ROLE_COLORS[t?.roleId || 'citizen'] }}>{rn(t?.roleId || 'citizen')}</span>: {pr.promisedResource.amount} {pr.promisedResource.type}
-					{pr.fulfilled && <span className="text-green-400 ml-1">✓</span>}{pr.broken && <span className="text-red-400 ml-1">✗ BROKEN</span>}
-				</div>);
-			})}</div>}
-			<div className="bg-gray-800/60 rounded p-2 space-y-2">
-				<h6 className="text-[10px] font-bold text-gray-400 uppercase">Carve Commitment</h6>
-				<select value={to} onChange={e => setTo(e.target.value)} className="w-full bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600">
-					<option value="">Select player...</option>{others.map(p => <option key={p.id} value={p.id}>{rn(p.roleId)}</option>)}
-				</select>
-				<div className="flex gap-2">
-					<select value={res} onChange={e => setRes(e.target.value as ResourceType)} className="flex-1 bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600">
-						{RT.map(r => <option key={r} value={r}>{RL[r]}</option>)}
-					</select>
-					<input type="number" min={1} max={10} value={amt} onChange={e => setAmt(Number(e.target.value))} className="w-14 bg-gray-700 text-gray-300 text-xs rounded px-2 py-1 border border-gray-600 text-center" />
-				</div>
-				<button onClick={() => { if (to) { onPromise(to, res, amt); setTo(''); } }} disabled={!to} className="w-full py-1 rounded bg-amber-600 text-white text-xs font-bold disabled:opacity-30 hover:bg-amber-500">Carve Commitment</button>
-			</div>
-		</div>
-	);
-}
+  const contributedPlayerCount = useMemo(() => {
+    const s: Record<string, boolean> = {};
+    passHistory.filter(h => h.passed).forEach(h => { s[h.playerId] = true; });
+    return Object.keys(s).length;
+  }, [passHistory]);
 
-// ─── Main Component ─────────────────────────────────────────────
-export default function DeliberationPhase(props: DeliberationPhaseProps) {
-	const { session, players, currentPlayerId, challenge, onPhaseComplete, onProposeTrade, onAcceptTrade, onRejectTrade, onFormCoalition, onMakePromise, onEndDeliberation, deliberationTimeRemaining } = props;
-	const [stage, setStage] = useState<Stage>('intro');
-	const [tab, setTab] = useState<WTab>('trading');
-	// I-SPY
-	const [diffs, setDiffs] = useState<ISpyDiff[]>([]);
-	const [turnIdx, setTurnIdx] = useState(0);
-	const [ispyT, setIspyT] = useState(IST);
-	const [slider, setSlider] = useState(50);
-	const [ispyDone, setIspyDone] = useState(false);
-	const slRef = useRef<HTMLDivElement>(null);
-	const dragging = useRef(false);
-	// Strategy
-	const [seq, setSeq] = useState<(string | null)[]>(Array(8).fill(null));
-	const [selTile, setSelTile] = useState<string | null>(null);
-	const [ready, setReady] = useState<Set<string>>(new Set());
-	const [timer, setTimer] = useState(deliberationTimeRemaining);
-	const [lastAct, setLastAct] = useState<Record<string, number>>({});
-	const [eqPrompt, setEqPrompt] = useState<string | null>(null);
-	const [discovered, setDiscovered] = useState(0);
+  // Intro timer
+  useEffect(() => {
+    if (stage === 'intro') {
+      const t = setTimeout(() => setStage('ispy'), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [stage]);
 
-	const cp = useMemo(() => players.find(p => p.id === currentPlayerId) || players[0], [players, currentPlayerId]);
-	const zones = useMemo(() => Object.values(session.board.zones), [session.board.zones]);
-	const ispyOrder = useMemo(() => [...players].sort((a, b) => a.utilityScore - b.utilityScore), [players]);
+  // Position ball near active player
+  useEffect(() => {
+    if (stage === 'vision' && ballAnim === 'idle') {
+      const pos = playerPos(activePlayerIdx % sortedPlayers.length, sortedPlayers.length, 180);
+      setBallPos({ x: pos.x, y: pos.y + 35 });
+    }
+  }, [activePlayerIdx, stage, ballAnim, sortedPlayers.length]);
 
-	// Generate I-SPY diffs
-	useEffect(() => {
-		if (diffs.length > 0) return;
-		const r = rng(session.rngSeed + session.currentRound);
-		const zids = zones.map(z => z.id), used = new Set<string>(), out: ISpyDiff[] = [];
-		for (let i = 0; i < 7 && i < zids.length; i++) {
-			let zi = Math.floor(r() * zids.length), att = 0;
-			while (used.has(zids[zi]) && att < 20) { zi = Math.floor(r() * zids.length); att++; }
-			used.add(zids[zi]);
-			out.push({ zoneId: zids[zi], resource: RT[Math.floor(r() * RT.length)], found: false, foundBy: null });
-		}
-		setDiffs(out);
-	}, [session.rngSeed, session.currentRound, zones, diffs.length]);
+  // Check if finalize should show
+  useEffect(() => {
+    if (boardTiles.length >= 4 && !showFinalize) setShowFinalize(true);
+  }, [boardTiles.length, showFinalize]);
 
-	// Stage transitions
-	useEffect(() => {
-		if (stage === 'intro') { const t = setTimeout(() => setStage('ispy'), 1500); return () => clearTimeout(t); }
-		if (stage === 'summary') { const t = setTimeout(() => onPhaseComplete(), 2000); return () => clearTimeout(t); }
-	}, [stage, onPhaseComplete]);
+  const handlePlaceTile = useCallback((tile: FeatureTile) => {
+    sounds.playButtonClick();
+    setSelectedTile(tile);
+  }, []);
 
-	// I-SPY timer
-	useEffect(() => {
-		if (stage !== 'ispy' || ispyDone) return;
-		const iv = setInterval(() => {
-			setIspyT(prev => {
-				if (prev <= 1) {
-					const tp = ispyOrder[turnIdx];
-					if (tp && diffs.filter(d => d.foundBy === tp.id).length === 0) {
-						const uc = diffs.findIndex(d => !d.found);
-						if (uc >= 0) { setEqPrompt(tp.id); setTimeout(() => setEqPrompt(null), 3000); }
-					}
-					if (turnIdx + 1 >= ispyOrder.length) { setIspyDone(true); setTimeout(() => setStage('strategy'), 1500); return IST; }
-					setTurnIdx(turnIdx + 1);
-					return IST;
-				}
-				return prev - 1;
-			});
-		}, 1000);
-		return () => clearInterval(iv);
-	}, [stage, ispyDone, turnIdx, ispyOrder, diffs]);
+  const handlePassBall = useCallback((targetIdx: number) => {
+    if (!selectedTile || targetIdx === activePlayerIdx % sortedPlayers.length) return;
+    if (ballAnim !== 'idle') return;
 
-	// Strategy timer
-	useEffect(() => {
-		if (stage !== 'strategy') return;
-		const iv = setInterval(() => { setTimer(p => { if (p <= 1) { setStage('summary'); return 0; } return p - 1; }); }, 1000);
-		return () => clearInterval(iv);
-	}, [stage]);
+    const tile = selectedTile;
+    const is = calcInclusivity(tile, activePlayer.id, sortedPlayers);
+    const res = calcResEfficiency(tile, sortedPlayers);
+    const vcs = calcVCS(boardTiles, tile);
+    const pq = (is + res + vcs) / 3;
 
-	// Equity check in strategy
-	useEffect(() => {
-		if (stage !== 'strategy') return;
-		const iv = setInterval(() => {
-			const now = Date.now();
-			for (const p of players) { if (now - (lastAct[p.id] || now) > 90000) { setEqPrompt(p.id); setTimeout(() => setEqPrompt(null), 5000); break; } }
-		}, 10000);
-		return () => clearInterval(iv);
-	}, [stage, players, lastAct]);
+    const startPos = playerPos(activePlayerIdx % sortedPlayers.length, sortedPlayers.length, 180);
+    const targetPos = playerPos(targetIdx, sortedPlayers.length, 180);
 
-	const clickDiff = useCallback((i: number) => {
-		if (stage !== 'ispy' || ispyDone) return;
-		const tp = ispyOrder[turnIdx]; if (!tp) return;
-		setDiffs(prev => { const n = [...prev]; if (n[i].found) return n; n[i] = { ...n[i], found: true, foundBy: tp.id }; return n; });
-		setDiscovered(p => p + 1);
-		setLastAct(p => ({ ...p, [tp.id]: Date.now() }));
-	}, [stage, ispyDone, ispyOrder, turnIdx]);
+    const entry = { playerId: activePlayer.id, tileId: tile.id, passQuality: Math.round(pq * 100) / 100, passed: pq >= 0.5 };
+    setPassHistory(h => [...h, entry]);
 
-	const handleReady = useCallback(() => {
-		setReady(p => new Set(p).add(currentPlayerId));
-		setLastAct(p => ({ ...p, [currentPlayerId]: Date.now() }));
-		if (ready.size + 1 >= players.length) setStage('summary');
-	}, [currentPlayerId, ready.size, players.length]);
+    if (pq >= 0.5) {
+      // Successful pass
+      sounds.playBallPass();
+      setBoardTiles(bt => [...bt, tile]);
+      setSelectedTile(null);
+      setBallAnim('success');
+      setMessage(`+1 CP — Pass quality: ${(pq * 100).toFixed(0)}%`);
+      if (consecutiveDrops > 0) sounds.playChainBonus();
+      setConsecutiveDrops(0);
 
-	const handleEnd = useCallback(() => { onEndDeliberation(); setStage('summary'); }, [onEndDeliberation]);
+      // Animate ball arc
+      const midX = (startPos.x + targetPos.x) / 2;
+      const midY = (startPos.y + targetPos.y) / 2 - 40;
+      const steps = [
+        { x: startPos.x, y: startPos.y + 35 },
+        { x: midX, y: midY },
+        { x: targetPos.x, y: targetPos.y + 35 },
+      ];
+      let step = 0;
+      const iv = setInterval(() => {
+        step++;
+        if (step < steps.length) setBallPos(steps[step]);
+        else {
+          clearInterval(iv);
+          setBallAnim('idle');
+          setActivePlayerIdx(targetIdx);
+          setMessage('');
+        }
+      }, 270);
+    } else {
+      // Drop
+      sounds.playBallDrop();
+      setBallAnim('drop');
+      const drops = consecutiveDrops + 1;
+      setConsecutiveDrops(drops);
+      const proposerRole = activePlayer.roleId.charAt(0).toUpperCase() + activePlayer.roleId.slice(1);
+      let msg = `The proposal mainly serves ${proposerRole}`;
+      if (drops >= 2) {
+        const weakest = sortedPlayers[0];
+        const weakObjs = BUCHI_OBJECTIVES[weakest.roleId] || [];
+        msg += ` — Hint: address ${weakest.name}'s needs (${weakObjs.join(', ')})`;
+      }
+      setMessage(msg);
+      setSelectedTile(null);
 
-	// Slider drag
-	const onSliderMove = useCallback((e: React.MouseEvent | MouseEvent) => {
-		if (!dragging.current || !slRef.current) return;
-		const r = slRef.current.getBoundingClientRect();
-		setSlider(Math.max(10, Math.min(90, ((e.clientX - r.left) / r.width) * 100)));
-	}, []);
-	useEffect(() => {
-		const up = () => { dragging.current = false; };
-		window.addEventListener('mouseup', up); window.addEventListener('mousemove', onSliderMove as any);
-		return () => { window.removeEventListener('mouseup', up); window.removeEventListener('mousemove', onSliderMove as any); };
-	}, [onSliderMove]);
+      const mX = (startPos.x + targetPos.x) / 2, mY = (startPos.y + targetPos.y) / 2 - 40;
+      setBallPos({ x: mX, y: mY });
+      setTimeout(() => setBallPos({ x: mX, y: 0 }), 600);
+      setTimeout(() => setBallPos({ x: mX, y: 10 }), 900);
+      setTimeout(() => {
+        setBallAnim('idle');
+        const p = playerPos(activePlayerIdx % sortedPlayers.length, sortedPlayers.length, 180);
+        setBallPos({ x: p.x, y: p.y + 35 });
+      }, 1200);
+    }
+  }, [selectedTile, activePlayerIdx, sortedPlayers, boardTiles, activePlayer, ballAnim, consecutiveDrops]);
 
-	// Mini hex grid
-	const miniGrid = (showDiffs: boolean) => (
-		<div className="grid gap-1" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-			{zones.slice(0, 14).map(z => {
-				const d = diffs.find(x => x.zoneId === z.id);
-				const show = showDiffs && d && !d.found;
-				const hinted = eqPrompt && d && !d.found;
-				return (
-					<motion.div key={z.id} onClick={() => show ? clickDiff(diffs.indexOf(d!)) : undefined}
-						className={`relative h-12 rounded flex flex-col items-center justify-center text-[8px] font-bold cursor-pointer select-none ${show ? 'hover:ring-2 hover:ring-white/50' : ''}`}
-						style={{ backgroundColor: CC[z.condition] + '40', borderColor: CC[z.condition], borderWidth: 1 }}
-						whileHover={show ? { scale: 1.1 } : {}}>
-						<span className="text-[7px] text-gray-300 truncate max-w-full px-0.5">{z.name.replace(/_/g, ' ')}</span>
-						<span className="text-[8px] capitalize" style={{ color: CC[z.condition] }}>{z.condition}</span>
-						{show && <motion.span className={`absolute -top-1 -right-1 text-sm ${hinted ? 'animate-pulse' : ''}`} initial={{ opacity: 0.6 }} animate={{ opacity: [0.6, 1, 0.6] }} transition={{ repeat: Infinity, duration: 2 }}>{RI[d!.resource]}</motion.span>}
-						{d?.found && showDiffs && <motion.span className="absolute inset-0 flex items-center justify-center text-lg" initial={{ scale: 2, opacity: 1 }} animate={{ scale: 0, opacity: 0 }} transition={{ duration: 0.5 }}>✨</motion.span>}
-					</motion.div>
-				);
-			})}
-		</div>
-	);
+  const handleFinalize = useCallback(() => {
+    if (ballAnim !== 'idle') return;
+    setFinalizeAttempted(true);
 
-	return (
-		<div className="w-full min-h-screen bg-gradient-to-b from-gray-900 to-gray-950 text-white p-4 overflow-y-auto">
-			<AnimatePresence mode="wait">
-				{stage === 'intro' && (
-					<motion.div key="intro" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center h-[60vh] gap-4">
-						<motion.h1 className="text-4xl font-black tracking-tight" initial={{ scale: 0.8 }} animate={{ scale: 1 }}>Phase 3: See the Vision</motion.h1>
-						<p className="text-gray-400 text-lg text-center max-w-md">Negotiate, discover resources, and plan your strategy.</p>
-						<div className="text-2xl font-mono text-yellow-400">Timer: {ft(deliberationTimeRemaining)}</div>
-					</motion.div>
-				)}
+    const passQualities = passHistory.map(h => h.passQuality);
+    const avgPQ = passQualities.length > 0 ? passQualities.reduce((a, b) => a + b, 0) / passQualities.length : 0;
+    const objRatio = uniqueObjsCovered.length / 6;
+    const contribRatio = contributedPlayerCount / sortedPlayers.length;
+    const cvs = avgPQ + objRatio + contribRatio;
 
-				{stage === 'ispy' && (
-					<motion.div key="ispy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-						<h2 className="text-xl font-bold text-center mb-1">I-SPY RESOURCE DISCOVERY</h2>
-						<p className="text-gray-400 text-center text-sm mb-3">Find 7 hidden resources! Click differences on the right panel.</p>
-						<div className="flex items-center justify-center gap-4 mb-3">
-							<div className="text-sm"><span className="text-gray-400">Current turn: </span>
-								<span className="font-bold" style={{ color: ROLE_COLORS[ispyOrder[turnIdx]?.roleId || 'citizen'] }}>{rn(ispyOrder[turnIdx]?.roleId || 'citizen')}</span></div>
-							<div className="w-40 h-3 bg-gray-800 rounded-full overflow-hidden">
-								<motion.div className="h-full bg-yellow-400 rounded-full" animate={{ width: `${(ispyT / IST) * 100}%` }} transition={{ duration: 0.3 }} />
-							</div>
-							<span className="text-sm font-mono text-yellow-400">{ispyT}s</span>
-						</div>
-						<AnimatePresence>{eqPrompt && (
-							<motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="text-center text-sm text-yellow-300 bg-yellow-900/30 rounded px-3 py-1.5 mb-2">
-								{rn(ispyOrder[turnIdx]?.roleId || 'citizen')}, look here — we found something for you.
-							</motion.div>
-						)}</AnimatePresence>
-						<div className="flex justify-center gap-3 mb-3">{players.map(p => (
-							<div key={p.id} className="text-xs"><span style={{ color: ROLE_COLORS[p.roleId] }}>{rn(p.roleId)}</span><span className="text-gray-500">: {diffs.filter(d => d.foundBy === p.id).length}</span></div>
-						))}</div>
-						<div ref={slRef} className="relative flex w-full rounded-lg overflow-hidden border border-gray-700" style={{ height: '340px' }} onMouseMove={onSliderMove}>
-							<div className="overflow-hidden" style={{ width: `${slider}%` }}>
-								<div className="p-3 h-full"><div className="text-[10px] font-bold text-gray-400 uppercase mb-2 text-center">What We Have</div>{miniGrid(false)}</div>
-							</div>
-							<div className="absolute top-0 bottom-0 w-1 bg-white/60 cursor-col-resize z-10 hover:bg-white" style={{ left: `${slider}%`, transform: 'translateX(-50%)' }} onMouseDown={() => { dragging.current = true; }}>
-								<div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-white border-2 border-gray-600 flex items-center justify-center text-gray-800 text-xs font-bold">⇔</div>
-							</div>
-							<div className="overflow-hidden" style={{ width: `${100 - slider}%` }}>
-								<div className="p-3 h-full"><div className="text-[10px] font-bold text-gray-400 uppercase mb-2 text-center">What We Could Build</div>{miniGrid(true)}</div>
-							</div>
-						</div>
-						{ispyDone && (
-							<motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="mt-4 bg-gray-800 rounded-lg p-4 text-center">
-								<h3 className="text-lg font-bold text-green-400 mb-2">Discovery Complete!</h3>
-								<p className="text-sm text-gray-300">{diffs.filter(d => d.found).length} / 7 resources discovered</p>
-								<div className="flex justify-center gap-3 mt-2">{players.map(p => (
-									<span key={p.id} className="text-xs" style={{ color: ROLE_COLORS[p.roleId] }}>{rn(p.roleId)}: {diffs.filter(d => d.foundBy === p.id).length}</span>
-								))}</div>
-							</motion.div>
-						)}
-					</motion.div>
-				)}
+    const activePos = playerPos(activePlayerIdx % sortedPlayers.length, sortedPlayers.length, 180);
 
-				{stage === 'strategy' && (
-					<motion.div key="strategy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
-						<ObjDash players={players} session={session} />
-						<SeqBuilder seq={seq} setSeq={setSeq} sel={selTile} setSel={setSelTile} />
-						<div className="flex gap-1 border-b border-gray-700 pb-1">
-							{(['trading', 'coalition', 'promises', 'series'] as WTab[]).map(t => (
-								<button key={t} onClick={() => { setTab(t); setLastAct(p => ({ ...p, [currentPlayerId]: Date.now() })); }}
-									className={`px-3 py-1.5 rounded-t text-xs font-bold uppercase transition-colors ${tab === t ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
-									{{ trading: 'Exchange Market', coalition: 'Alliance Forge', promises: 'Promise Wall', series: 'Strategy Table' }[t]}
-								</button>
-							))}
-						</div>
-						<div className="bg-gray-800/40 rounded-lg p-3 min-h-[240px]">
-							{tab === 'trading' && <TradePanel cp={cp} players={players} session={session} onPropose={onProposeTrade} onAccept={onAcceptTrade} onReject={onRejectTrade} />}
-							{tab === 'coalition' && <CoalPanel cp={cp} players={players} session={session} onForm={onFormCoalition} />}
-							{tab === 'promises' && <PromPanel cp={cp} players={players} session={session} onPromise={onMakePromise} />}
-							{tab === 'series' && (
-								<div className="text-sm text-gray-400">
-									<h5 className="text-xs font-bold text-gray-400 mb-2">Strategy Table Preview</h5>
-									<div className="flex gap-1 flex-wrap mb-3">
-										{seq.filter(Boolean).map((id, i) => { const t = TILES.find(a => a.id === id); return t ? <span key={i} className="px-2 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: t.color }}>{t.icon} {t.label}</span> : null; })}
-										{!seq.filter(Boolean).length && <span className="text-gray-600 text-xs italic">No tiles placed yet. Use the sequence builder above.</span>}
-									</div>
-									{challenge && (
-										<div className="bg-gray-900/60 rounded p-2">
-											<h6 className="text-[10px] font-bold text-yellow-400 uppercase mb-1">Active Challenge</h6>
-											<div className="text-xs text-gray-300">{challenge.name}</div>
-											<div className="text-[10px] text-gray-500 mt-0.5">{challenge.description}</div>
-											<div className="text-[10px] text-gray-500 mt-1">Difficulty: {challenge.difficulty} | Zones: {challenge.affectedZoneIds.join(', ')}</div>
-										</div>
-									)}
-								</div>
-							)}
-						</div>
-						<AnimatePresence>{eqPrompt && (
-							<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center text-sm text-yellow-300 bg-yellow-900/30 rounded px-3 py-2">
-								Every voice shapes the Shared Vision. {rn(players.find(p => p.id === eqPrompt)?.roleId || 'citizen')}, what does the park need from your perspective?
-							</motion.div>
-						)}</AnimatePresence>
-						<div className="flex items-center justify-between bg-gray-900/80 rounded-lg p-3">
-							<motion.div className={`text-2xl font-mono font-bold ${timer < 60 ? 'text-red-400' : 'text-yellow-400'}`}
-								animate={timer < 60 ? { scale: [1, 1.05, 1] } : {}} transition={timer < 60 ? { repeat: Infinity, duration: 1 } : {}}>
-								{ft(timer)}
-							</motion.div>
-							<div className="flex items-center gap-3">
-								<div className="flex gap-1">{players.map(p => (
-									<div key={p.id} className={`w-3 h-3 rounded-full border ${ready.has(p.id) ? 'bg-green-400 border-green-400' : 'bg-transparent border-gray-600'}`} title={`${rn(p.roleId)} ${ready.has(p.id) ? 'ready' : 'not ready'}`} />
-								))}</div>
-								<button onClick={handleReady} disabled={ready.has(currentPlayerId)}
-									className={`px-4 py-2 rounded text-sm font-bold transition-colors ${ready.has(currentPlayerId) ? 'bg-green-800 text-green-300 cursor-default' : 'bg-green-600 text-white hover:bg-green-500'}`}>
-									{ready.has(currentPlayerId) ? 'Ready ✓' : 'Ready'}
-								</button>
-								<button onClick={handleEnd} className="px-4 py-2 rounded bg-red-600 text-white text-sm font-bold hover:bg-red-500 transition-colors">End Deliberation</button>
-							</div>
-						</div>
-					</motion.div>
-				)}
+    if (cvs >= 0.7) {
+      setBallAnim('goal_success'); sounds.playGoalScore(); setMessage('The group has a shared vision!');
+      setBallPos({ x: activePos.x, y: activePos.y + 35 });
+      setTimeout(() => setBallPos({ x: 0, y: 0 }), 400);
+      setTimeout(() => {
+        const d = challenge?.publicFace?.difficultyRating || 3;
+        const th = tileCostSum(boardTiles) * getDiffMult(d);
+        (window as any).__visionResult = {
+          tiles: boardTiles, objectivesCovered: uniqueObjsCovered,
+          collaborativeVisionScore: Math.round(cvs * 100) / 100, passHistory, threshold: Math.round(th),
+        } as VisionBoardResult;
+        setBallAnim('idle'); setStage('locked');
+      }, 1500);
+    } else if (cvs >= 0.5 && !extraCycle) {
+      setBallAnim('goal_partial'); sounds.playGoalMiss(); setMessage('One more round of adjustments.');
+      setBallPos({ x: 5, y: -5 });
+      setTimeout(() => {
+        setBallAnim('idle'); setExtraCycle(true); setFinalizeAttempted(false); setShowFinalize(false);
+        const p = playerPos(activePlayerIdx % sortedPlayers.length, sortedPlayers.length, 180);
+        setBallPos({ x: p.x, y: p.y + 35 }); setMessage('');
+      }, 1500);
+    } else {
+      setBallAnim('goal_fail'); sounds.playGoalMiss(); setMessage('Vision too fragmented. Restarting...');
+      setBallPos({ x: 30, y: -30 });
+      setTimeout(() => {
+        setBoardTiles([]); setPassHistory([]); setConsecutiveDrops(0);
+        setFinalizeAttempted(false); setShowFinalize(false); setExtraCycle(false);
+        setBallAnim('idle'); setActivePlayerIdx(0);
+        const p = playerPos(0, sortedPlayers.length, 180);
+        setBallPos({ x: p.x, y: p.y + 35 }); setMessage('');
+      }, 2000);
+    }
+  }, [passHistory, uniqueObjsCovered, contributedPlayerCount, sortedPlayers, activePlayerIdx, boardTiles, challenge, ballAnim, extraCycle]);
 
-				{stage === 'summary' && (
-					<motion.div key="summary" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center h-[60vh] gap-3">
-						<h2 className="text-2xl font-bold text-gray-200">Vision Planning Summary</h2>
-						<div className="bg-gray-800 rounded-lg p-6 w-full max-w-md space-y-2 text-sm">
-							{[
-								['Strategy Sequence', seq.filter(Boolean).length > 0 ? seq.filter(Boolean).map(id => TILES.find(t => t.id === id)?.label).join(' → ') : 'No strategy set'],
-								['Trades Completed', String((session.tradeOffers || []).filter(t => t.status === 'accepted' || t.status === 'completed').length)],
-								['Alliances Forged', String((session.activeCoalitions || []).length)],
-								['Promises Made', String((session.promises || []).length)],
-							].map(([label, val]) => (
-								<div key={label} className="flex justify-between text-gray-300">
-									<span>{label}</span><span className="font-bold text-white">{val}</span>
-								</div>
-							))}
-							<div className="flex justify-between text-gray-300">
-								<span>Resources Discovered</span><span className="font-bold text-green-400">{discovered} / 7</span>
-							</div>
-						</div>
-					</motion.div>
-				)}
-			</AnimatePresence>
+  const handleComplete = useCallback(() => {
+    sounds.playButtonClick();
+    const result = (window as any).__visionResult as VisionBoardResult | undefined;
+    if (result) {
+      delete (window as any).__visionResult;
+      onPhaseComplete(result);
+    }
+  }, [onPhaseComplete]);
 
-			<PhaseNavigation
-				canContinue={stage === 'strategy' || stage === 'summary'}
-				continueLabel="Continue to Phase 4: The Team Play \u2192"
-				onContinue={() => {
-					console.log('PHASE TRANSITION: Deliberation → Action');
-					onPhaseComplete();
-				}}
-				showBack={stage === 'strategy'}
-				backLabel="\u2190 Back to Challenge"
-				onBack={() => console.log('Back to Challenge phase')}
-				onSkip={() => {
-					console.log('PHASE SKIP: Skipping deliberation');
-					onPhaseComplete();
-				}}
-				skipLabel="Skip Deliberation"
-			/>
-		</div>
-	);
+  // INTRO
+  if (stage === 'intro') {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+          className="text-center">
+          <h1 className="text-3xl font-bold text-amber-400 mb-2">Phase 3: Build Your Vision</h1>
+          <p className="text-gray-400">Pass the ball to build a shared plan</p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (stage === 'ispy') {
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-8">
+        <h2 className="text-xl font-bold text-amber-400 mb-4">Resource Discovery</h2>
+        <ISpyMini players={sortedPlayers} onComplete={() => setStage('vision')} />
+        <PhaseNavigation onContinue={() => setStage('vision')} canContinue continueLabel="Skip to Vision Board →" />
+      </div>
+    );
+  }
+
+  if (stage === 'locked') {
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-8">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center max-w-lg">
+          <div className="text-4xl mb-3">🔒</div>
+          <h2 className="text-2xl font-bold text-amber-400 mb-4"
+            style={{ textShadow: '0 0 20px rgba(245,158,11,0.4)' }}>
+            Vision Board Locked
+          </h2>
+          <div className="bg-gray-900 rounded-xl p-4 mb-4 border border-amber-500/30"
+            style={{ boxShadow: '0 0 30px rgba(245,158,11,0.15)' }}>
+            <div className="flex flex-wrap gap-2 justify-center mb-3">
+              {boardTiles.map(t => (
+                <div key={t.id} className="bg-gray-800 rounded-lg px-3 py-2 text-sm">
+                  <span className="mr-1">{t.icon}</span>{t.name}
+                </div>
+              ))}
+            </div>
+            <div className="text-sm text-gray-400 mb-2">Objectives Covered:</div>
+            <div className="flex gap-2 justify-center">
+              {uniqueObjsCovered.map(o => (
+                <span key={o} className="px-2 py-1 rounded text-xs font-bold"
+                  style={{ background: OBJ_COLORS[o] + '22', color: OBJ_COLORS[o] }}>
+                  {OBJ_ICONS[o]} {o}
+                </span>
+              ))}
+            </div>
+          </div>
+          <PhaseNavigation onContinue={handleComplete} canContinue
+            continueLabel="Continue to Phase 4: Build the Path →" />
+        </motion.div>
+      </div>
+    );
+  }
+
+  const ballColor = ballAnim === 'drop' || ballAnim === 'goal_fail' ? '#EF4444'
+    : ballAnim === 'success' || ballAnim === 'goal_success' ? '#22C55E' : '#F59E0B';
+
+  return (
+    <div className="min-h-screen bg-gray-950 flex">
+      <div className="w-64 bg-gray-900/90 border-r border-gray-800 p-3 overflow-y-auto"
+        style={{ maxHeight: '100vh' }}>
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+          Available Features
+        </h3>
+        <div className="space-y-2">
+          {availableTiles.map(tile => {
+            const isSelected = selectedTile?.id === tile.id;
+            return (
+              <motion.div key={tile.id} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                onClick={() => handlePlaceTile(tile)}
+                className="rounded-lg p-2 cursor-pointer transition-colors"
+                style={{
+                  background: isSelected ? 'rgba(245,158,11,0.15)' : 'rgba(55,65,81,0.5)',
+                  border: isSelected ? '2px solid #F59E0B' : '1px solid rgba(255,255,255,0.06)',
+                }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">{tile.icon}</span>
+                  <span className="text-sm font-semibold text-gray-200">{tile.name}</span>
+                </div>
+                <div className="text-xs text-gray-500 mb-1">{tile.description}</div>
+                <div className="flex gap-1 mb-1">
+                  {(Object.entries(tile.cost) as [ResourceType, number][]).map(([rt, amt]) => (
+                    <div key={rt} className="flex items-center gap-0.5">
+                      {Array.from({ length: amt }).map((_, i) => (
+                        <div key={i} className="w-2 h-2 rounded-full"
+                          style={{ background: RESOURCE_COLORS[rt] || '#888' }} />
+                      ))}
+                      <span className="text-[9px] text-gray-500 ml-0.5">{rt[0].toUpperCase()}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-1 flex-wrap">
+                  {tile.objectivesServed.map(o => (
+                    <span key={o} className="text-[10px] px-1 rounded"
+                      style={{ background: (OBJ_COLORS[o] || '#666') + '22', color: OBJ_COLORS[o] || '#aaa' }}>
+                      {OBJ_ICONS[o] || '?'} {o}
+                    </span>
+                  ))}
+                </div>
+              </motion.div>
+            );
+          })}
+          {availableTiles.length === 0 && (
+            <div className="text-xs text-gray-600 text-center py-4">All tiles placed</div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+        <div className="absolute top-3 left-0 right-0 flex justify-center gap-4 text-xs z-10">
+          <span className="text-gray-400">
+            Active: <span style={{ color: ROLE_COLORS[activePlayer.roleId] }} className="font-bold">
+              {activePlayer.name}
+            </span>
+          </span>
+          <span className="text-gray-500">|</span>
+          <span className="text-gray-400">Tiles: {boardTiles.length}</span>
+          <span className="text-gray-500">|</span>
+          <span className="text-gray-400">Objectives: {uniqueObjsCovered.length}/6</span>
+        </div>
+
+        <div className="relative" style={{ width: 460, height: 460 }}>
+          <div className="absolute rounded-xl bg-gray-900/80 border border-gray-700 flex flex-wrap gap-1 p-3 items-start content-start overflow-y-auto"
+            style={{ left: 80, top: 130, width: 300, height: 200 }}>
+            {boardTiles.length === 0 && (
+              <div className="w-full h-full flex items-center justify-center text-gray-600 text-sm">
+                Drag tiles here
+              </div>
+            )}
+            {boardTiles.map(t => (
+              <div key={t.id} className="bg-gray-800 rounded px-2 py-1 text-xs flex items-center gap-1">
+                <span>{t.icon}</span><span className="text-gray-300">{t.name}</span>
+              </div>
+            ))}
+          </div>
+
+          {sortedPlayers.map((p, i) => {
+            const pos = playerPos(i, sortedPlayers.length, 180);
+            const cx = 230 + pos.x;
+            const cy = 230 + pos.y;
+            const isActive = i === activePlayerIdx % sortedPlayers.length;
+            const isTarget = selectedTile && !isActive;
+            return (
+              <motion.div key={p.id}
+                onClick={() => { if (isTarget) handlePassBall(i); }}
+                className="absolute flex flex-col items-center cursor-pointer"
+                style={{ left: cx - 25, top: cy - 25 }}
+                whileHover={isTarget ? { scale: 1.1 } : {}}
+                animate={isActive ? { boxShadow: '0 0 16px rgba(245,158,11,0.4)' } : {}}>
+                <div className="w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-bold"
+                  style={{
+                    border: `3px solid ${ROLE_COLORS[p.roleId]}`,
+                    background: isActive ? 'rgba(245,158,11,0.15)' : 'rgba(30,30,40,0.9)',
+                    color: ROLE_COLORS[p.roleId],
+                    boxShadow: isTarget ? `0 0 12px ${ROLE_COLORS[p.roleId]}66` : 'none',
+                  }}>
+                  {p.name[0]}
+                </div>
+                <span className="text-[10px] mt-1 text-gray-400 font-medium text-center max-w-[70px] truncate">
+                  {p.name}
+                </span>
+                {isActive && (
+                  <span className="text-[9px] text-amber-400 font-bold">ACTIVE</span>
+                )}
+              </motion.div>
+            );
+          })}
+
+          <motion.div ref={ballRef}
+            animate={{
+              left: 230 + ballPos.x - 15,
+              top: 230 + ballPos.y - 15,
+              scale: ballAnim === 'goal_success' ? [1, 1.5, 1] : 1,
+            }}
+            transition={{
+              type: ballAnim === 'success' ? 'tween' : 'spring',
+              duration: ballAnim === 'success' ? 0.8 : ballAnim === 'drop' ? 0.4 : 0.5,
+              bounce: ballAnim === 'drop' ? 0.5 : 0,
+            }}
+            className="absolute w-[30px] h-[30px] rounded-full z-20"
+            style={{
+              background: `radial-gradient(circle at 40% 35%, ${ballColor}, ${ballColor}88)`,
+              boxShadow: `0 0 16px ${ballColor}66`,
+            }}
+          />
+        </div>
+
+        <AnimatePresence>
+          {message && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }} className="text-sm font-semibold px-4 py-2 rounded-lg mt-2"
+              style={{
+                color: ballAnim === 'drop' || ballAnim === 'goal_fail' ? '#EF4444'
+                  : ballAnim === 'goal_success' ? '#F59E0B' : '#22C55E',
+                background: 'rgba(0,0,0,0.5)',
+              }}>
+              {message}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {selectedTile && ballAnim === 'idle' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="mt-3 bg-gray-900 rounded-lg p-2 border border-amber-500/30 flex items-center gap-2">
+            <span>{selectedTile.icon}</span>
+            <span className="text-sm text-gray-300">{selectedTile.name}</span>
+            <span className="text-xs text-amber-400 ml-2">Click a player to pass</span>
+          </motion.div>
+        )}
+
+        {showFinalize && !finalizeAttempted && ballAnim === 'idle' && (
+          <motion.button initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            onClick={handleFinalize}
+            className="mt-4 px-6 py-2 rounded-xl font-bold text-sm"
+            style={{
+              background: 'linear-gradient(135deg, #F59E0B, #D97706)',
+              color: '#1C1917',
+              boxShadow: '0 4px 16px rgba(245,158,11,0.3)',
+            }}
+            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            Finalize Vision
+          </motion.button>
+        )}
+
+        {ballAnim === 'idle' && !selectedTile && !showFinalize && (
+          <div className="mt-4 text-xs text-gray-600 text-center">
+            Select a feature tile from the left panel, then click a player to pass the ball
+          </div>
+        )}
+      </div>
+
+      <div className="w-52 bg-gray-900/90 border-l border-gray-800 p-3 overflow-y-auto"
+        style={{ maxHeight: '100vh' }}>
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+          Objectives
+        </h3>
+        <div className="space-y-1 mb-4">
+          {(['safety', 'greenery', 'access', 'culture', 'revenue', 'community'] as string[]).map(o => {
+            const covered = uniqueObjsCovered.includes(o);
+            return (
+              <div key={o} className="flex items-center gap-1.5 text-xs">
+                <span>{OBJ_ICONS[o]}</span>
+                <span className={covered ? 'text-green-400 font-bold' : 'text-gray-500'}
+                  style={{ textDecoration: covered ? 'none' : 'none' }}>
+                  {o}
+                </span>
+                {covered && <span className="text-green-400 ml-auto">✓</span>}
+              </div>
+            );
+          })}
+        </div>
+
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+          Pass History
+        </h3>
+        <div className="space-y-1">
+          {passHistory.map((h, i) => {
+            const p = sortedPlayers.find(pl => pl.id === h.playerId);
+            return (
+              <div key={i} className="text-[10px] flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full"
+                  style={{ background: h.passed ? '#22C55E' : '#EF4444' }} />
+                <span style={{ color: p ? ROLE_COLORS[p.roleId] : '#888' }}>
+                  {p?.name?.[0] || '?'}
+                </span>
+                <span className="text-gray-500 truncate flex-1">
+                  {availableTiles.find(t => t.id === h.tileId)?.name || boardTiles.find(t => t.id === h.tileId)?.name || h.tileId}
+                </span>
+                <span className={h.passed ? 'text-green-400' : 'text-red-400'}>
+                  {(h.passQuality * 100).toFixed(0)}%
+                </span>
+              </div>
+            );
+          })}
+          {passHistory.length === 0 && (
+            <div className="text-[10px] text-gray-600">No passes yet</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }

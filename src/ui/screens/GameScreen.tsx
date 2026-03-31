@@ -19,13 +19,14 @@ import { CHALLENGE_CATEGORY_COLORS, WELFARE_WEIGHTS, OBJECTIVE_WEIGHTS, BUCHI_OB
 // ── New Gamified Phase Components ─────────────────────────────────
 import { EventRollPhase } from '../phases/EventRollPhase';
 import { ChallengePhase } from '../phases/ChallengePhase';
-import DeliberationPhase from '../phases/DeliberationPhase';
-import RelayRacePhase from '../phases/RelayRacePhase';
+import BallPassingPhase from '../phases/DeliberationPhase';
+import SeriesBuilderPhase from '../phases/RelayRacePhase';
 import ScoringPhase from '../phases/ScoringPhase';
 import RoundTransition from '../phases/RoundTransition';
 import { PhaseTransitionCard } from '../effects/PhaseTransitionCard';
 import { DeckDisplay } from '../effects/ResourceAnimation';
 import type { NashEngineOutput } from '../../core/engine/nashEngine';
+import GameEnvironment, { SoundControl } from '../components/GameEnvironment';
 
 // ── Role metadata ────────────────────────────────────────────────
 
@@ -764,6 +765,15 @@ export default function GameScreen() {
   const [lastNashOutput, setLastNashOutput] = useState<NashEngineOutput | null>(null);
   const [lastEndCondition, setLastEndCondition] = useState<string>('none');
   const [roundCPAwards, setRoundCPAwards] = useState<Record<string, { amount: number; reason: string }[]>>({});
+  const [visionBoard, setVisionBoard] = useState<{ tiles: any[]; threshold: number; objectivesCovered: string[] } | null>(null);
+
+  // Log the complete transition map on mount for debugging
+  React.useEffect(() => {
+    console.log('%c=== COMMONGROUND TRANSITION MAP ===', 'color: #F59E0B; font-weight: bold; font-size: 14px');
+    console.log('%cPayment Day → event_roll (auto) → challenge → deliberation → relay_race → scoring → round_transition → [next round | debrief]', 'color: #9CA3AF');
+    console.log('%cEach phase overlay: absolute inset-0 z-40, exclusive rendering via gamifiedPhase state', 'color: #9CA3AF');
+    console.log('%cEngine phases: payment_day → event_roll → individual_action → deliberation → action_resolution → round_end_accounting → level_check → round_end', 'color: #6B7280');
+  }, []);
 
   // Gamified phase activation — ONLY activates when gamifiedPhase is null (no active gamified overlay)
   // The primary mechanism is the showPhaseTransition chain called by each phase's onPhaseComplete.
@@ -800,6 +810,11 @@ export default function GameScreen() {
 
   const currentPlayer = getCurrentPlayer();
   const currentPhase = session.currentPhase;
+  const phaseNumber = currentPhase === 'payment_day' || currentPhase === 'event_roll' ? 1
+    : currentPhase === 'deliberation' ? 3
+    : currentPhase === 'individual_action' || currentPhase === 'action_resolution' ? 4
+    : currentPhase === 'round_end_accounting' || currentPhase === 'level_check' ? 5
+    : 2;
   const players = Object.values(session.players);
   const zones = Object.values(session.board.zones);
   const activeChallenge = getActiveChallenge();
@@ -846,6 +861,7 @@ export default function GameScreen() {
   );
 
   return (
+    <GameEnvironment currentPhase={phaseNumber} showCelebration={false}>
     <div className="w-full h-screen bg-stone-900 flex flex-col overflow-hidden">
       {/* Phase Indicator Bar */}
       <PhaseIndicator
@@ -896,26 +912,17 @@ export default function GameScreen() {
               challenge={activeChallenge}
               players={players}
               onPhaseComplete={(results) => {
-                console.log('FLOW: Phase 2 complete → showing Phase 3');
-                const cpAwards: Record<string, { amount: number; reason: string }[]> = {};
-                for (const clue of results.cluesFound) {
-                  if (!cpAwards[clue.finderId]) cpAwards[clue.finderId] = [];
-                  cpAwards[clue.finderId].push({ amount: 1, reason: `Found ${clue.type} clue` });
-                }
-                if (results.allFound) {
-                  for (const p of players) {
-                    if (!cpAwards[p.id]) cpAwards[p.id] = [];
-                    cpAwards[p.id].push({ amount: 2, reason: 'All 5 clues found (team bonus)' });
-                  }
-                }
+                console.log('FLOW: Phase 2 complete → showing Phase 3. Found:', results.totalFound, 'relevant,', results.teachingMoments, 'teaching moments');
+                // Convert investigation CP awards to round CP format
                 setRoundCPAwards(prev => {
                   const merged = { ...prev };
-                  for (const [pid, awards] of Object.entries(cpAwards)) {
-                    merged[pid] = [...(merged[pid] || []), ...awards];
+                  for (const [pid, cp] of Object.entries(results.cpAwarded)) {
+                    if (!merged[pid]) merged[pid] = [];
+                    merged[pid].push({ amount: cp, reason: 'Zone investigation clues found' });
                   }
                   return merged;
                 });
-                showPhaseTransition(2, 3, 'Investigate', 'Plan Strategy', 'deliberation');
+                showPhaseTransition(2, 3, 'Investigate', 'Build Your Vision', 'deliberation');
               }}
             />
           ) : (
@@ -935,59 +942,43 @@ export default function GameScreen() {
         </div>
       )}
 
-      {/* Phase 3: I-Spy + Deliberation */}
+      {/* Phase 3: Ball Passing Vision Board */}
       {gamifiedPhase === 'deliberation' && (
         <div className="absolute inset-0 z-40">
-          <DeliberationPhase
+          <BallPassingPhase
             session={session}
             players={players}
-            currentPlayerId={currentPlayer?.id || players[0]?.id || ''}
             challenge={activeChallenge}
-            onPhaseComplete={() => {
-              console.log('FLOW: Phase 3 complete → advancing engine + showing Phase 4');
-              advancePhase(); // engine: deliberation → individual_action or action_resolution
-              showPhaseTransition(3, 4, 'Plan Strategy', 'Build the Path', 'relay_race');
+            onPhaseComplete={(result: any) => {
+              console.log('FLOW: Phase 3 complete → vision board locked, showing Phase 4');
+              setVisionBoard({ tiles: result.tiles, threshold: result.threshold, objectivesCovered: result.objectivesCovered });
+              advancePhase();
+              showPhaseTransition(3, 4, 'Build Your Vision', 'Build the Path', 'relay_race');
             }}
-            onProposeTrade={proposeTrade}
-            onAcceptTrade={(tradeId) => useGameStore.getState().acceptTrade(tradeId)}
-            onRejectTrade={(tradeId) => useGameStore.getState().rejectTrade(tradeId)}
-            onFormCoalition={(partnerIds, targetZoneId) => useGameStore.getState().formCoalition(partnerIds, targetZoneId)}
-            onMakePromise={(toPlayerId, resource, amount) => useGameStore.getState().makePromise(toPlayerId, resource, amount, session.currentRound + 1)}
-            onEndDeliberation={endDeliberation}
             deliberationTimeRemaining={deliberationTimeRemaining}
           />
         </div>
       )}
 
-      {/* Phase 4: Relay Race Action Resolution */}
+      {/* Phase 4: Series Building */}
       {gamifiedPhase === 'relay_race' && (
         <div className="absolute inset-0 z-40">
           {activeChallenge ? (
-            <RelayRacePhase
+            <SeriesBuilderPhase
               session={session}
               players={players}
               challenge={activeChallenge}
+              visionBoard={visionBoard || { tiles: [], threshold: 20, objectivesCovered: [] }}
               onPhaseComplete={(result: any) => {
-                console.log('FLOW: Phase 4 complete → advancing engine + showing Phase 5');
-                setRoundCPAwards(prev => {
-                  const merged = { ...prev };
-                  if (result.teamPlayBonus) {
-                    for (const p of players) {
-                      if (!merged[p.id]) merged[p.id] = [];
-                      merged[p.id].push({ amount: 1, reason: 'Team play bonus (all contributed)' });
-                    }
-                  }
-                  return merged;
-                });
-                advancePhase(); // engine: action_resolution → round_end_accounting
-                showPhaseTransition(4, 5, 'Build the Path', 'Scoring', 'scoring');
+                console.log('FLOW: Phase 4 complete → showing Phase 5');
+                advancePhase();
+                showPhaseTransition(4, 5, 'Build the Path', 'Park Guardian', 'scoring');
               }}
               onPlayCard={(cardId: string, targetZoneId?: string) => playCard(cardId, targetZoneId)}
               onPassTurn={passTurn}
               onUseAbility={() => useUniqueAbility()}
             />
           ) : (
-            // No challenge — skip to scoring
             <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80">
               <div className="text-center">
                 <p className="text-gray-300 text-lg mb-4">No challenge to resolve. Moving to scoring...</p>
@@ -995,7 +986,7 @@ export default function GameScreen() {
                   className="px-6 py-3 bg-amber-500 text-black font-bold rounded-xl"
                   onClick={() => {
                     advancePhase();
-                    showPhaseTransition(4, 5, 'Build the Path', 'Scoring', 'scoring');
+                    showPhaseTransition(4, 5, 'Build the Path', 'Park Guardian', 'scoring');
                   }}
                 >
                   Continue {'\u2192'}
@@ -1121,6 +1112,7 @@ export default function GameScreen() {
             <line x1="14" y1="6" x2="9" y2="12" />
           </svg>
         </button>
+        <SoundControl />
       </div>
 
       {/* Main content area */}
@@ -1541,5 +1533,6 @@ export default function GameScreen() {
         )}
       </AnimatePresence>
     </div>
+    </GameEnvironment>
   );
 }
