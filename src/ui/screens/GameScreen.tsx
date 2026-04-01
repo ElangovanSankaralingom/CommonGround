@@ -27,6 +27,7 @@ import { PhaseTransitionCard } from '../effects/PhaseTransitionCard';
 import { DeckDisplay } from '../effects/ResourceAnimation';
 import type { NashEngineOutput } from '../../core/engine/nashEngine';
 import GameEnvironment, { SoundControl } from '../components/GameEnvironment';
+import PaymentDay from '../components/PaymentDay';
 
 // ── Role metadata ────────────────────────────────────────────────
 
@@ -860,10 +861,153 @@ export default function GameScreen() {
     [proposeTrade]
   );
 
+  // ── EXCLUSIVE PHASE RENDERING ────────────────────────────────────
+  // When a gamified phase is active, render ONLY that phase (no board underneath).
+  // This prevents all overlap issues.
+  const renderGamifiedPhase = (): React.ReactNode => {
+    if (gamifiedPhase === 'phase_transition' && phaseTransition) {
+      return (
+        <PhaseTransitionCard
+          fromPhase={phaseTransition.from}
+          toPhase={phaseTransition.to}
+          fromName={phaseTransition.fromName}
+          toName={phaseTransition.toName}
+          onComplete={() => {}}
+        />
+      );
+    }
+    if (gamifiedPhase === 'event_roll') {
+      return (
+        <EventRollPhase
+          session={session}
+          onPhaseComplete={() => {
+            console.log('TRANSITION: Phase 1 complete → Phase 2');
+            advancePhase();
+            showPhaseTransition(1, 2, 'Winds of Change', 'Investigate', 'challenge');
+          }}
+        />
+      );
+    }
+    if (gamifiedPhase === 'challenge') {
+      return activeChallenge ? (
+        <ChallengePhase
+          session={session}
+          challenge={activeChallenge}
+          players={players}
+          onPhaseComplete={(results: any) => {
+            console.log('TRANSITION: Phase 2 complete → Phase 3');
+            setRoundCPAwards(prev => {
+              const merged = { ...prev };
+              for (const [pid, cp] of Object.entries(results.cpAwarded || {})) {
+                if (!merged[pid]) merged[pid] = [];
+                merged[pid].push({ amount: cp as number, reason: 'Investigation clues' });
+              }
+              return merged;
+            });
+            showPhaseTransition(2, 3, 'Investigate', 'Build Your Vision', 'deliberation');
+          }}
+        />
+      ) : (
+        <div className="w-full h-screen bg-stone-900 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-gray-300 text-lg mb-4">No challenge this season.</p>
+            <button className="px-6 py-3 bg-amber-500 text-black font-bold rounded-xl"
+              onClick={() => showPhaseTransition(2, 3, 'Investigate', 'Build Your Vision', 'deliberation')}>
+              Continue {'\u2192'}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (gamifiedPhase === 'deliberation') {
+      return (
+        <BallPassingPhase
+          session={session}
+          players={players}
+          challenge={activeChallenge}
+          onPhaseComplete={(result: any) => {
+            console.log('TRANSITION: Phase 3 complete → Phase 4');
+            setVisionBoard({ tiles: result.tiles, threshold: result.threshold, objectivesCovered: result.objectivesCovered });
+            advancePhase();
+            showPhaseTransition(3, 4, 'Build Your Vision', 'Build the Path', 'relay_race');
+          }}
+          deliberationTimeRemaining={deliberationTimeRemaining}
+        />
+      );
+    }
+    if (gamifiedPhase === 'relay_race') {
+      return activeChallenge ? (
+        <SeriesBuilderPhase
+          session={session}
+          players={players}
+          challenge={activeChallenge}
+          visionBoard={visionBoard || { tiles: [], threshold: 20, objectivesCovered: [] }}
+          onPhaseComplete={(result: any) => {
+            console.log('TRANSITION: Phase 4 complete → Phase 5');
+            advancePhase();
+            showPhaseTransition(4, 5, 'Build the Path', 'Park Guardian', 'scoring');
+          }}
+          onPlayCard={(cardId: string, targetZoneId?: string) => playCard(cardId, targetZoneId)}
+          onPassTurn={passTurn}
+          onUseAbility={() => useUniqueAbility()}
+        />
+      ) : (
+        <div className="w-full h-screen bg-stone-900 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-gray-300 text-lg mb-4">No challenge to resolve.</p>
+            <button className="px-6 py-3 bg-amber-500 text-black font-bold rounded-xl"
+              onClick={() => { advancePhase(); showPhaseTransition(4, 5, 'Build the Path', 'Park Guardian', 'scoring'); }}>
+              Continue {'\u2192'}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (gamifiedPhase === 'scoring') {
+      return (
+        <ScoringPhase
+          session={session}
+          players={players}
+          roundCPAwards={roundCPAwards}
+          onPhaseComplete={(nashOutput: any, endCondition: any) => {
+            console.log('TRANSITION: Phase 5 complete → Round transition. endCondition:', endCondition);
+            setLastNashOutput(nashOutput);
+            setLastEndCondition(endCondition);
+            advancePhase();
+            setGamifiedPhase('round_transition');
+          }}
+        />
+      );
+    }
+    if (gamifiedPhase === 'round_transition') {
+      return (
+        <RoundTransition
+          session={session}
+          endCondition={lastEndCondition as any}
+          nashOutput={lastNashOutput}
+          onNextRound={() => {
+            console.log('TRANSITION: Next round');
+            setGamifiedPhase(null);
+            setRoundCPAwards({});
+            advancePhase();
+          }}
+          onDebrief={() => {
+            console.log('TRANSITION: Debrief');
+            setGamifiedPhase(null);
+            advancePhase();
+          }}
+        />
+      );
+    }
+    return null; // No gamified phase active — show board
+  };
+
+  const activeGamifiedContent = renderGamifiedPhase();
+
   return (
     <GameEnvironment currentPhase={phaseNumber} showCelebration={false}>
     <div className="w-full h-screen bg-stone-900 flex flex-col overflow-hidden">
-      {/* Phase Indicator Bar */}
+      {/* Phase Indicator Bar — always visible */}
       <PhaseIndicator
         currentPhase={currentPhase}
         currentRound={session.currentRound}
@@ -871,171 +1015,16 @@ export default function GameScreen() {
         gameLevel={session.gameLevel}
       />
 
-      {/* ══════════════════════════════════════════════════════════ */}
-      {/* ══ GAMIFIED PHASE OVERLAYS ════════════════════════════ */}
-      {/* ══════════════════════════════════════════════════════════ */}
-
-      {/* Phase Transition Card */}
-      <AnimatePresence>
-        {gamifiedPhase === 'phase_transition' && phaseTransition && (
-          <PhaseTransitionCard
-            fromPhase={phaseTransition.from}
-            toPhase={phaseTransition.to}
-            fromName={phaseTransition.fromName}
-            toName={phaseTransition.toName}
-            onComplete={() => {}}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Phase 1: Event Roll */}
-      {gamifiedPhase === 'event_roll' && (
-        <div className="absolute inset-0 z-40">
-          <EventRollPhase
-            session={session}
-            onPhaseComplete={() => {
-              console.log('FLOW: Phase 1 complete → advancing engine + showing Phase 2');
-              advancePhase(); // engine: event_roll → individual_action or deliberation
-              // Gamified flow: always go to challenge investigation next
-              showPhaseTransition(1, 2, 'Event Roll', 'Investigate', 'challenge');
-            }}
-          />
+      {/* ══ EXCLUSIVE RENDERING: either gamified phase OR board ══ */}
+      {activeGamifiedContent ? (
+        <div className="flex-1 overflow-y-auto">
+          {activeGamifiedContent}
         </div>
-      )}
+      ) : (
+      <React.Fragment>
+      {/* ══ BOARD VIEW (shown when no gamified phase is active) ══ */}
 
-      {/* Phase 2: Challenge + Treasure Hunt */}
-      {gamifiedPhase === 'challenge' && (
-        <div className="absolute inset-0 z-40">
-          {activeChallenge ? (
-            <ChallengePhase
-              session={session}
-              challenge={activeChallenge}
-              players={players}
-              onPhaseComplete={(results) => {
-                console.log('FLOW: Phase 2 complete → showing Phase 3. Found:', results.totalFound, 'relevant,', results.teachingMoments, 'teaching moments');
-                // Convert investigation CP awards to round CP format
-                setRoundCPAwards(prev => {
-                  const merged = { ...prev };
-                  for (const [pid, cp] of Object.entries(results.cpAwarded)) {
-                    if (!merged[pid]) merged[pid] = [];
-                    merged[pid].push({ amount: cp, reason: 'Zone investigation clues found' });
-                  }
-                  return merged;
-                });
-                showPhaseTransition(2, 3, 'Investigate', 'Build Your Vision', 'deliberation');
-              }}
-            />
-          ) : (
-            // No challenge — skip to deliberation
-            <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80">
-              <div className="text-center">
-                <p className="text-gray-300 text-lg mb-4">No challenge this season. Moving to strategy planning...</p>
-                <button
-                  className="px-6 py-3 bg-amber-500 text-black font-bold rounded-xl"
-                  onClick={() => showPhaseTransition(2, 3, 'Investigate', 'Plan Strategy', 'deliberation')}
-                >
-                  Continue {'\u2192'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Phase 3: Ball Passing Vision Board */}
-      {gamifiedPhase === 'deliberation' && (
-        <div className="absolute inset-0 z-40">
-          <BallPassingPhase
-            session={session}
-            players={players}
-            challenge={activeChallenge}
-            onPhaseComplete={(result: any) => {
-              console.log('FLOW: Phase 3 complete → vision board locked, showing Phase 4');
-              setVisionBoard({ tiles: result.tiles, threshold: result.threshold, objectivesCovered: result.objectivesCovered });
-              advancePhase();
-              showPhaseTransition(3, 4, 'Build Your Vision', 'Build the Path', 'relay_race');
-            }}
-            deliberationTimeRemaining={deliberationTimeRemaining}
-          />
-        </div>
-      )}
-
-      {/* Phase 4: Series Building */}
-      {gamifiedPhase === 'relay_race' && (
-        <div className="absolute inset-0 z-40">
-          {activeChallenge ? (
-            <SeriesBuilderPhase
-              session={session}
-              players={players}
-              challenge={activeChallenge}
-              visionBoard={visionBoard || { tiles: [], threshold: 20, objectivesCovered: [] }}
-              onPhaseComplete={(result: any) => {
-                console.log('FLOW: Phase 4 complete → showing Phase 5');
-                advancePhase();
-                showPhaseTransition(4, 5, 'Build the Path', 'Park Guardian', 'scoring');
-              }}
-              onPlayCard={(cardId: string, targetZoneId?: string) => playCard(cardId, targetZoneId)}
-              onPassTurn={passTurn}
-              onUseAbility={() => useUniqueAbility()}
-            />
-          ) : (
-            <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80">
-              <div className="text-center">
-                <p className="text-gray-300 text-lg mb-4">No challenge to resolve. Moving to scoring...</p>
-                <button
-                  className="px-6 py-3 bg-amber-500 text-black font-bold rounded-xl"
-                  onClick={() => {
-                    advancePhase();
-                    showPhaseTransition(4, 5, 'Build the Path', 'Park Guardian', 'scoring');
-                  }}
-                >
-                  Continue {'\u2192'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Phase 5: Scoring */}
-      {gamifiedPhase === 'scoring' && (
-        <div className="absolute inset-0 z-40">
-          <ScoringPhase
-            session={session}
-            players={players}
-            roundCPAwards={roundCPAwards}
-            onPhaseComplete={(nashOutput, endCondition) => {
-              console.log('FLOW: Phase 5 complete → round transition. endCondition:', endCondition);
-              setLastNashOutput(nashOutput);
-              setLastEndCondition(endCondition);
-              advancePhase(); // engine: round_end_accounting → level_check → round_end
-              setGamifiedPhase('round_transition');
-            }}
-          />
-        </div>
-      )}
-
-      {/* Round Transition / End Game */}
-      {gamifiedPhase === 'round_transition' && (
-        <div className="absolute inset-0 z-40">
-          <RoundTransition
-            session={session}
-            endCondition={lastEndCondition as any}
-            nashOutput={lastNashOutput}
-            onNextRound={() => {
-              console.log('FLOW: Next round → resetting gamified phase, advancing engine');
-              setGamifiedPhase(null);
-              setRoundCPAwards({});
-              advancePhase(); // Advances to next round's payment_day
-            }}
-            onDebrief={() => {
-              console.log('FLOW: Debrief → clearing gamified phase, advancing engine');
-              setGamifiedPhase(null);
-              advancePhase(); // Advances to debrief
-            }}
-          />
-        </div>
-      )}
+      {/* All phase overlays now handled exclusively by renderGamifiedPhase() above */}
 
       {/* Deck Displays (always visible during gameplay) */}
       {session.status === 'playing' && (
@@ -1302,65 +1291,23 @@ export default function GameScreen() {
         )}
       </AnimatePresence>
 
-      {/* Payment Day Overlay (Fix 5) */}
+      {/* Payment Day — Resource Distribution Screen */}
       <AnimatePresence>
         {showPaymentDay && currentPhase === 'payment_day' && (
           <motion.div
-            className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 z-40"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <motion.div
-              className="bg-stone-800 rounded-2xl p-8 max-w-2xl w-full border border-emerald-400/30 shadow-2xl"
-              initial={{ scale: 0.9 }}
-              animate={{ scale: 1 }}
-            >
-              <h2 className="text-2xl font-serif font-bold text-emerald-300 text-center mb-6">
-                Payment Day — Round {session.currentRound}
-              </h2>
-              <p className="text-stone-400 text-xs text-center mb-4">Profession income distributed to all players</p>
-              <div className="grid grid-cols-5 gap-3 mb-6">
-                {players.map((p, i) => (
-                  <motion.div
-                    key={p.id}
-                    className="text-center bg-stone-700/50 rounded-lg p-3"
-                    initial={{ y: -30, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ delay: i * 0.15 }}
-                  >
-                    <div
-                      className="w-10 h-10 mx-auto rounded-full flex items-center justify-center text-lg mb-2"
-                      style={{ backgroundColor: ROLE_COLORS[p.roleId] }}
-                    >
-                      {ROLE_ICONS[p.roleId]}
-                    </div>
-                    <p className="text-stone-200 text-xs font-semibold">{p.name}</p>
-                    <p className="text-[10px]" style={{ color: ROLE_COLORS[p.roleId] }}>{ROLE_NAMES[p.roleId]}</p>
-                    <div className="mt-2 grid grid-cols-5 gap-0.5">
-                      {(Object.entries(p.resources) as [ResourceType, number][]).map(([res, amt]) => (
-                        <div key={res} className="text-center">
-                          <div className="text-[8px]" style={{ color: RESOURCE_COLOR_MAP[res] }}>{RESOURCE_ICONS[res]}</div>
-                          <span className="text-[9px] text-stone-300 font-bold">{amt}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-              <button
-                className="w-full py-3 rounded-xl bg-emerald-500 text-stone-900 font-bold text-sm
-                           hover:bg-emerald-400 transition-colors"
-                onClick={() => {
-                  dismissPaymentDay();
-                  advancePhase();
-                  // Start gamified event roll after payment day
-                  setGamifiedPhase('event_roll');
-                }}
-              >
-                Continue to Event Roll {'\u2192'}
-              </button>
-            </motion.div>
+            <PaymentDay
+              onContinue={() => {
+                console.log('TRANSITION: Payment Day → Event Roll');
+                dismissPaymentDay();
+                advancePhase();
+                setGamifiedPhase('event_roll');
+              }}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1532,6 +1479,8 @@ export default function GameScreen() {
           </motion.div>
         )}
       </AnimatePresence>
+      </React.Fragment>
+      )}
     </div>
     </GameEnvironment>
   );

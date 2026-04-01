@@ -195,7 +195,7 @@ export default function SeriesBuilderPhase({
         {/* Category + Resource selection */}
         <div className="space-y-3">
           <div className="flex gap-2 flex-wrap">
-            {SEQ.map(c => <button key={c} onClick={() => setSelCat(c)}
+            {SEQ.map(c => <button key={c} onClick={() => { console.log('PHASE4: category clicked', c); setSelCat(c); }}
               className={`px-3 py-2 rounded text-sm font-semibold uppercase ${selCat === c ? 'bg-amber-600 text-white border-2 border-amber-400' : 'bg-gray-700 text-gray-300 border border-gray-600 hover:border-gray-400'}`}>
               {ICONS[c]} {c}</button>)}
           </div>
@@ -203,7 +203,7 @@ export default function SeriesBuilderPhase({
             <p className="text-xs text-gray-400">Select resource &amp; tokens:</p>
             <div className="flex gap-2 flex-wrap">
               {RES_TYPES.map(r => { const a = avail(ap, r); const e = calculateEffectiveness(abilityFor(ap, r)); return (
-                <button key={r} onClick={() => { setSelRes(r); setSelTok(Math.min(1, a)); }} disabled={a === 0}
+                <button key={r} onClick={() => { console.log('PHASE4: resource clicked', r, 'available:', a); setSelRes(r); setSelTok(Math.min(1, a)); }} disabled={a === 0}
                   className={`px-3 py-2 rounded text-xs ${selRes === r ? 'bg-blue-600 text-white border-2 border-blue-400' : a > 0 ? 'bg-gray-700 text-gray-200 border border-gray-600 hover:border-gray-400' : 'bg-gray-900 text-gray-600 cursor-not-allowed'}`}>
                   <div className="font-semibold">{RLBL[r]}</div><div className="text-[10px]">{a} | {e}%</div>
                 </button>); })}
@@ -216,8 +216,8 @@ export default function SeriesBuilderPhase({
             </div>}
           </motion.div>}
           <div className="flex gap-3">
-            <button onClick={commit} disabled={!selCat || !selRes || selTok < 1}
-              className="px-5 py-2 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold disabled:opacity-40">Commit &amp; Pass</button>
+            <button onClick={() => { console.log('PHASE4: commit clicked', selCat, selRes, selTok); commit(); }} disabled={!selCat || !selRes || selTok < 1}
+              className="px-5 py-2 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">Commit &amp; Pass</button>
             {xformed && !showVote && <button onClick={() => { setStage('transformation'); setTimeout(() => setStage('summary'), 3000); }}
               className="px-5 py-2 rounded bg-green-600 hover:bg-green-500 text-white font-semibold">Finalize Series</button>}
           </div>
