@@ -490,14 +490,9 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
   };
 
   /* ── SCREEN 3: Resource Allocation ────────────────────────── */
-  const renderResourceAllocation = () => {
-    const alreadyCommittedByPlayer = (pid: string, excludeTile?: string) => {
-      const c: Record<ResourceType, number> = { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 };
-      // Sum all commitments for this player
-      RESOURCE_TYPES.forEach(r => { c[r] = commitments[pid]?.[r] || 0; });
-      return c;
-    };
+  const effColor = (eff: number) => eff >= 70 ? T.primary : eff >= 40 ? T.tertiary : T.secondary;
 
+  const renderResourceAllocation = () => {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10, overflowY: 'auto', padding: 8 }}>
         <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.primary, marginBottom: 4 }}>Resource Allocation</div>
@@ -515,65 +510,140 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
               {RESOURCE_TYPES.filter(r => needed[r] > 0).map(r => {
                 const rTotal = Object.values(commitments).reduce((s, pc) => s + (pc[r] || 0), 0);
                 const met = rTotal >= needed[r];
+
+                // Calculate effective value and breakdown by effectiveness tier
+                let totalEffValue = 0;
+                let greenTokens = 0;
+                let amberTokens = 0;
+                let redTokens = 0;
+                sorted.forEach(p => {
+                  const c = commitments[p.id]?.[r] || 0;
+                  if (c <= 0) return;
+                  const ak = RESOURCE_ABILITY_MAP[r] as keyof typeof p.abilities;
+                  const e = calculateEffectiveness((p.abilities as any)[ak] ?? 0);
+                  totalEffValue += c * (e / 100) * 5;
+                  if (e >= 70) greenTokens += c;
+                  else if (e >= 40) amberTokens += c;
+                  else redTokens += c;
+                });
+
+                // Find best 2 players for smart suggestion
+                const ranked = [...sorted].map(p => {
+                  const ak = RESOURCE_ABILITY_MAP[r] as keyof typeof p.abilities;
+                  return { name: p.name, eff: calculateEffectiveness((p.abilities as any)[ak] ?? 0) };
+                }).sort((a, b) => b.eff - a.eff);
+                const topTwo = ranked.slice(0, 2);
+
                 return (
-                  <div key={r} style={{ marginBottom: 6 }}>
+                  <div key={r} style={{ marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                       <div style={{ width: 8, height: 8, borderRadius: '50%', background: RESOURCE_COLORS[r] }} />
                       <span style={{ fontFamily: T.fontBody, fontSize: 11, color: T.onSurface, textTransform: 'capitalize' }}>{r}</span>
                       <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: T.onSurfaceVariant }}>({needed[r]} needed)</span>
                     </div>
-                    {sorted.filter(p => (p.resources[r] ?? 0) > 0).map(p => {
+
+                    {/* ALL 5 players — no filtering */}
+                    {sorted.map(p => {
                       const abilityKey = RESOURCE_ABILITY_MAP[r] as keyof typeof p.abilities;
                       const eff = calculateEffectiveness((p.abilities as any)[abilityKey] ?? 0);
                       const committed = commitments[p.id]?.[r] || 0;
-                      const totalForPlayer = alreadyCommittedByPlayer(p.id);
-                      const maxAvail = (p.resources[r] ?? 0);
+                      const maxAvail = p.resources[r] ?? 0;
                       const isBallHolder = p.id === ballHolder?.id;
+                      const effValue = committed * (eff / 100) * 5;
+                      const ec = effColor(eff);
                       return (
-                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16, marginBottom: 2 }}>
-                          <div style={{
-                            width: 20, height: 20, borderRadius: '50%', background: ROLE_COLORS[p.roleId],
-                            fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
-                          }}>{p.name[0]}</div>
-                          <span style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant, width: 40 }}>{eff}%</span>
-                          <button disabled={!isBallHolder || committed <= 0} onClick={() => {
-                            if (!isMyTurn(ballHolder?.id)) return;
-                            setCommitments(prev => ({
-                              ...prev, [p.id]: { ...(prev[p.id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }), [r]: Math.max(0, committed - 1) }
-                            }));
-                          }} style={{
-                            width: 22, height: 22, background: T.surface, border: `1px solid ${T.outlineVariant}`,
-                            borderRadius: 4, color: T.onSurface, cursor: isBallHolder ? 'pointer' : 'default',
-                            fontSize: 14, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          }}>&minus;</button>
-                          <span style={{ fontFamily: T.fontNumber, fontSize: 12, color: T.onSurface, width: 20, textAlign: 'center' }}>{committed}</span>
-                          <button disabled={!isBallHolder || committed >= maxAvail} onClick={() => {
-                            if (!isMyTurn(ballHolder?.id)) return;
-                            const nash = nashCheckAction({ type: 'commit_resource', payload: { resource: r, amount: committed + 1 } }, p, sorted, { tiles: visionTiles, commitments });
-                            setNashHistory(prev => [...prev, nash.nashScore]);
-                            if (!nash.passed) { triggerBallDrop(nash.reason); return; }
-                            setCommitments(prev => ({
-                              ...prev, [p.id]: { ...(prev[p.id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }), [r]: Math.min(maxAvail, committed + 1) }
-                            }));
-                          }} style={{
-                            width: 22, height: 22, background: T.surface, border: `1px solid ${T.outlineVariant}`,
-                            borderRadius: 4, color: T.onSurface, cursor: isBallHolder ? 'pointer' : 'default',
-                            fontSize: 14, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          }}>+</button>
+                        <div key={p.id} style={{ marginLeft: 16, marginBottom: 3 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <div style={{
+                              width: 20, height: 20, borderRadius: '50%', background: ROLE_COLORS[p.roleId],
+                              fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0,
+                            }}>{p.name[0]}</div>
+                            <span style={{ fontFamily: T.fontBody, fontSize: 10, color: ec, width: 32, fontWeight: 600 }}>{eff}%</span>
+                            <button disabled={!isBallHolder || committed <= 0} onClick={() => {
+                              if (!isMyTurn(ballHolder?.id)) return;
+                              console.log(`RESOURCE_COMMIT: ${p.name} decreases ${r} to ${committed - 1}`);
+                              setCommitments(prev => ({
+                                ...prev, [p.id]: { ...(prev[p.id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }), [r]: Math.max(0, committed - 1) }
+                              }));
+                            }} style={{
+                              width: 20, height: 20, background: T.surface, border: `1px solid ${T.outlineVariant}`,
+                              borderRadius: 3, color: T.onSurface, cursor: isBallHolder ? 'pointer' : 'default',
+                              fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              opacity: (!isBallHolder || committed <= 0) ? 0.3 : 1,
+                            }}>{'\u2212'}</button>
+                            <span style={{ fontFamily: T.fontNumber, fontSize: 12, color: T.onSurface, width: 16, textAlign: 'center' }}>{committed}</span>
+                            <button disabled={!isBallHolder || committed >= maxAvail} onClick={() => {
+                              if (!isMyTurn(ballHolder?.id)) return;
+                              // Nash check: hoarding detection (only fail if player withholds what group needs most from them)
+                              const nash = nashCheckAction({ type: 'commit_resource', payload: { resource: r, amount: committed + 1 } }, p, sorted, { tiles: visionTiles, commitments });
+                              setNashHistory(prev => [...prev, nash.nashScore]);
+                              if (!nash.passed) { triggerBallDrop(nash.reason); return; }
+                              console.log(`RESOURCE_COMMIT: ${p.name} commits ${committed + 1} ${r} at ${eff}% = ${((committed + 1) * (eff / 100) * 5).toFixed(1)} pts`);
+                              setCommitments(prev => ({
+                                ...prev, [p.id]: { ...(prev[p.id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }), [r]: Math.min(maxAvail, committed + 1) }
+                              }));
+                            }} style={{
+                              width: 20, height: 20, background: T.surface, border: `1px solid ${T.outlineVariant}`,
+                              borderRadius: 3, color: T.onSurface, cursor: isBallHolder ? 'pointer' : 'default',
+                              fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              opacity: (!isBallHolder || committed >= maxAvail) ? 0.3 : 1,
+                            }}>+</button>
+                            <span style={{ fontFamily: T.fontNumber, fontSize: 9, color: T.onSurfaceVariant, width: 20, textAlign: 'center' }}>/{maxAvail}</span>
+                            {/* Effective value */}
+                            {committed > 0 && (
+                              <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: ec, fontWeight: 600, marginLeft: 4 }}>
+                                = {effValue.toFixed(1)} pts
+                              </span>
+                            )}
+                          </div>
+                          {/* Teaching feedback for low effectiveness commitment */}
+                          {committed > 0 && eff < 30 && (
+                            <div style={{ fontFamily: T.fontBody, fontSize: 8, color: T.secondary, marginLeft: 25, fontStyle: 'italic', marginTop: 1 }}>
+                              Low efficiency — consider if another player can contribute this more effectively
+                            </div>
+                          )}
                         </div>
                       );
                     })}
-                    {/* Progress */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 16, marginTop: 3 }}>
-                      <div style={{ flex: 1, height: 6, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${Math.min(100, (rTotal / Math.max(needed[r], 1)) * 100)}%`,
-                          height: '100%', background: met ? '#6c6' : '#e55', borderRadius: 3, transition: 'width 0.3s',
-                        }} />
+
+                    {/* Smart suggestion */}
+                    <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant, opacity: 0.6, fontStyle: 'italic', marginLeft: 16, marginTop: 2 }}>
+                      Tip: {topTwo.map(t => `${t.name} (${t.eff}%)`).join(' and ')} most effective here
+                    </div>
+
+                    {/* Segmented progress bar */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 16, marginTop: 4 }}>
+                      <div style={{ flex: 1, height: 7, background: T.surface, borderRadius: 3, overflow: 'hidden', display: 'flex' }}>
+                        {/* Green segment (high eff) */}
+                        {greenTokens > 0 && (
+                          <div style={{
+                            width: `${(greenTokens / Math.max(needed[r], 1)) * 100}%`,
+                            height: '100%', background: T.primary, transition: 'width 0.3s',
+                          }} />
+                        )}
+                        {/* Amber segment (medium eff) */}
+                        {amberTokens > 0 && (
+                          <div style={{
+                            width: `${(amberTokens / Math.max(needed[r], 1)) * 100}%`,
+                            height: '100%', background: T.tertiary, transition: 'width 0.3s',
+                          }} />
+                        )}
+                        {/* Red segment (low eff) */}
+                        {redTokens > 0 && (
+                          <div style={{
+                            width: `${(redTokens / Math.max(needed[r], 1)) * 100}%`,
+                            height: '100%', background: T.secondary, transition: 'width 0.3s',
+                          }} />
+                        )}
                       </div>
-                      <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: met ? '#6c6' : '#e55' }}>
+                      <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: met ? T.primary : '#e55', minWidth: 30 }}>
                         {rTotal}/{needed[r]}
                       </span>
+                      {rTotal > 0 && (
+                        <span style={{ fontFamily: T.fontNumber, fontSize: 9, color: effColor(totalEffValue / Math.max(rTotal, 1) * 20) }}>
+                          {totalEffValue.toFixed(1)} pts
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
