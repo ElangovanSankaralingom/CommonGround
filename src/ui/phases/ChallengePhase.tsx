@@ -20,7 +20,7 @@ interface ChallengePhaseProps {
   players: Player[];
   onPhaseComplete: (results: InvestigationResult) => void;
 }
-type Stage = 'intro' | 'card' | 'scene' | 'summary' | 'continue';
+type Stage = 'card' | 'scene' | 'summary' | 'continue';
 
 // ─── Constants ──────────────────────────────────────────────────
 const TURN_SEC = 15;
@@ -225,7 +225,8 @@ function DiffDots({ n, max = 5 }: { n: number; max?: number }) {
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════
 export function ChallengePhase({ session, challenge, players, onPhaseComplete }: ChallengePhaseProps) {
-  const [stage, setStage] = useState<Stage>('intro');
+  console.log('CHALLENGE_PHASE: Mounted → direct to card (no intro)');
+  const [stage, setStage] = useState<Stage>('card');
   const [timer, setTimer] = useState(TURN_SEC);
   const [score, setScore] = useState(0);
   const [modal, setModal] = useState<{ obj: ZoneObject; isR: boolean; piece: string; color: string } | null>(null);
@@ -250,11 +251,6 @@ export function ChallengePhase({ session, challenge, players, onPhaseComplete }:
 
   // Build relevant index for puzzle pieces
   const relevantObjs = useMemo(() => zone.objects.filter(o => o.relevant), [zone]);
-
-  // Intro auto-advance
-  useEffect(() => {
-    if (stage === 'intro') { const t = setTimeout(() => setStage('card'), 1500); return () => clearTimeout(t); }
-  }, [stage]);
 
   // Turn timer
   useEffect(() => {
@@ -343,17 +339,6 @@ export function ChallengePhase({ session, challenge, players, onPhaseComplete }:
       color: '#e8e0d0', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
       <AnimatePresence mode="wait">
-        {/* ═══ INTRO ═══ */}
-        {stage === 'intro' && (
-          <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#12160e', zIndex: 60 }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 12, color: '#808878', letterSpacing: 4 }}>PHASE 2</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: '#d4a843', fontFamily: 'Georgia,serif', marginTop: 4 }}>Investigate</div>
-            </div>
-          </motion.div>
-        )}
-
         {/* ═══ CARD ═══ */}
         {stage === 'card' && (
           <motion.div key="card" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -376,7 +361,7 @@ export function ChallengePhase({ session, challenge, players, onPhaseComplete }:
                   Source: {realistic.realWorldSource}
                 </p>
               )}
-              <button onClick={() => { sounds.playButtonClick(); setStage('scene'); }}
+              <button onClick={() => { console.log('ENTER_ZONE → skip to HOG (InvestigationPhase)'); sounds.playButtonClick(); setStage('continue'); }}
                 style={{ background: 'linear-gradient(135deg,#2ecc71,#27ae60)', color: '#0a2818', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'Georgia,serif' }}>
                 Enter Zone {'\u2192'}
               </button>

@@ -20,9 +20,11 @@ import { CHALLENGE_CATEGORY_COLORS, WELFARE_WEIGHTS, OBJECTIVE_WEIGHTS, BUCHI_OB
 import { EventRollPhase } from '../phases/EventRollPhase';
 import { ChallengePhase } from '../phases/ChallengePhase';
 import BallPassingPhase from '../phases/DeliberationPhase';
+import VisionBoardPhase from '../phases/VisionBoardPhase';
 import SeriesBuilderPhase from '../phases/RelayRacePhase';
 import ScoringPhase from '../phases/ScoringPhase';
 import RoundTransition from '../phases/RoundTransition';
+import InvestigationPhase from '../phases/InvestigationPhase';
 import { PhaseTransitionCard } from '../effects/PhaseTransitionCard';
 import { DeckDisplay } from '../effects/ResourceAnimation';
 import type { NashEngineOutput } from '../../core/engine/nashEngine';
@@ -758,7 +760,7 @@ export default function GameScreen() {
 
   // ── Gamified Flow State ────────────────────────────────────────
   const [gamifiedPhase, setGamifiedPhase] = useState<
-    'event_roll' | 'challenge' | 'deliberation' | 'relay_race' | 'scoring' | 'round_transition' | 'phase_transition' | null
+    'event_roll' | 'challenge' | 'investigation' | 'deliberation' | 'relay_race' | 'scoring' | 'round_transition' | 'phase_transition' | null
   >(null);
   const [phaseTransition, setPhaseTransition] = useState<{
     from: number; to: number; fromName: string; toName: string;
@@ -771,7 +773,7 @@ export default function GameScreen() {
   // Log the complete transition map on mount for debugging
   React.useEffect(() => {
     console.log('%c=== COMMONGROUND TRANSITION MAP ===', 'color: #F59E0B; font-weight: bold; font-size: 14px');
-    console.log('%cPayment Day → event_roll (auto) → challenge → deliberation → relay_race → scoring → round_transition → [next round | debrief]', 'color: #9CA3AF');
+    console.log('%cPayment Day → event_roll (auto) → challenge → investigation → deliberation → relay_race → scoring → round_transition → [next round | debrief]', 'color: #9CA3AF');
     console.log('%cEach phase overlay: absolute inset-0 z-40, exclusive rendering via gamifiedPhase state', 'color: #9CA3AF');
     console.log('%cEngine phases: payment_day → event_roll → individual_action → deliberation → action_resolution → round_end_accounting → level_check → round_end', 'color: #6B7280');
   }, []);
@@ -894,17 +896,10 @@ export default function GameScreen() {
           session={session}
           challenge={activeChallenge}
           players={players}
-          onPhaseComplete={(results: any) => {
-            console.log('TRANSITION: Phase 2 complete → Phase 3');
-            setRoundCPAwards(prev => {
-              const merged = { ...prev };
-              for (const [pid, cp] of Object.entries(results.cpAwarded || {})) {
-                if (!merged[pid]) merged[pid] = [];
-                merged[pid].push({ amount: cp as number, reason: 'Investigation clues' });
-              }
-              return merged;
-            });
-            showPhaseTransition(2, 3, 'Investigate', 'Build Your Vision', 'deliberation');
+          onPhaseComplete={() => {
+            console.log('ENTER_ZONE → HOG_ACTIVE (ChallengePhase card → InvestigationPhase HOG)');
+            // ChallengePhase now only shows the challenge card; actual HOG is in InvestigationPhase
+            showPhaseTransition(2, 4, 'Challenge Card', 'Investigation', 'investigation');
           }}
         />
       ) : (
@@ -919,19 +914,49 @@ export default function GameScreen() {
         </div>
       );
     }
+    if (gamifiedPhase === 'investigation') {
+      return activeChallenge ? (
+        <InvestigationPhase
+          session={session}
+          challenge={activeChallenge}
+          players={players}
+          onPhaseComplete={(results: any) => {
+            console.log('HOG_SUMMARY → PHASE3_SOLUTIONS (Investigation complete → Build Your Vision)');
+            setRoundCPAwards(prev => {
+              const merged = { ...prev };
+              for (const [pid, cp] of Object.entries(results.cpAwarded || {})) {
+                if (!merged[pid]) merged[pid] = [];
+                merged[pid].push({ amount: cp as number, reason: 'Investigation findings' });
+              }
+              return merged;
+            });
+            showPhaseTransition(4, 3, 'Investigation', 'Build Your Vision', 'deliberation');
+          }}
+        />
+      ) : (
+        <div className="w-full h-screen bg-stone-900 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-gray-300 text-lg mb-4">No zone to investigate.</p>
+            <button className="px-6 py-3 bg-amber-500 text-black font-bold rounded-xl"
+              onClick={() => showPhaseTransition(4, 3, 'Deep Investigation', 'Build Your Vision', 'deliberation')}>
+              Continue {'\u2192'}
+            </button>
+          </div>
+        </div>
+      );
+    }
     if (gamifiedPhase === 'deliberation') {
       return (
-        <BallPassingPhase
+        <VisionBoardPhase
           session={session}
           players={players}
           challenge={activeChallenge}
           onPhaseComplete={(result: any) => {
-            console.log('TRANSITION: Phase 3 complete → Phase 4');
+            console.log('TRANSITION: Phase 3 (Vision Board) complete → Phase 4');
             setVisionBoard({ tiles: result.tiles, threshold: result.threshold, objectivesCovered: result.objectivesCovered });
             advancePhase();
             showPhaseTransition(3, 4, 'Build Your Vision', 'Build the Path', 'relay_race');
           }}
-          deliberationTimeRemaining={deliberationTimeRemaining}
         />
       );
     }
@@ -1004,6 +1029,29 @@ export default function GameScreen() {
 
   const activeGamifiedContent = renderGamifiedPhase();
 
+  // ── Back Navigation ────────────────────────────────────────────
+  const PHASE_BACK_MAP: Record<string, typeof gamifiedPhase> = {
+    challenge: 'event_roll',
+    investigation: 'challenge',
+    deliberation: 'investigation',
+    relay_race: 'deliberation',
+    scoring: 'relay_race',
+    round_transition: 'scoring',
+  };
+
+  const handleGoBack = useCallback(() => {
+    if (!gamifiedPhase || gamifiedPhase === 'phase_transition') return;
+    const prev = PHASE_BACK_MAP[gamifiedPhase];
+    if (!prev) return;
+    console.log(`BACK: ${gamifiedPhase} → ${prev}`);
+    setGamifiedPhase(prev);
+  }, [gamifiedPhase]);
+
+  const canGoBack = gamifiedPhase != null
+    && gamifiedPhase !== 'event_roll'
+    && gamifiedPhase !== 'phase_transition'
+    && PHASE_BACK_MAP[gamifiedPhase] != null;
+
   return (
     <GameEnvironment currentPhase={phaseNumber} showCelebration={false}>
     <div className="w-full h-screen bg-stone-900 flex flex-col overflow-hidden">
@@ -1017,8 +1065,46 @@ export default function GameScreen() {
 
       {/* ══ EXCLUSIVE RENDERING: either gamified phase OR board ══ */}
       {activeGamifiedContent ? (
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" style={{ position: 'relative' }}>
           {activeGamifiedContent}
+          {/* ── Back Button (floating over all phases) ── */}
+          {canGoBack && (
+            <button
+              onClick={handleGoBack}
+              style={{
+                position: 'absolute',
+                top: 12,
+                left: 12,
+                zIndex: 55,
+                background: 'rgba(30, 27, 20, 0.8)',
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(69, 72, 60, 0.15)',
+                borderRadius: '0.25rem',
+                padding: '6px 14px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                transition: 'opacity 0.2s, background 0.2s',
+                color: '#c6c8b8',
+                fontFamily: 'Manrope, sans-serif',
+                fontSize: 12,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(45, 40, 30, 0.9)';
+                e.currentTarget.style.opacity = '1';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(30, 27, 20, 0.8)';
+                e.currentTarget.style.opacity = '0.85';
+              }}
+            >
+              <span style={{ fontSize: 18, lineHeight: 1, fontFamily: "'Material Symbols Outlined', sans-serif" }}>
+                {'\u2190'}
+              </span>
+              <span>Back</span>
+            </button>
+          )}
         </div>
       ) : (
       <React.Fragment>

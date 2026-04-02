@@ -126,6 +126,161 @@ export function calculatePoints(tokens: number, effectivenessPercent: number): n
   return Math.round(tokens * (effectivenessPercent / 100) * 5 * 10) / 10;
 }
 
+// ─── Vision Board Feature Tiles (Phase 3 — rich tile data) ──────
+
+export type ObjectiveId = 'safety' | 'greenery' | 'access' | 'culture' | 'revenue' | 'community';
+
+export interface VisionFeatureTile {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  resourceCost: Record<ResourceType, number>;
+  objectivesServed: Record<ObjectiveId, number>;
+  compatibleZones: string[];
+  hybridsWith: string[];
+}
+
+export interface HybridTile {
+  id: string;
+  name: string;
+  mergedFrom: [string, string];
+  icon: string;
+  description: string;
+  resourceCost: Record<ResourceType, number>;
+  savingsVsOriginal: Record<ResourceType, number>;
+  objectivesServed: Record<ObjectiveId, number>;
+}
+
+export const FEATURE_TILES: VisionFeatureTile[] = [
+  { id: 'drainage_system', name: 'Drainage System Repair', icon: 'plumbing',
+    description: 'Clear and restore the blocked 450mm RCC drainage network.',
+    resourceCost: { budget: 2, knowledge: 3, volunteer: 0, material: 2, influence: 0 },
+    objectivesServed: { safety: 0.6, greenery: 0.8, access: 0.2, culture: 0, revenue: 0.3, community: 0.4 },
+    compatibleZones: ['z3', 'z4', 'z5'], hybridsWith: ['water_filtration', 'irrigation_link'] },
+  { id: 'water_filtration', name: 'Water Filtration Unit', icon: 'water_drop',
+    description: 'Install biological filtration to restore water quality to bathing standard.',
+    resourceCost: { budget: 3, knowledge: 2, volunteer: 0, material: 2, influence: 1 },
+    objectivesServed: { safety: 0.7, greenery: 0.9, access: 0.3, culture: 0, revenue: 0.4, community: 0.5 },
+    compatibleZones: ['z3', 'z2'], hybridsWith: ['drainage_system'] },
+  { id: 'community_seating', name: 'Community Seating Area', icon: 'chair',
+    description: 'Shaded benches and gathering space for residents and elderly visitors.',
+    resourceCost: { budget: 1, knowledge: 0, volunteer: 2, material: 2, influence: 0 },
+    objectivesServed: { safety: 0.2, greenery: 0.1, access: 0.7, culture: 0.4, revenue: 0.1, community: 0.9 },
+    compatibleZones: ['z1', 'z2', 'z3', 'z5', 'z6'], hybridsWith: ['cafe_space'] },
+  { id: 'cafe_space', name: 'Community Cafe Kiosk', icon: 'local_cafe',
+    description: 'Small vendor space generating revenue while serving visitors.',
+    resourceCost: { budget: 2, knowledge: 1, volunteer: 1, material: 2, influence: 2 },
+    objectivesServed: { safety: 0.1, greenery: 0, access: 0.3, culture: 0.5, revenue: 0.9, community: 0.6 },
+    compatibleZones: ['z1', 'z2', 'z3', 'z13'], hybridsWith: ['community_seating'] },
+  { id: 'native_plants', name: 'Native Plant Restoration', icon: 'park',
+    description: 'Replant indigenous species to restore biodiversity and reduce maintenance.',
+    resourceCost: { budget: 1, knowledge: 2, volunteer: 3, material: 1, influence: 0 },
+    objectivesServed: { safety: 0.1, greenery: 1.0, access: 0.2, culture: 0.3, revenue: 0.1, community: 0.4 },
+    compatibleZones: ['z3', 'z4', 'z5', 'z6'], hybridsWith: ['ecological_buffer'] },
+  { id: 'playground_equipment', name: 'Playground Equipment Overhaul', icon: 'sports_soccer',
+    description: 'Replace rusted equipment with safe modern play structures.',
+    resourceCost: { budget: 3, knowledge: 1, volunteer: 1, material: 3, influence: 1 },
+    objectivesServed: { safety: 0.9, greenery: 0.1, access: 0.5, culture: 0.3, revenue: 0.2, community: 0.8 },
+    compatibleZones: ['z6'], hybridsWith: ['safety_surfacing'] },
+  { id: 'safety_surfacing', name: 'Impact-Absorbing Surface', icon: 'layers',
+    description: 'Rubber safety flooring in fall zones around play equipment.',
+    resourceCost: { budget: 2, knowledge: 1, volunteer: 0, material: 3, influence: 0 },
+    objectivesServed: { safety: 1.0, greenery: 0, access: 0.3, culture: 0, revenue: 0, community: 0.5 },
+    compatibleZones: ['z6'], hybridsWith: ['playground_equipment'] },
+  { id: 'walking_path', name: 'Walking Path Restoration', icon: 'route',
+    description: 'Repair cracked slabs, install root barriers, restore full width.',
+    resourceCost: { budget: 2, knowledge: 1, volunteer: 2, material: 2, influence: 0 },
+    objectivesServed: { safety: 0.6, greenery: 0.3, access: 0.9, culture: 0.2, revenue: 0.2, community: 0.7 },
+    compatibleZones: ['z5', 'z1'], hybridsWith: ['path_lighting'] },
+  { id: 'path_lighting', name: 'Solar Path Lighting', icon: 'light_mode',
+    description: 'Replace 8 dead light poles with solar-powered units for evening safety.',
+    resourceCost: { budget: 2, knowledge: 1, volunteer: 0, material: 2, influence: 1 },
+    objectivesServed: { safety: 0.9, greenery: 0.1, access: 0.6, culture: 0.1, revenue: 0.3, community: 0.7 },
+    compatibleZones: ['z5', 'z1', 'z3'], hybridsWith: ['walking_path'] },
+  { id: 'signage_system', name: 'Wayfinding & Information Signage', icon: 'signpost',
+    description: 'Distance markers, directional signs, and interpretive boards.',
+    resourceCost: { budget: 1, knowledge: 1, volunteer: 1, material: 1, influence: 0 },
+    objectivesServed: { safety: 0.3, greenery: 0.1, access: 0.6, culture: 0.5, revenue: 0.2, community: 0.4 },
+    compatibleZones: ['z1', 'z2', 'z3', 'z5', 'z6', 'z13'], hybridsWith: [] },
+  { id: 'waste_management', name: 'Waste Collection System', icon: 'delete',
+    description: 'Segregated bins with scheduled collection and composting station.',
+    resourceCost: { budget: 1, knowledge: 0, volunteer: 2, material: 1, influence: 1 },
+    objectivesServed: { safety: 0.4, greenery: 0.5, access: 0.3, culture: 0.2, revenue: 0.1, community: 0.6 },
+    compatibleZones: ['z1', 'z2', 'z3', 'z4', 'z5', 'z6'], hybridsWith: [] },
+  { id: 'irrigation_link', name: 'Irrigation Network Extension', icon: 'water',
+    description: 'Extend water supply from tanker point or restored Z3 junction to garden beds.',
+    resourceCost: { budget: 1, knowledge: 2, volunteer: 1, material: 2, influence: 0 },
+    objectivesServed: { safety: 0.1, greenery: 0.9, access: 0.1, culture: 0.1, revenue: 0.2, community: 0.5 },
+    compatibleZones: ['z4', 'z3'], hybridsWith: ['drainage_system'] },
+  { id: 'ecological_buffer', name: 'Ecological Buffer Zone', icon: 'forest',
+    description: 'Natural barrier of native vegetation to protect pond from runoff.',
+    resourceCost: { budget: 1, knowledge: 2, volunteer: 2, material: 1, influence: 1 },
+    objectivesServed: { safety: 0.2, greenery: 1.0, access: 0.1, culture: 0.3, revenue: 0.1, community: 0.3 },
+    compatibleZones: ['z3', 'z4'], hybridsWith: ['native_plants'] },
+  { id: 'vendor_market', name: 'Organized Vendor Market', icon: 'store',
+    description: 'Designated vendor area with infrastructure freeing up main pathways.',
+    resourceCost: { budget: 2, knowledge: 1, volunteer: 1, material: 2, influence: 3 },
+    objectivesServed: { safety: 0.3, greenery: 0, access: 0.8, culture: 0.5, revenue: 0.8, community: 0.7 },
+    compatibleZones: ['z1', 'z13'], hybridsWith: ['cafe_space'] },
+  { id: 'community_governance', name: 'Community Management Committee', icon: 'groups',
+    description: 'Resident-led maintenance and oversight body with Corporation coordination.',
+    resourceCost: { budget: 0, knowledge: 1, volunteer: 3, material: 0, influence: 2 },
+    objectivesServed: { safety: 0.3, greenery: 0.3, access: 0.4, culture: 0.6, revenue: 0.3, community: 1.0 },
+    compatibleZones: ['z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z13'], hybridsWith: [] },
+  { id: 'fountain_repair', name: 'Fountain Motor Replacement', icon: 'water_drop',
+    description: 'Replace burnt pump motor and resolve SPV-Corporation warranty deadlock.',
+    resourceCost: { budget: 2, knowledge: 1, volunteer: 0, material: 1, influence: 3 },
+    objectivesServed: { safety: 0.4, greenery: 0.5, access: 0.5, culture: 0.7, revenue: 0.4, community: 0.8 },
+    compatibleZones: ['z2'], hybridsWith: [] },
+];
+
+export const HYBRID_TILES: HybridTile[] = [
+  { id: 'community_cafe_hybrid', name: 'Community Cafe with Public Seating', mergedFrom: ['community_seating', 'cafe_space'], icon: 'deck',
+    description: 'Combined social space with subsidized food service and shaded gathering area.',
+    resourceCost: { budget: 2, knowledge: 1, volunteer: 2, material: 3, influence: 1 },
+    savingsVsOriginal: { budget: 1, knowledge: 0, volunteer: 1, material: 1, influence: 1 },
+    objectivesServed: { safety: 0.2, greenery: 0.1, access: 0.6, culture: 0.5, revenue: 0.7, community: 0.9 } },
+  { id: 'integrated_drainage_hybrid', name: 'Integrated Drainage & Filtration', mergedFrom: ['drainage_system', 'water_filtration'], icon: 'water_drop',
+    description: 'Combined drainage clearance with inline biological filtration system.',
+    resourceCost: { budget: 4, knowledge: 4, volunteer: 0, material: 3, influence: 1 },
+    savingsVsOriginal: { budget: 1, knowledge: 1, volunteer: 0, material: 1, influence: 0 },
+    objectivesServed: { safety: 0.8, greenery: 0.9, access: 0.3, culture: 0, revenue: 0.4, community: 0.5 } },
+  { id: 'safe_playground_hybrid', name: 'Complete Playground Safety Package', mergedFrom: ['playground_equipment', 'safety_surfacing'], icon: 'child_care',
+    description: 'New equipment with integrated safety surfacing — single contractor, lower cost.',
+    resourceCost: { budget: 4, knowledge: 1, volunteer: 1, material: 5, influence: 1 },
+    savingsVsOriginal: { budget: 1, knowledge: 1, volunteer: 0, material: 1, influence: 0 },
+    objectivesServed: { safety: 1.0, greenery: 0.1, access: 0.5, culture: 0.3, revenue: 0.2, community: 0.8 } },
+  { id: 'lit_walking_path_hybrid', name: 'Illuminated Walking Track', mergedFrom: ['walking_path', 'path_lighting'], icon: 'directions_walk',
+    description: 'Repaired path with integrated solar lighting — shared trenching saves cost.',
+    resourceCost: { budget: 3, knowledge: 1, volunteer: 2, material: 3, influence: 0 },
+    savingsVsOriginal: { budget: 1, knowledge: 1, volunteer: 0, material: 1, influence: 1 },
+    objectivesServed: { safety: 0.8, greenery: 0.3, access: 0.9, culture: 0.2, revenue: 0.3, community: 0.8 } },
+  { id: 'green_restoration_hybrid', name: 'Ecological Restoration Package', mergedFrom: ['native_plants', 'ecological_buffer'], icon: 'nature',
+    description: 'Combined native planting with buffer zone — single nursery order, volunteer planting day.',
+    resourceCost: { budget: 1, knowledge: 3, volunteer: 4, material: 1, influence: 1 },
+    savingsVsOriginal: { budget: 1, knowledge: 1, volunteer: 1, material: 1, influence: 0 },
+    objectivesServed: { safety: 0.2, greenery: 1.0, access: 0.2, culture: 0.3, revenue: 0.1, community: 0.4 } },
+];
+
+/** Convert a VisionFeatureTile to the legacy FeatureTile format for downstream compatibility */
+export function toFeatureTile(vt: VisionFeatureTile): FeatureTile {
+  const objectives = (Object.entries(vt.objectivesServed) as [string, number][])
+    .filter(([, w]) => w >= 0.3)
+    .map(([k]) => k);
+  return {
+    id: vt.id, name: vt.name, icon: vt.icon, description: vt.description,
+    cost: Object.fromEntries(Object.entries(vt.resourceCost).filter(([, v]) => v > 0)) as Partial<Record<ResourceType, number>>,
+    objectivesServed: objectives,
+    taskCategory: 'build',
+  };
+}
+
+/** Get VisionFeatureTiles compatible with a given investigation zone */
+export function getVisionTilesForZone(zoneId: string): VisionFeatureTile[] {
+  return FEATURE_TILES.filter(t => t.compatibleZones.includes(zoneId));
+}
+
 // Starting tokens per role (12 total each)
 export const STARTING_TOKENS: Record<RoleId, Record<ResourceType, number>> = {
   administrator: { budget: 5, knowledge: 1, volunteer: 2, material: 2, influence: 2 },
