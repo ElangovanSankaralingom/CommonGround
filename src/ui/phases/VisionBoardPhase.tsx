@@ -45,6 +45,12 @@ const OBJECTIVE_LABELS: Record<ObjectiveId, string> = {
   culture: 'Culture', revenue: 'Revenue', community: 'Community',
 };
 
+const NOTE_COLORS: Record<string, string> = {
+  administrator: '#d4c48a', investor: '#8ab8d4', designer: '#a4c88a', citizen: '#d4a88a', advocate: '#b8a4d4',
+};
+const COLLAB_KEYWORDS = ['everyone', 'all players', 'group', 'together', 'community', 'shared', 'cascade', 'multiple', 'both', 'compromise', 'negotiate', 'other players', 'balance'];
+const SELFISH_KEYWORDS = ['i need', 'my objective', 'my role', 'only i', 'for me', 'my score'];
+
 const SUCCESS_CRITERIA: Record<string, string> = {
   drainage_system: 'Water clarity: dissolved oxygen above 4.0 mg/L within 6 months',
   community_seating: 'Visitor count: evening footfall above 100/day within 3 months',
@@ -83,7 +89,7 @@ interface VisionBoardPhaseProps {
 
 /* ── Component ─────────────────────────────────────────────── */
 export default function VisionBoardPhase({ session, players, challenge, onPhaseComplete }: VisionBoardPhaseProps) {
-  type Screen = 'individual_picks' | 'group_negotiation' | 'resource_allocation' | 'vote_finalize';
+  type Screen = 'individual_picks' | 'group_negotiation' | 'vote_finalize';
   type BallState = 'held' | 'passing' | 'received' | 'dropped' | 'shooting';
 
   const sorted = useMemo(() => [...players].sort((a, b) => a.utilityScore - b.utilityScore), [players]);
@@ -102,7 +108,28 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
   const [goalResult, setGoalResult] = useState<GoalShotResult | null>(null);
   const [hybridMergeCount, setHybridMergeCount] = useState(0);
 
+  // Fix 2+3: Drag-to-board, writing box, negotiation log
+  interface BoardNote {
+    id: string; tileId: string; tile: VisionFeatureTile;
+    position: { x: number; y: number }; rotation: number;
+    placedById: string; playerName: string; playerRole: string;
+    reasoning: string; stars: number;
+  }
+  type NegLogEntry = { type: 'place' | 'remove' | 'merge' | 'rejected'; playerName: string; roleId: string; feature: string; reasoning?: string; nashReason?: string; time: number };
+  const [boardNotes, setBoardNotes] = useState<BoardNote[]>([]);
+  const [pendingDrop, setPendingDrop] = useState<{ tile: VisionFeatureTile; position: { x: number; y: number } } | null>(null);
+  const [showWritingBox, setShowWritingBox] = useState(false);
+  const [reasoningText, setReasoningText] = useState('');
+  const [isDragOverBoard, setIsDragOverBoard] = useState(false);
+  const [negotiationLog, setNegotiationLog] = useState<NegLogEntry[]>([]);
+  const boardRef = React.useRef<HTMLDivElement>(null);
+
   const ballHolder = sorted[ballHolderIdx];
+
+  // Sync visionTiles from boardNotes
+  useEffect(() => {
+    setVisionTiles(boardNotes.map(n => n.tile));
+  }, [boardNotes]);
 
   /* ── Derived ──────────────────────────────────────────────── */
   const zoneId = useMemo(() => {
@@ -197,12 +224,46 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
     });
   }, [visionTiles, commitments, starVotes, sorted, difficultyDots, onPhaseComplete]);
 
-  /* ── Init commitments ─────────────────────────────────────── */
+  /* ── Auto-calculate commitments based on player effectiveness ── */
   useEffect(() => {
+    if (visionTiles.length === 0) {
+      const empty: Record<string, Record<ResourceType, number>> = {};
+      sorted.forEach(p => { empty[p.id] = { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }; });
+      setCommitments(empty);
+      return;
+    }
+    // Distribute each resource type proportionally by player effectiveness
     const c: Record<string, Record<ResourceType, number>> = {};
     sorted.forEach(p => { c[p.id] = { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }; });
+    RESOURCE_TYPES.forEach(r => {
+      const totalNeeded = visionTiles.reduce((s, t) => s + (t.resourceCost[r] || 0), 0);
+      if (totalNeeded === 0) return;
+      // Calculate each player's effectiveness for this resource
+      const playerEffs = sorted.map(p => {
+        const ak = RESOURCE_ABILITY_MAP[r] as keyof typeof p.abilities;
+        return { id: p.id, eff: calculateEffectiveness((p.abilities as any)[ak] ?? 0), avail: p.resources[r] || 0 };
+      });
+      const totalEff = playerEffs.reduce((s, pe) => s + pe.eff, 0) || 1;
+      let remaining = totalNeeded;
+      // Assign proportionally to effectiveness, capped by available
+      playerEffs.sort((a, b) => b.eff - a.eff); // highest eff first
+      playerEffs.forEach(pe => {
+        const share = Math.min(pe.avail, Math.round((pe.eff / totalEff) * totalNeeded), remaining);
+        c[pe.id][r] = share;
+        remaining -= share;
+      });
+      // Distribute any remainder to whoever has capacity
+      if (remaining > 0) {
+        for (const pe of playerEffs) {
+          const extra = Math.min(pe.avail - c[pe.id][r], remaining);
+          if (extra > 0) { c[pe.id][r] += extra; remaining -= extra; }
+          if (remaining <= 0) break;
+        }
+      }
+    });
     setCommitments(c);
-  }, [sorted]);
+    console.log('AUTO_COMMITMENTS: distributed based on effectiveness', c);
+  }, [sorted, visionTiles]);
 
   /* ── Helpers ──────────────────────────────────────────────── */
   const costText = (tile: VisionFeatureTile) =>
@@ -212,7 +273,7 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
 
   const allPicked = sorted.length > 0 && sorted.every(p => (playerPicks[p.id]?.length ?? 0) >= 3);
 
-  const screenIdx = ['individual_picks', 'group_negotiation', 'resource_allocation', 'vote_finalize'].indexOf(screen);
+  const screenIdx = ['individual_picks', 'group_negotiation', 'vote_finalize'].indexOf(screen);
 
   /* ── SCREEN 1: Individual Picks ───────────────────────────── */
   const renderIndividualPicks = () => {
@@ -341,337 +402,367 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
     );
   };
 
-  /* ── SCREEN 2: Group Negotiation ──────────────────────────── */
+  /* ── SCREEN 2: Group Negotiation (drag-to-board sticky notes) ─ */
+
+  const confirmStickyNote = useCallback(() => {
+    if (!pendingDrop || reasoningText.trim().length < 10) return;
+    const tile = pendingDrop.tile;
+    const reasoning = reasoningText.trim();
+
+    // Nash check with reasoning modifier
+    const nash = nashCheckAction({ type: 'place_tile', payload: tile }, ballHolder, sorted, { tiles: visionTiles, commitments });
+    const collabCount = COLLAB_KEYWORDS.filter(k => reasoning.toLowerCase().includes(k)).length;
+    const selfishCount = SELFISH_KEYWORDS.filter(k => reasoning.toLowerCase().includes(k)).length;
+    const modifier = (collabCount >= 2 ? 10 : 0) - (selfishCount >= 2 ? 10 : 0);
+    const adjustedScore = Math.max(0, Math.min(100, nash.nashScore + modifier));
+    const passed = adjustedScore >= 25;
+    console.log(`REASONING_ANALYSIS: collaborative=${collabCount}, selfish=${selfishCount}, modifier=${modifier > 0 ? '+' + modifier : modifier}`);
+
+    setNashHistory(prev => [...prev, adjustedScore]);
+
+    if (passed) {
+      const note: BoardNote = {
+        id: Date.now().toString(), tileId: tile.id, tile,
+        position: pendingDrop.position, rotation: (Math.random() - 0.5) * 6,
+        placedById: ballHolder.id, playerName: ballHolder.name, playerRole: ballHolder.roleId,
+        reasoning, stars: 0,
+      };
+      setBoardNotes(prev => [...prev, note]);
+      setNegotiationLog(prev => [{ type: 'place', playerName: ballHolder.name, roleId: ballHolder.roleId, feature: tile.name, reasoning, time: Date.now() }, ...prev]);
+      console.log('NOTE_PLACED:', tile.name, 'by', ballHolder.name, 'Nash:', adjustedScore);
+    } else {
+      setNegotiationLog(prev => [{ type: 'rejected', playerName: ballHolder.name, roleId: ballHolder.roleId, feature: tile.name, reasoning, nashReason: nash.reason, time: Date.now() }, ...prev]);
+      triggerBallDrop(nash.reason);
+      console.log('NOTE_REJECTED:', tile.name, 'Nash:', adjustedScore, nash.reason);
+    }
+    setShowWritingBox(false);
+    setPendingDrop(null);
+    setReasoningText('');
+  }, [pendingDrop, reasoningText, ballHolder, sorted, visionTiles, commitments, triggerBallDrop]);
+
+  const removeNote = useCallback((noteId: string) => {
+    const note = boardNotes.find(n => n.id === noteId);
+    if (note) {
+      setBoardNotes(prev => prev.filter(n => n.id !== noteId));
+      setNegotiationLog(prev => [{ type: 'remove', playerName: note.playerName, roleId: note.playerRole, feature: note.tile.name, time: Date.now() }, ...prev]);
+    }
+  }, [boardNotes]);
+
+  const mergeNotesHybrid = useCallback((hybrid: HybridTile) => {
+    if (!isMyTurn(ballHolder?.id)) return;
+    const note1 = boardNotes.find(n => n.tileId === hybrid.mergedFrom[0]);
+    const note2 = boardNotes.find(n => n.tileId === hybrid.mergedFrom[1]);
+    if (!note1 || !note2) return;
+    const merged: VisionFeatureTile = {
+      id: hybrid.id, name: hybrid.name, icon: hybrid.icon, description: hybrid.description,
+      resourceCost: hybrid.resourceCost, objectivesServed: hybrid.objectivesServed,
+      compatibleZones: [], hybridsWith: [],
+    };
+    const newNote: BoardNote = {
+      id: Date.now().toString(), tileId: hybrid.id, tile: merged,
+      position: { x: (note1.position.x + note2.position.x) / 2, y: (note1.position.y + note2.position.y) / 2 },
+      rotation: (Math.random() - 0.5) * 4, placedById: ballHolder.id, playerName: ballHolder.name,
+      playerRole: ballHolder.roleId, reasoning: `Merged: ${note1.tile.name} + ${note2.tile.name}`, stars: 0,
+    };
+    setBoardNotes(prev => [...prev.filter(n => n.id !== note1.id && n.id !== note2.id), newNote]);
+    setHybridMergeCount(prev => prev + 1);
+    setNegotiationLog(prev => [{ type: 'merge', playerName: ballHolder.name, roleId: ballHolder.roleId, feature: hybrid.name, time: Date.now() }, ...prev]);
+    sounds.playButtonClick();
+  }, [boardNotes, ballHolder, isMyTurn]);
+
   const renderGroupNegotiation = () => {
+    const onBoardIds = new Set(boardNotes.map(n => n.tileId));
     const overBudget = RESOURCE_TYPES.some(r => boardCost.totalCost[r] > groupBudget.available[r]);
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10, overflowY: 'auto', padding: 8 }}>
-        {/* Pick tally */}
-        <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.primary, marginBottom: 4 }}>Feature Popularity</div>
-        {pickTally.map(entry => {
-          const onBoard = visionTiles.some(vt => vt.id === entry.tile.id);
-          const canMerge = possibleHybrids.some(h => h.mergedFrom.includes(entry.tile.id));
-          return (
-            <div key={entry.tile.id} style={{
-              display: 'flex', alignItems: 'center', gap: 8, background: T.container,
-              borderRadius: 8, padding: 8, boxShadow: T.woodBevel, marginBottom: 4,
-              opacity: onBoard ? 0.5 : 1,
-            }}>
-              <span style={{ fontSize: 16 }}>{emojiFor(entry.tile.icon)}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 12, color: T.onSurface }}>{entry.tile.name}</div>
-                <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant }}>
-                  {RESOURCE_TYPES.filter(r => entry.tile.resourceCost[r] > 0).map(r => (
-                    <span key={r} style={{ color: RESOURCE_COLORS[r], marginRight: 4 }}>{r[0].toUpperCase()}:{entry.tile.resourceCost[r]}</span>
-                  ))}
-                </div>
-              </div>
-              <span style={{
-                background: T.tertiary, color: T.surface, borderRadius: 12, padding: '2px 8px',
-                fontFamily: T.fontNumber, fontSize: 11, fontWeight: 700,
-              }}>{entry.count}/{sorted.length}</span>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {entry.pickedBy.map(pid => {
-                  const p = sorted.find(pp => pp.id === pid);
-                  return p ? (
-                    <div key={pid} style={{
-                      width: 18, height: 18, borderRadius: '50%', background: ROLE_COLORS[p.roleId],
-                      fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
-                    }}>{p.name[0]}</div>
-                  ) : null;
-                })}
-              </div>
-              {!onBoard && (
-                <button onClick={() => {
-                  if (!isMyTurn(ballHolder?.id)) return;
-                  const nash = nashCheckAction({ type: 'place_tile', payload: entry.tile }, ballHolder, sorted, { tiles: visionTiles, commitments });
-                  setNashHistory(prev => [...prev, nash.nashScore]);
-                  if (!nash.passed) { triggerBallDrop(nash.reason); return; }
-                  setVisionTiles(prev => [...prev, entry.tile]);
-                }} style={{
-                  background: T.primary, color: T.surface, border: 'none', borderRadius: 6,
-                  padding: '4px 10px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 11, cursor: 'pointer',
-                }}>Promote &uarr;</button>
-              )}
-              {canMerge && onBoard && (
-                <button onClick={() => {
-                  if (!isMyTurn(ballHolder?.id)) return;
-                  const hybrid = possibleHybrids.find(h => h.mergedFrom.includes(entry.tile.id));
-                  if (!hybrid) return;
-                  setVisionTiles(prev => {
-                    const without = prev.filter(t => !hybrid.mergedFrom.includes(t.id));
-                    const merged: VisionFeatureTile = {
-                      id: hybrid.id, name: hybrid.name, icon: hybrid.icon, description: hybrid.description,
-                      resourceCost: hybrid.resourceCost, objectivesServed: hybrid.objectivesServed,
-                      compatibleZones: [], hybridsWith: [],
-                    };
-                    return [...without, merged];
-                  });
-                  setHybridMergeCount(prev => prev + 1);
-                }} style={{
-                  background: T.secondary, color: T.surface, border: 'none', borderRadius: 6,
-                  padding: '4px 10px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 11, cursor: 'pointer',
-                }}>Merge</button>
-              )}
-            </div>
-          );
-        })}
-
-        {/* Vision Board */}
-        <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.tertiary, marginTop: 8 }}>VISION BOARD</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {visionTiles.map(tile => (
-            <div key={tile.id} style={{
-              background: T.containerHigh, borderRadius: 8, padding: 8, boxShadow: T.woodBevel,
-              display: 'flex', alignItems: 'center', gap: 6, position: 'relative',
-            }}>
-              <span style={{ fontSize: 16 }}>{emojiFor(tile.icon)}</span>
-              <div>
-                <div style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 12, color: T.onSurface }}>{tile.name}</div>
-                <div style={{ fontFamily: T.fontNumber, fontSize: 10, color: T.onSurfaceVariant }}>
-                  {RESOURCE_TYPES.filter(r => tile.resourceCost[r] > 0).map(r => (
-                    <span key={r} style={{ color: RESOURCE_COLORS[r], marginRight: 4 }}>{r[0].toUpperCase()}:{tile.resourceCost[r]}</span>
-                  ))}
-                </div>
-              </div>
-              <button onClick={() => setVisionTiles(prev => prev.filter(t => t.id !== tile.id))} style={{
-                position: 'absolute', top: 2, right: 4, background: 'none', border: 'none',
-                color: '#e55', fontSize: 14, cursor: 'pointer', lineHeight: 1,
-              }}>&times;</button>
-            </div>
-          ))}
-          {visionTiles.length === 0 && (
-            <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.outlineVariant, padding: 10 }}>
-              No features promoted yet. Use Promote buttons above.
-            </div>
-          )}
-        </div>
-
-        {/* Resource meters */}
-        <div style={{ marginTop: 8 }}>
-          {RESOURCE_TYPES.map(r => {
-            const cost = boardCost.totalCost[r];
-            const avail = groupBudget.available[r];
-            const over = cost > avail;
-            const pct = avail > 0 ? Math.min(100, (cost / avail) * 100) : 0;
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', gap: 0 }}>
+        {/* LEFT: Feature Pool */}
+        <div style={{ width: '40%', overflowY: 'auto', padding: 10, borderRight: `1px solid ${T.outlineVariant}` }}>
+          <div style={{ fontFamily: T.fontHeadline, fontSize: 13, color: T.primary, marginBottom: 8 }}>FEATURE POOL</div>
+          {pickTally.map(entry => {
+            const isOnBoard = onBoardIds.has(entry.tile.id);
             return (
-              <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <span style={{ width: 70, fontFamily: T.fontBody, fontSize: 11, color: RESOURCE_COLORS[r], textTransform: 'capitalize' }}>{r}</span>
-                <div style={{ flex: 1, height: 8, background: T.surface, borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ width: `${pct}%`, height: '100%', background: over ? '#e55' : RESOURCE_COLORS[r], borderRadius: 4, transition: 'width 0.3s' }} />
+              <div key={entry.tile.id}
+                draggable={!isOnBoard && ballHolder?.id ? true : false}
+                onDragStart={(e) => {
+                  if (!isMyTurn(ballHolder?.id)) { e.preventDefault(); return; }
+                  e.dataTransfer.setData('text/plain', JSON.stringify({ id: entry.tile.id }));
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+                style={{
+                  background: isOnBoard ? T.surface : '#1e1b14', borderRadius: 4, padding: '10px 12px',
+                  marginBottom: 6, cursor: isOnBoard ? 'default' : 'grab', opacity: isOnBoard ? 0.35 : 1,
+                  transition: 'background 0.15s, transform 0.15s',
+                }}
+                onMouseEnter={(e) => { if (!isOnBoard) (e.currentTarget as HTMLElement).style.background = T.containerHigh; }}
+                onMouseLeave={(e) => { if (!isOnBoard) (e.currentTarget as HTMLElement).style.background = '#1e1b14'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 20, color: T.onSurfaceVariant }}>{emojiFor(entry.tile.icon)}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 12, color: T.onSurface }}>{entry.tile.name}</div>
+                    <div style={{ display: 'flex', gap: 3, marginTop: 2 }}>
+                      {entry.pickedBy.map(pid => {
+                        const p = sorted.find(pp => pp.id === pid);
+                        return p ? <div key={pid} style={{ width: 14, height: 14, borderRadius: '50%', background: ROLE_COLORS[p.roleId], fontSize: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{p.name[0]}</div> : null;
+                      })}
+                      <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: T.onSurfaceVariant, marginLeft: 4 }}>{entry.count}/{sorted.length}</span>
+                    </div>
+                  </div>
+                  <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: T.onSurfaceVariant }}>Cost:{RESOURCE_TYPES.reduce((s, r) => s + entry.tile.resourceCost[r], 0)}</span>
                 </div>
-                <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: over ? '#e55' : T.onSurfaceVariant, width: 50, textAlign: 'right' }}>
-                  {cost}/{avail}
-                </span>
               </div>
             );
           })}
         </div>
 
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button onClick={() => { sounds.playButtonClick(); passBallToNext(); }} style={{
-            background: T.outlineVariant, color: T.onSurface, border: 'none', borderRadius: 8,
-            padding: '8px 16px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
-          }}>Pass Ball</button>
-          <button
-            disabled={visionTiles.length < 3 || overBudget}
-            onClick={() => { sounds.playButtonClick(); setScreen('resource_allocation'); }}
-            style={{
-              background: visionTiles.length >= 3 && !overBudget ? T.primary : T.outlineVariant,
-              color: T.surface, border: 'none', borderRadius: 8, padding: '8px 16px',
-              fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
-              opacity: visionTiles.length >= 3 && !overBudget ? 1 : 0.4,
+        {/* RIGHT: Cork Board + Budget + Log */}
+        <div style={{ width: '60%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Cork Board */}
+          <div ref={boardRef}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setIsDragOverBoard(true); }}
+            onDragLeave={() => setIsDragOverBoard(false)}
+            onDrop={(e) => {
+              e.preventDefault(); setIsDragOverBoard(false);
+              if (!isMyTurn(ballHolder?.id)) return;
+              try {
+                const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+                const tile = pickTally.find(t => t.tile.id === data.id)?.tile;
+                if (!tile || onBoardIds.has(tile.id)) return;
+                const rect = boardRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                const pos = { x: Math.max(10, Math.min(85, ((e.clientX - rect.left) / rect.width) * 100)), y: Math.max(10, Math.min(85, ((e.clientY - rect.top) / rect.height) * 100)) };
+                setPendingDrop({ tile, position: pos });
+                setShowWritingBox(true);
+                setReasoningText('');
+              } catch { /* ignore bad data */ }
             }}
-          >Next: Assign Resources &rarr;</button>
-        </div>
-      </div>
-    );
-  };
-
-  /* ── SCREEN 3: Resource Allocation ────────────────────────── */
-  const effColor = (eff: number) => eff >= 70 ? T.primary : eff >= 40 ? T.tertiary : T.secondary;
-
-  const renderResourceAllocation = () => {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10, overflowY: 'auto', padding: 8 }}>
-        <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.primary, marginBottom: 4 }}>Resource Allocation</div>
-        {visionTiles.map(tile => {
-          const needed: Record<ResourceType, number> = { ...tile.resourceCost };
-          return (
-            <div key={tile.id} style={{ background: T.container, borderRadius: 8, padding: 10, boxShadow: T.woodBevel, marginBottom: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                <span style={{ fontSize: 16 }}>{emojiFor(tile.icon)}</span>
-                <span style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, color: T.onSurface }}>{tile.name}</span>
-                <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: T.onSurfaceVariant, marginLeft: 'auto' }}>
-                  Needs: {costText(tile)}
-                </span>
-              </div>
-              {RESOURCE_TYPES.filter(r => needed[r] > 0).map(r => {
-                const rTotal = Object.values(commitments).reduce((s, pc) => s + (pc[r] || 0), 0);
-                const met = rTotal >= needed[r];
-
-                // Calculate effective value and breakdown by effectiveness tier
-                let totalEffValue = 0;
-                let greenTokens = 0;
-                let amberTokens = 0;
-                let redTokens = 0;
-                sorted.forEach(p => {
-                  const c = commitments[p.id]?.[r] || 0;
-                  if (c <= 0) return;
-                  const ak = RESOURCE_ABILITY_MAP[r] as keyof typeof p.abilities;
-                  const e = calculateEffectiveness((p.abilities as any)[ak] ?? 0);
-                  totalEffValue += c * (e / 100) * 5;
-                  if (e >= 70) greenTokens += c;
-                  else if (e >= 40) amberTokens += c;
-                  else redTokens += c;
-                });
-
-                // Find best 2 players for smart suggestion
-                const ranked = [...sorted].map(p => {
-                  const ak = RESOURCE_ABILITY_MAP[r] as keyof typeof p.abilities;
-                  return { name: p.name, eff: calculateEffectiveness((p.abilities as any)[ak] ?? 0) };
-                }).sort((a, b) => b.eff - a.eff);
-                const topTwo = ranked.slice(0, 2);
-
-                return (
-                  <div key={r} style={{ marginBottom: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: RESOURCE_COLORS[r] }} />
-                      <span style={{ fontFamily: T.fontBody, fontSize: 11, color: T.onSurface, textTransform: 'capitalize' }}>{r}</span>
-                      <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: T.onSurfaceVariant }}>({needed[r]} needed)</span>
-                    </div>
-
-                    {/* ALL 5 players — no filtering */}
-                    {sorted.map(p => {
-                      const abilityKey = RESOURCE_ABILITY_MAP[r] as keyof typeof p.abilities;
-                      const eff = calculateEffectiveness((p.abilities as any)[abilityKey] ?? 0);
-                      const committed = commitments[p.id]?.[r] || 0;
-                      const maxAvail = p.resources[r] ?? 0;
-                      const isBallHolder = p.id === ballHolder?.id;
-                      const effValue = committed * (eff / 100) * 5;
-                      const ec = effColor(eff);
-                      return (
-                        <div key={p.id} style={{ marginLeft: 16, marginBottom: 3 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <div style={{
-                              width: 20, height: 20, borderRadius: '50%', background: ROLE_COLORS[p.roleId],
-                              fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0,
-                            }}>{p.name[0]}</div>
-                            <span style={{ fontFamily: T.fontBody, fontSize: 10, color: ec, width: 32, fontWeight: 600 }}>{eff}%</span>
-                            <button disabled={!isBallHolder || committed <= 0} onClick={() => {
-                              if (!isMyTurn(ballHolder?.id)) return;
-                              console.log(`RESOURCE_COMMIT: ${p.name} decreases ${r} to ${committed - 1}`);
-                              setCommitments(prev => ({
-                                ...prev, [p.id]: { ...(prev[p.id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }), [r]: Math.max(0, committed - 1) }
-                              }));
-                            }} style={{
-                              width: 20, height: 20, background: T.surface, border: `1px solid ${T.outlineVariant}`,
-                              borderRadius: 3, color: T.onSurface, cursor: isBallHolder ? 'pointer' : 'default',
-                              fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              opacity: (!isBallHolder || committed <= 0) ? 0.3 : 1,
-                            }}>{'\u2212'}</button>
-                            <span style={{ fontFamily: T.fontNumber, fontSize: 12, color: T.onSurface, width: 16, textAlign: 'center' }}>{committed}</span>
-                            <button disabled={!isBallHolder || committed >= maxAvail} onClick={() => {
-                              if (!isMyTurn(ballHolder?.id)) return;
-                              // Nash check: hoarding detection (only fail if player withholds what group needs most from them)
-                              const nash = nashCheckAction({ type: 'commit_resource', payload: { resource: r, amount: committed + 1 } }, p, sorted, { tiles: visionTiles, commitments });
-                              setNashHistory(prev => [...prev, nash.nashScore]);
-                              if (!nash.passed) { triggerBallDrop(nash.reason); return; }
-                              console.log(`RESOURCE_COMMIT: ${p.name} commits ${committed + 1} ${r} at ${eff}% = ${((committed + 1) * (eff / 100) * 5).toFixed(1)} pts`);
-                              setCommitments(prev => ({
-                                ...prev, [p.id]: { ...(prev[p.id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }), [r]: Math.min(maxAvail, committed + 1) }
-                              }));
-                            }} style={{
-                              width: 20, height: 20, background: T.surface, border: `1px solid ${T.outlineVariant}`,
-                              borderRadius: 3, color: T.onSurface, cursor: isBallHolder ? 'pointer' : 'default',
-                              fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              opacity: (!isBallHolder || committed >= maxAvail) ? 0.3 : 1,
-                            }}>+</button>
-                            <span style={{ fontFamily: T.fontNumber, fontSize: 9, color: T.onSurfaceVariant, width: 20, textAlign: 'center' }}>/{maxAvail}</span>
-                            {/* Effective value */}
-                            {committed > 0 && (
-                              <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: ec, fontWeight: 600, marginLeft: 4 }}>
-                                = {effValue.toFixed(1)} pts
-                              </span>
-                            )}
-                          </div>
-                          {/* Teaching feedback for low effectiveness commitment */}
-                          {committed > 0 && eff < 30 && (
-                            <div style={{ fontFamily: T.fontBody, fontSize: 8, color: T.secondary, marginLeft: 25, fontStyle: 'italic', marginTop: 1 }}>
-                              Low efficiency — consider if another player can contribute this more effectively
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {/* Smart suggestion */}
-                    <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant, opacity: 0.6, fontStyle: 'italic', marginLeft: 16, marginTop: 2 }}>
-                      Tip: {topTwo.map(t => `${t.name} (${t.eff}%)`).join(' and ')} most effective here
-                    </div>
-
-                    {/* Segmented progress bar */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 16, marginTop: 4 }}>
-                      <div style={{ flex: 1, height: 7, background: T.surface, borderRadius: 3, overflow: 'hidden', display: 'flex' }}>
-                        {/* Green segment (high eff) */}
-                        {greenTokens > 0 && (
-                          <div style={{
-                            width: `${(greenTokens / Math.max(needed[r], 1)) * 100}%`,
-                            height: '100%', background: T.primary, transition: 'width 0.3s',
-                          }} />
-                        )}
-                        {/* Amber segment (medium eff) */}
-                        {amberTokens > 0 && (
-                          <div style={{
-                            width: `${(amberTokens / Math.max(needed[r], 1)) * 100}%`,
-                            height: '100%', background: T.tertiary, transition: 'width 0.3s',
-                          }} />
-                        )}
-                        {/* Red segment (low eff) */}
-                        {redTokens > 0 && (
-                          <div style={{
-                            width: `${(redTokens / Math.max(needed[r], 1)) * 100}%`,
-                            height: '100%', background: T.secondary, transition: 'width 0.3s',
-                          }} />
-                        )}
-                      </div>
-                      <span style={{ fontFamily: T.fontNumber, fontSize: 10, color: met ? T.primary : '#e55', minWidth: 30 }}>
-                        {rTotal}/{needed[r]}
-                      </span>
-                      {rTotal > 0 && (
-                        <span style={{ fontFamily: T.fontNumber, fontSize: 9, color: effColor(totalEffValue / Math.max(rTotal, 1) * 20) }}>
-                          {totalEffValue.toFixed(1)} pts
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+            style={{
+              flex: 1, minHeight: 280, position: 'relative', margin: 8, borderRadius: 8, overflow: 'hidden',
+              background: isDragOverBoard
+                ? `repeating-radial-gradient(circle at 3px 3px,rgba(180,140,80,0.1) 0px,transparent 2px),linear-gradient(135deg,#3a2e1e,#2e2416,#342a1c,#2a2014)`
+                : `repeating-radial-gradient(circle at 3px 3px,rgba(180,140,80,0.06) 0px,transparent 2px),linear-gradient(135deg,#2a2218,#261e14,#2e2418,#221c12)`,
+              boxShadow: 'inset 0 0 40px rgba(22,19,12,0.4)',
+              border: isDragOverBoard ? `2px dashed rgba(174,212,86,0.25)` : '2px solid transparent',
+              transition: 'border 0.2s, background 0.2s',
+            }}
+          >
+            {/* Board title */}
+            <div style={{ textAlign: 'center', padding: '8px 0 4px', fontFamily: T.fontHeadline, fontSize: 14, color: T.tertiary }}>
+              {'\u{1F4CC}'} OUR VISION {'\u2014'} {ZONE_LABELS[zoneId] || zoneId}
             </div>
-          );
-        })}
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button onClick={() => { sounds.playButtonClick(); passBallToNext(); }} style={{
-            background: T.outlineVariant, color: T.onSurface, border: 'none', borderRadius: 8,
-            padding: '8px 16px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
-          }}>Pass Ball</button>
-          <button
-            disabled={!allResourcesMet}
-            onClick={() => { sounds.playButtonClick(); setScreen('vote_finalize'); }}
-            style={{
-              background: allResourcesMet ? T.primary : T.outlineVariant,
-              color: T.surface, border: 'none', borderRadius: 8, padding: '8px 16px',
-              fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
-              opacity: allResourcesMet ? 1 : 0.4,
-            }}
-          >Next: Vote &amp; Finalize &rarr;</button>
+
+            {/* Sticky notes */}
+            {boardNotes.map(note => (
+              <motion.div key={note.id}
+                initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                style={{
+                  position: 'absolute', left: `${note.position.x}%`, top: `${note.position.y}%`,
+                  transform: `translate(-50%,-50%) rotate(${note.rotation}deg)`,
+                  width: 140, minHeight: 90, padding: 8,
+                  background: NOTE_COLORS[note.playerRole] || '#d4c48a',
+                  borderRadius: 2, boxShadow: '2px 3px 6px rgba(22,19,12,0.35)',
+                  cursor: 'default', zIndex: 5,
+                }}
+              >
+                {/* Pushpin */}
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'radial-gradient(circle,#d4a843,#8a6a20)', margin: '0 auto 4px' }} />
+                <div style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 11, color: '#2a2018' }}>
+                  {emojiFor(note.tile.icon)} {note.tile.name}
+                </div>
+                <div style={{ fontFamily: T.fontNumber, fontSize: 8, color: '#5a5040', marginTop: 2 }}>
+                  {RESOURCE_TYPES.filter(r => note.tile.resourceCost[r] > 0).map(r => `${r[0].toUpperCase()}:${note.tile.resourceCost[r]}`).join(' ')}
+                </div>
+                {note.reasoning && (
+                  <div style={{ fontFamily: T.fontBody, fontSize: 9, color: '#4a4030', fontStyle: 'italic', marginTop: 4, lineHeight: 1.3, overflow: 'hidden', maxHeight: 36 }}>
+                    {'\u201C'}{note.reasoning}{'\u201D'}
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                  <span style={{ fontFamily: T.fontBody, fontSize: 8, fontStyle: 'italic', color: '#6a6050' }}>{'\u2014'} {note.playerName}</span>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: (ROLE_COLORS as Record<string, string>)[note.playerRole] || '#888', flexShrink: 0 }} />
+                </div>
+                {/* Remove button */}
+                <button onClick={() => removeNote(note.id)} style={{
+                  position: 'absolute', top: 2, right: 4, background: 'none', border: 'none',
+                  color: '#8a5040', fontSize: 12, cursor: 'pointer', lineHeight: 1, opacity: 0.5,
+                }}>{'\u00D7'}</button>
+                {/* Star display */}
+                {note.stars > 0 && (
+                  <div style={{ position: 'absolute', top: -6, right: -6, display: 'flex' }}>
+                    {Array.from({ length: note.stars }).map((_, i) => <span key={i} style={{ fontSize: 10, color: '#d4a843' }}>{'\u2B50'}</span>)}
+                  </div>
+                )}
+              </motion.div>
+            ))}
+
+            {/* Hybrid merge connectors */}
+            {possibleHybrids.map(h => {
+              const n1 = boardNotes.find(n => n.tileId === h.mergedFrom[0]);
+              const n2 = boardNotes.find(n => n.tileId === h.mergedFrom[1]);
+              if (!n1 || !n2) return null;
+              return (
+                <div key={h.id} onClick={() => mergeNotesHybrid(h)} style={{
+                  position: 'absolute',
+                  left: `${(n1.position.x + n2.position.x) / 2}%`,
+                  top: `${(n1.position.y + n2.position.y) / 2}%`,
+                  transform: 'translate(-50%,-50%)',
+                  background: 'rgba(212,168,67,0.2)', border: `1px dashed ${T.tertiary}`,
+                  borderRadius: 12, padding: '3px 8px', cursor: 'pointer', zIndex: 10,
+                  fontFamily: T.fontBody, fontSize: 9, color: T.tertiary, fontWeight: 700,
+                }}>
+                  Merge {'\u2192'} {h.name}
+                </div>
+              );
+            })}
+
+            {boardNotes.length === 0 && (
+              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontFamily: T.fontBody, fontSize: 13, color: T.outlineVariant, textAlign: 'center' }}>
+                Drag features from the left panel{'\n'}onto the board to build your vision
+              </div>
+            )}
+          </div>
+
+          {/* Resource meters */}
+          <div style={{ padding: '4px 10px' }}>
+            {RESOURCE_TYPES.map(r => {
+              const cost = boardCost.totalCost[r]; const avail = groupBudget.available[r];
+              const over = cost > avail; const pct = avail > 0 ? Math.min(100, (cost / avail) * 100) : 0;
+              return (
+                <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                  <span style={{ width: 60, fontFamily: T.fontBody, fontSize: 10, color: RESOURCE_COLORS[r], textTransform: 'capitalize' }}>{r}</span>
+                  <div style={{ flex: 1, height: 6, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: over ? '#e55' : RESOURCE_COLORS[r], borderRadius: 3, transition: 'width 0.3s' }} />
+                  </div>
+                  <span style={{ fontFamily: T.fontNumber, fontSize: 9, color: over ? '#e55' : T.onSurfaceVariant, width: 40, textAlign: 'right' }}>{cost}/{avail}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Negotiation log */}
+          {negotiationLog.length > 0 && (
+            <div style={{ maxHeight: 100, overflowY: 'auto', margin: '0 8px 4px', padding: 6, background: T.surface, borderRadius: 4 }}>
+              <div style={{ fontFamily: T.fontHeadline, fontSize: 10, color: T.tertiary, marginBottom: 4 }}>NEGOTIATION LOG</div>
+              {negotiationLog.slice(0, 15).map((entry, i) => (
+                <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 3, borderLeft: `2px solid ${(ROLE_COLORS as Record<string, string>)[entry.roleId] || T.outlineVariant}`, paddingLeft: 6 }}>
+                  <span style={{ fontFamily: T.fontBody, fontSize: 9, color: entry.type === 'rejected' ? T.secondary : T.onSurfaceVariant }}>
+                    {entry.type === 'place' && `${entry.playerName} placed ${entry.feature}: \u201C${(entry.reasoning || '').slice(0, 60)}${(entry.reasoning || '').length > 60 ? '...' : ''}\u201D`}
+                    {entry.type === 'remove' && `${entry.playerName} removed ${entry.feature}`}
+                    {entry.type === 'merge' && `${entry.playerName} merged into ${entry.feature}`}
+                    {entry.type === 'rejected' && `${entry.playerName} tried ${entry.feature} \u2014 ${entry.nashReason}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 8, padding: '4px 10px 8px' }}>
+            <button onClick={() => { sounds.playButtonClick(); passBallToNext(); }} style={{
+              background: T.outlineVariant, color: T.onSurface, border: 'none', borderRadius: 8,
+              padding: '6px 14px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 12, cursor: 'pointer',
+            }}>Pass Ball</button>
+            <button
+              disabled={visionTiles.length < 3 || overBudget}
+              onClick={() => { sounds.playButtonClick(); setScreen('vote_finalize'); }}
+              style={{
+                background: visionTiles.length >= 3 && !overBudget ? T.primary : T.outlineVariant,
+                color: T.surface, border: 'none', borderRadius: 8, padding: '6px 14px',
+                fontFamily: T.fontBody, fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                opacity: visionTiles.length >= 3 && !overBudget ? 1 : 0.4,
+              }}
+            >Next: Vote &amp; Finalize {'\u2192'}</button>
+          </div>
         </div>
+
+        {/* WRITING BOX MODAL */}
+        <AnimatePresence>
+          {showWritingBox && pendingDrop && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              style={{
+                position: 'fixed', inset: 0, zIndex: 65, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(22,19,12,0.7)', backdropFilter: 'blur(8px)',
+              }}
+              onClick={() => { setShowWritingBox(false); setPendingDrop(null); setReasoningText(''); }}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: T.container, borderRadius: 8, padding: 20, maxWidth: 380, width: '90%',
+                  boxShadow: '0 8px 30px rgba(22,19,12,0.6)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 20 }}>{emojiFor(pendingDrop.tile.icon)}</span>
+                  <div>
+                    <div style={{ fontFamily: T.fontHeadline, fontWeight: 700, fontSize: 14, color: T.onSurface }}>{pendingDrop.tile.name}</div>
+                    <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant }}>Placed by {ballHolder?.name} {'\u2014'} {ballHolder?.roleId}</div>
+                  </div>
+                </div>
+                <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.primary, marginBottom: 4 }}>Why are you choosing this feature?</div>
+                <div style={{ fontFamily: T.fontBody, fontSize: 9, color: '#808878', fontStyle: 'italic', marginBottom: 8 }}>(Consider: how does this help the ZONE, not just your objectives?)</div>
+                <div style={{ position: 'relative' }}>
+                  <textarea
+                    value={reasoningText}
+                    onChange={(e) => setReasoningText(e.target.value.slice(0, 200))}
+                    placeholder="e.g., The drainage pipe is the root cause we found in investigation. Without fixing it, nothing else works..."
+                    style={{
+                      width: '100%', minHeight: 80, maxHeight: 120, resize: 'vertical',
+                      background: T.surface, color: T.onSurface, fontFamily: T.fontBody, fontSize: 12,
+                      lineHeight: 1.5, border: `1px solid rgba(69,72,60,0.15)`, borderRadius: 4,
+                      padding: 10, boxSizing: 'border-box',
+                    }}
+                  />
+                  <span style={{ position: 'absolute', bottom: 4, right: 8, fontFamily: T.fontBody, fontSize: 8, color: '#808878' }}>
+                    {reasoningText.length}/200
+                  </span>
+                </div>
+                {/* Other players' choices context */}
+                <div style={{ marginTop: 8, marginBottom: 8 }}>
+                  <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant, marginBottom: 4 }}>Other players chose:</div>
+                  {sorted.filter(p => p.id !== ballHolder?.id).map(p => {
+                    const pPicks = playerPicks[p.id] || [];
+                    return (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: ROLE_COLORS[p.roleId], fontSize: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{p.name[0]}</div>
+                        <span style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant }}>
+                          {pPicks.map(tid => availableTiles.find(t => t.id === tid)?.name || tid).join(', ') || 'none'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    disabled={reasoningText.trim().length < 10}
+                    onClick={confirmStickyNote}
+                    style={{
+                      flex: 1, padding: '8px 0', background: reasoningText.trim().length >= 10 ? T.primary : T.outlineVariant,
+                      color: T.surface, border: 'none', borderRadius: 6, fontFamily: T.fontBody, fontWeight: 700, fontSize: 12,
+                      cursor: reasoningText.trim().length >= 10 ? 'pointer' : 'not-allowed',
+                      opacity: reasoningText.trim().length >= 10 ? 1 : 0.4,
+                    }}
+                  >Stick it {'\u2713'}</button>
+                  <button onClick={() => { setShowWritingBox(false); setPendingDrop(null); setReasoningText(''); }}
+                    style={{
+                      padding: '8px 16px', background: 'transparent', color: T.onSurfaceVariant,
+                      border: `1px solid ${T.outlineVariant}`, borderRadius: 6, fontFamily: T.fontBody, fontSize: 12, cursor: 'pointer',
+                    }}
+                  >Cancel {'\u2717'}</button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   };
 
-  /* ── SCREEN 4: Vote + Finalize ────────────────────────────── */
+  /* ── (Resource Allocation screen removed — commitments auto-calculated) ── */
+
+  /* ── SCREEN 3: Vote + Finalize ────────────────────────────── */
   const renderVoteFinalize = () => {
     const myStars = starsUsed[ballHolder?.id] || 0;
     return (
@@ -820,11 +911,10 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
         <span style={{ fontFamily: T.fontBody, fontSize: 12, color: T.onSurfaceVariant }}>
           {screen === 'individual_picks' && 'Individual Picks'}
           {screen === 'group_negotiation' && 'Group Negotiation'}
-          {screen === 'resource_allocation' && 'Resource Allocation'}
           {screen === 'vote_finalize' && 'Vote & Finalize'}
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-          {[0, 1, 2, 3].map(i => (
+          {[0, 1, 2].map(i => (
             <div key={i} style={{
               width: 10, height: 10, borderRadius: '50%',
               background: i <= screenIdx ? T.primary : T.outlineVariant,
@@ -847,12 +937,6 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
             <motion.div key="s2" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }}
               transition={{ duration: 0.3 }} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               {renderGroupNegotiation()}
-            </motion.div>
-          )}
-          {screen === 'resource_allocation' && (
-            <motion.div key="s3" initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }}
-              transition={{ duration: 0.3 }} style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {renderResourceAllocation()}
             </motion.div>
           )}
           {screen === 'vote_finalize' && (
