@@ -10,7 +10,11 @@ import {
 import {
   calculateBoardCost, calculateGroupBudget, checkAffordability,
   calculateThreshold, evaluateVision, proposeHybrid, finalizeBoard,
+  nashCheckAction, calculateBuchiSatisfaction, calculateCollaborativeScore,
+  evaluateGoalShot,
+  type NashCheckResult, type BuchiSatisfactionResult, type CollaborativeScoreResult, type GoalShotResult,
 } from '../../core/engine/visionBoardEngine';
+import { BUCHI_OBJECTIVES } from '../../core/models/constants';
 import { sounds } from '../../utils/sounds';
 
 // ─── Types ──────────────────────────────────────────────────────
@@ -91,6 +95,18 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
   const [votes, setVotes] = useState<Record<string, string[]>>({});
   const [priorityOrder, setPriorityOrder] = useState<string[]>([]);
 
+  // Ball & Nash state
+  type BallState = 'held' | 'passing' | 'received' | 'dropped' | 'shooting';
+  const [ballHolder, setBallHolder] = useState<string>(players[0]?.id || '');
+  const [ballState, setBallState] = useState<BallState>('held');
+  const [dropCount, setDropCount] = useState<Record<string, number>>({});
+  const [nashHistory, setNashHistory] = useState<number[]>([]);
+  const [nashToast, setNashToast] = useState<{ message: string; hint?: string } | null>(null);
+  const [hybridMergeCount, setHybridMergeCount] = useState(0);
+  const [tradeCount, setTradeCount] = useState(0);
+  const [goalResult, setGoalResult] = useState<GoalShotResult | null>(null);
+  const [adjustmentRound, setAdjustmentRound] = useState(false);
+
   // Zone resolution
   const engineZoneId = challenge?.affectedZoneIds?.[0] || 'boating_pond';
   const zoneIdMap: Record<string, string> = {
@@ -159,6 +175,7 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
       };
       return [...filtered, syntheticTile];
     });
+    setHybridMergeCount(c => c + 1);
     sounds.playButtonClick();
   }, []);
 
@@ -242,6 +259,88 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
     if (screen !== 'vision_finalized') return null;
     return calculateThreshold(selectedTiles, difficultyDots);
   }, [screen, selectedTiles, difficultyDots]);
+
+  // Buchi satisfaction per player (live)
+  const buchiResults = useMemo(() => {
+    return players.map(p => calculateBuchiSatisfaction(p, { tiles: selectedTiles }));
+  }, [players, selectedTiles]);
+
+  // Collaborative score (computed on finalized screen)
+  const collabScore = useMemo(() => {
+    if (screen !== 'vision_finalized') return null;
+    return calculateCollaborativeScore(players, { tiles: selectedTiles, commitments }, nashHistory, hybridMergeCount, tradeCount);
+  }, [screen, players, selectedTiles, commitments, nashHistory, hybridMergeCount, tradeCount]);
+
+  // Nash-gated action wrapper
+  const nashGatedAction = useCallback((
+    actionType: 'place_tile' | 'commit_resource' | 'cast_vote' | 'propose_trade',
+    payload: any,
+    onPass: () => void,
+  ) => {
+    const actingPlayer = players.find(p => p.id === ballHolder);
+    if (!actingPlayer) { onPass(); return; }
+
+    const result = nashCheckAction(
+      { type: actionType, payload },
+      actingPlayer,
+      players,
+      { tiles: selectedTiles, commitments },
+    );
+
+    setNashHistory(prev => [...prev, result.nashScore]);
+
+    if (result.passed) {
+      onPass();
+      // Pass ball to next player
+      const currentIdx = players.findIndex(p => p.id === ballHolder);
+      const nextIdx = (currentIdx + 1) % players.length;
+      setBallState('passing');
+      setTimeout(() => {
+        setBallHolder(players[nextIdx].id);
+        setBallState('received');
+        setTimeout(() => setBallState('held'), 400);
+      }, 300);
+    } else {
+      // Ball drop
+      setBallState('dropped');
+      const pd = dropCount[ballHolder] || 0;
+      setDropCount(prev => ({ ...prev, [ballHolder]: pd + 1 }));
+      const hint = pd >= 1
+        ? `Hint: ${players.filter(p => p.id !== ballHolder).map(p => {
+            const unmet = (BUCHI_OBJECTIVES[p.roleId] || []).filter(obj => {
+              const tileScore = selectedTiles.reduce((s, t) => s + (t.objectivesServed[obj as ObjectiveId] ?? 0), 0);
+              return tileScore < 0.5;
+            });
+            return unmet.length > 0 ? `${p.name} needs ${unmet.join(', ')}` : null;
+          }).filter(Boolean).join('; ')}`
+        : undefined;
+      setNashToast({ message: result.reason, hint });
+      setTimeout(() => {
+        setBallState('held');
+        setNashToast(null);
+      }, 4000);
+    }
+  }, [ballHolder, players, selectedTiles, commitments, dropCount]);
+
+  // Shoot for goal
+  const shootForGoal = useCallback(() => {
+    if (!collabScore) return;
+    sounds.playButtonClick();
+    setBallState('shooting');
+    const shotResult = evaluateGoalShot(collabScore, buchiResults);
+    setTimeout(() => {
+      setGoalResult(shotResult);
+      setBallState('held');
+      console.log(`GOAL_SHOT_UI: ${shotResult.result} score=${shotResult.score}`);
+      if (shotResult.result === 'goal') {
+        // Proceed after animation
+      } else if (shotResult.result === 'near_miss') {
+        setAdjustmentRound(true);
+      } else {
+        // Miss — will loop back
+      }
+    }, 1500);
+  }, [collabScore, buchiResults]);
 
   // ─── Screen navigation ─────────────────────────────────────────
 
@@ -356,6 +455,218 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
             style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
           >
             {renderFinalized()}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ═══ BALL & PLAYER AVATARS OVERLAY ═══ */}
+      {screen !== 'vision_finalized' && (
+        <div style={{
+          position: 'relative', padding: '8px 24px 12px',
+          background: T.container, borderTop: `1px solid ${T.outlineVariant}`,
+          display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16,
+        }}>
+          {/* Player avatars with buchi dots */}
+          {players.map((player, i) => {
+            const isHolder = player.id === ballHolder;
+            const buchi = buchiResults.find(b => b.playerName === player.name);
+            const roleColor = ROLE_COLORS[player.roleId] || '#888';
+            return (
+              <div key={player.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <motion.div
+                  animate={isHolder ? { scale: [1, 1.08, 1] } : { scale: 1 }}
+                  transition={isHolder ? { duration: 1.5, repeat: Infinity } : {}}
+                  style={{
+                    width: 40, height: 40, borderRadius: '50%',
+                    background: roleColor, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: T.fontBody, fontWeight: 700, fontSize: 16, color: '#fff',
+                    boxShadow: isHolder ? `0 0 12px ${T.primary}, 0 0 4px ${T.primary}` : '0 2px 6px rgba(0,0,0,0.3)',
+                    border: isHolder ? `2px solid ${T.primary}` : '2px solid transparent',
+                    opacity: isHolder ? 1 : 0.6,
+                    position: 'relative',
+                  }}
+                >
+                  {player.name.charAt(0)}
+                  {/* Ball indicator */}
+                  {isHolder && ballState === 'held' && (
+                    <motion.div
+                      animate={{ y: [-2, 2, -2] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                      style={{
+                        position: 'absolute', top: -16, width: 20, height: 20, borderRadius: '50%',
+                        background: 'radial-gradient(circle at 35% 35%, #aed456, #465f00)',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 8, fontWeight: 700, color: T.surface,
+                      }}
+                    >
+                      {player.name.charAt(0)}
+                    </motion.div>
+                  )}
+                </motion.div>
+                <div style={{ fontSize: 9, color: isHolder ? T.primary : T.onSurfaceVariant, fontWeight: isHolder ? 700 : 400 }}>
+                  {isHolder ? 'YOUR TURN' : player.name}
+                </div>
+                {/* Buchi objective dots */}
+                <div style={{ display: 'flex', gap: 3 }}>
+                  {(BUCHI_OBJECTIVES[player.roleId] || []).map((obj, j) => {
+                    const met = buchi?.buchiObjectives[j]?.met ?? false;
+                    return (
+                      <div key={obj} title={`${obj}: ${met ? 'met' : 'unmet'}`} style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: met ? T.primary : '#e74c3c',
+                      }} />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Ball drop animation */}
+          <AnimatePresence>
+            {ballState === 'dropped' && (
+              <motion.div
+                initial={{ y: -20, opacity: 1 }}
+                animate={{ y: 80, opacity: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.8, ease: 'easeIn' }}
+                style={{
+                  position: 'absolute', left: '50%', top: -10,
+                  transform: 'translateX(-50%)',
+                  width: 28, height: 28, borderRadius: '50%',
+                  background: 'radial-gradient(circle at 35% 35%, #e74c3c, #8b0000)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                }}
+              />
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* ═══ NASH FEEDBACK TOAST ═══ */}
+      <AnimatePresence>
+        {nashToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+            style={{
+              position: 'absolute', bottom: 120, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 80, maxWidth: 400, width: '90%',
+              background: 'rgba(30,27,20,0.92)', backdropFilter: 'blur(8px)',
+              borderRadius: 10, padding: '12px 16px',
+              borderLeft: `4px solid ${T.tertiary}`,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            }}
+            onClick={() => setNashToast(null)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 16, color: T.tertiary }}>{'⚠️'}</span>
+              <span style={{ fontFamily: T.fontBody, fontSize: 13, color: T.onSurface }}>
+                {nashToast.message}
+              </span>
+            </div>
+            {nashToast.hint && (
+              <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginTop: 4 }}>
+                {nashToast.hint}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ═══ GOAL RESULT OVERLAY ═══ */}
+      <AnimatePresence>
+        {goalResult && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{
+              position: 'absolute', inset: 0, zIndex: 90,
+              background: 'rgba(22,19,12,0.92)', backdropFilter: 'blur(12px)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            {goalResult.result === 'goal' && (
+              <>
+                <motion.div
+                  initial={{ scale: 0 }} animate={{ scale: 1 }}
+                  transition={{ type: 'spring', damping: 10, stiffness: 100 }}
+                  style={{
+                    width: 100, height: 100, borderRadius: '50%',
+                    background: `radial-gradient(circle at 35% 35%, ${T.primary}, #465f00)`,
+                    boxShadow: `0 0 40px ${T.primary}, 0 0 80px rgba(174,212,86,0.3)`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 40,
+                    marginBottom: 20,
+                  }}
+                >
+                  {'⚽'}
+                </motion.div>
+                <div style={{ fontFamily: T.fontHeadline, fontSize: 28, fontWeight: 700, color: T.primary, marginBottom: 8 }}>
+                  GOAL!
+                </div>
+                <div style={{ fontFamily: T.fontNumber, fontSize: 40, fontWeight: 700, color: T.tertiary, marginBottom: 12 }}>
+                  {goalResult.score}
+                </div>
+                <div style={{ fontSize: 14, color: T.onSurface, marginBottom: 24, textAlign: 'center', maxWidth: 360 }}>
+                  {goalResult.feedback}
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                  onClick={() => { setGoalResult(null); handleComplete(); }}
+                  style={{
+                    padding: '12px 28px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                    background: T.primary, color: T.surface,
+                    fontFamily: T.fontHeadline, fontWeight: 700, fontSize: 15,
+                  }}
+                >
+                  Begin Phase 4: Build the Path
+                </motion.button>
+              </>
+            )}
+            {goalResult.result === 'near_miss' && (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 16 }}>{'🥅'}</div>
+                <div style={{ fontFamily: T.fontHeadline, fontSize: 22, fontWeight: 700, color: T.tertiary, marginBottom: 8 }}>
+                  Almost!
+                </div>
+                <div style={{ fontSize: 14, color: T.onSurface, marginBottom: 24, textAlign: 'center', maxWidth: 360 }}>
+                  {goalResult.feedback}
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                  onClick={() => { setGoalResult(null); setScreen('tile_selection'); }}
+                  style={{
+                    padding: '10px 24px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                    background: T.tertiary, color: T.surface,
+                    fontFamily: T.fontHeadline, fontWeight: 700, fontSize: 13,
+                  }}
+                >
+                  Adjust Vision
+                </motion.button>
+              </>
+            )}
+            {goalResult.result === 'miss' && (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 16 }}>{'❌'}</div>
+                <div style={{ fontFamily: T.fontHeadline, fontSize: 22, fontWeight: 700, color: '#e74c3c', marginBottom: 8 }}>
+                  Not Balanced
+                </div>
+                <div style={{ fontSize: 14, color: T.onSurface, marginBottom: 24, textAlign: 'center', maxWidth: 360 }}>
+                  {goalResult.feedback}
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                  onClick={() => { setGoalResult(null); setScreen('tile_selection'); }}
+                  style={{
+                    padding: '10px 24px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                    background: '#e74c3c', color: '#fff',
+                    fontFamily: T.fontHeadline, fontWeight: 700, fontSize: 13,
+                  }}
+                >
+                  Rethink Vision
+                </motion.button>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -934,22 +1245,104 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
           </div>
         </div>
 
-        {/* Complete button */}
+        {/* Collaborative Score Panel */}
+        {collabScore && (
+          <div style={{
+            background: T.containerHigh, borderRadius: 10, padding: 16, marginTop: 12,
+            boxShadow: T.woodBevel,
+          }}>
+            <div style={{ fontFamily: T.fontHeadline, fontWeight: 700, fontSize: 14, color: T.tertiary, marginBottom: 10 }}>
+              Team Collaboration
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+              {/* Score ring */}
+              <div style={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+                <svg width={80} height={80} viewBox="0 0 80 80">
+                  <circle cx={40} cy={40} r={34} fill="none" stroke={T.outlineVariant} strokeWidth={6} />
+                  <circle cx={40} cy={40} r={34} fill="none"
+                    stroke={collabScore.score >= 60 ? T.primary : collabScore.score >= 45 ? T.tertiary : '#e74c3c'}
+                    strokeWidth={6} strokeLinecap="round"
+                    strokeDasharray={`${(collabScore.score / 100) * 213.6} 213.6`}
+                    transform="rotate(-90 40 40)"
+                  />
+                </svg>
+                <div style={{
+                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: T.fontNumber, fontSize: 24, fontWeight: 700,
+                  color: collabScore.score >= 60 ? T.primary : collabScore.score >= 45 ? T.tertiary : '#e74c3c',
+                }}>
+                  {collabScore.score}
+                </div>
+              </div>
+              {/* Breakdown bars */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {([
+                  ['Nash Average', collabScore.breakdown.nashAverage],
+                  ['Buchi Coverage', collabScore.breakdown.buchiCoverage],
+                  ['Resource Equity', collabScore.breakdown.resourceEquity],
+                  ['Feature Diversity', collabScore.breakdown.featureDiversity],
+                ] as [string, number][]).map(([label, val]) => (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 100, fontSize: 10, color: T.onSurfaceVariant }}>{label}</div>
+                    <div style={{ flex: 1, height: 6, background: T.container, borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ width: `${val}%`, height: '100%', background: T.primary, borderRadius: 3 }} />
+                    </div>
+                    <div style={{ width: 24, fontSize: 10, fontFamily: T.fontNumber, color: T.onSurfaceVariant, textAlign: 'right' }}>
+                      {val}
+                    </div>
+                  </div>
+                ))}
+                {(collabScore.breakdown.hybridBonus > 0 || collabScore.breakdown.tradeBonus > 0) && (
+                  <div style={{ fontSize: 10, color: T.tertiary, marginTop: 2 }}>
+                    Bonuses: {collabScore.breakdown.hybridBonus > 0 ? `+${collabScore.breakdown.hybridBonus} hybrid` : ''}
+                    {collabScore.breakdown.tradeBonus > 0 ? ` +${collabScore.breakdown.tradeBonus} trade` : ''}
+                  </div>
+                )}
+              </div>
+            </div>
+            {/* Balance status */}
+            <div style={{
+              marginTop: 10, fontSize: 12, fontWeight: 700, textAlign: 'center',
+              color: collabScore.sharedBalanceAchieved ? T.primary : '#e74c3c',
+            }}>
+              {collabScore.sharedBalanceAchieved
+                ? 'Shared balance achieved. Ready to shoot!'
+                : 'Shared balance NOT achieved. Adjust the vision.'}
+            </div>
+          </div>
+        )}
+
+        {/* Shoot for Goal / Complete button */}
         <div style={{
           borderTop: `1px solid ${T.outlineVariant}`, paddingTop: 12, marginTop: 12,
-          display: 'flex', justifyContent: 'flex-end',
+          display: 'flex', justifyContent: 'flex-end', gap: 12,
         }}>
-          <motion.button
-            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-            onClick={handleComplete}
-            style={{
-              padding: '10px 24px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: T.primary, color: T.surface,
-              fontFamily: T.fontHeadline, fontWeight: 700, fontSize: 14,
-            }}
-          >
-            Begin Phase 4: Build the Path
-          </motion.button>
+          {collabScore && collabScore.sharedBalanceAchieved ? (
+            <motion.button
+              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+              onClick={shootForGoal}
+              style={{
+                padding: '12px 28px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                background: T.primary, color: T.surface,
+                fontFamily: T.fontHeadline, fontWeight: 700, fontSize: 15,
+                boxShadow: `0 0 16px ${T.primary}40`,
+              }}
+            >
+              {'⚽'} Shoot for Goal
+            </motion.button>
+          ) : (
+            <motion.button
+              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+              onClick={handleComplete}
+              style={{
+                padding: '10px 24px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                background: T.primary, color: T.surface,
+                fontFamily: T.fontHeadline, fontWeight: 700, fontSize: 14,
+              }}
+            >
+              Begin Phase 4: Build the Path
+            </motion.button>
+          )}
         </div>
       </div>
     );

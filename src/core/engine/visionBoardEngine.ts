@@ -6,7 +6,7 @@
  * Follows the same functional patterns as investigationEngine.ts and nashEngine.ts.
  */
 
-import type { Player, ResourceType, GameSession } from '../models/types';
+import type { Player, ResourceType, GameSession, RoleId } from '../models/types';
 import {
   type VisionFeatureTile,
   type HybridTile,
@@ -19,6 +19,7 @@ import {
   calculateEffectiveness,
   STARTING_TOKENS,
 } from '../content/featureTiles';
+import { BUCHI_OBJECTIVES, OBJECTIVE_WEIGHTS, SURVIVAL_THRESHOLDS } from '../models/constants';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -366,5 +367,355 @@ export function finalizeBoard(
     hiddenThreshold,
     visionStatement,
     consensusLevel,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BALL PASSING & NASH EQUILIBRIUM CHECK
+// ═══════════════════════════════════════════════════════════════
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface NashAction {
+  type: 'place_tile' | 'commit_resource' | 'cast_vote' | 'propose_trade';
+  payload: any;
+}
+
+export interface NashCheckResult {
+  passed: boolean;
+  nashScore: number;
+  reason: string;
+  selfishness: number;
+  consideration: number;
+}
+
+export interface BuchiSatisfactionResult {
+  playerName: string;
+  role: string;
+  buchiObjectives: { name: string; current: number; threshold: number; met: boolean }[];
+  overallSatisfied: boolean;
+  satisfactionPercentage: number;
+}
+
+export interface CollaborativeScoreResult {
+  score: number;
+  breakdown: {
+    nashAverage: number;
+    buchiCoverage: number;
+    resourceEquity: number;
+    featureDiversity: number;
+    hybridBonus: number;
+    tradeBonus: number;
+  };
+  sharedBalanceAchieved: boolean;
+}
+
+export interface SharedBalanceResult {
+  balanced: boolean;
+  score: number;
+  blockers: string[];
+  loopBack: boolean;
+  loopTarget: string;
+}
+
+export interface GoalShotResult {
+  result: 'goal' | 'near_miss' | 'miss';
+  score: number;
+  feedback: string;
+  loopBack: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// 9. nashCheckAction
+// ---------------------------------------------------------------------------
+
+export function nashCheckAction(
+  action: NashAction,
+  actingPlayer: Player,
+  allPlayers: Player[],
+  currentBoardState: { tiles: VisionFeatureTile[]; commitments: Record<string, Record<ResourceType, number>> },
+): NashCheckResult {
+  const playerBuchi = BUCHI_OBJECTIVES[actingPlayer.roleId] || [];
+  const otherPlayers = allPlayers.filter(p => p.id !== actingPlayer.id);
+
+  if (action.type === 'place_tile') {
+    const tile = action.payload as VisionFeatureTile;
+    const selfScore = playerBuchi.reduce((s, obj) => s + (tile.objectivesServed[obj] ?? 0), 0);
+    const othersScore = otherPlayers.reduce((s, p) => {
+      const pBuchi = BUCHI_OBJECTIVES[p.roleId] || [];
+      return s + pBuchi.reduce((ss, obj) => ss + (tile.objectivesServed[obj] ?? 0), 0);
+    }, 0);
+    const total = selfScore + othersScore;
+    const consideration = total > 0 ? othersScore / total : 0.5;
+
+    const passed = consideration >= 0.25;
+    const reason = consideration < 0.25
+      ? 'This feature serves mainly your objectives. Consider what others need.'
+      : consideration < 0.4
+        ? 'This helps you most but has some group benefit. Acceptable but not collaborative.'
+        : 'Good collaborative choice — serves multiple stakeholders.';
+
+    console.log(`NASH_CHECK place_tile "${tile.name}": self=${selfScore.toFixed(2)} others=${othersScore.toFixed(2)} consideration=${consideration.toFixed(2)} → ${passed ? 'PASS' : 'FAIL'}`);
+    return { passed, nashScore: Math.round(consideration * 100), reason, selfishness: Math.round((1 - consideration) * 100), consideration: Math.round(consideration * 100) };
+  }
+
+  if (action.type === 'commit_resource') {
+    const { resource, amount } = action.payload as { resource: ResourceType; amount: number };
+    const abilityKey = RESOURCE_ABILITY_MAP[resource] as keyof Player['abilities'];
+    const abilityScore = (actingPlayer.abilities as any)[abilityKey] ?? 0;
+    const effectiveness = calculateEffectiveness(abilityScore);
+
+    // Check if this fills a deficit nobody else can fill easily
+    const needed = currentBoardState.tiles.reduce((s, t) => s + (t.resourceCost[resource] ?? 0), 0);
+    const totalCommitted = Object.values(currentBoardState.commitments).reduce((s, pc) => s + (pc[resource] ?? 0), 0);
+    const deficit = needed - totalCommitted;
+    const deficitFilled = deficit > 0 && amount > 0;
+
+    // Check hoarding: is the player keeping their best resource uncommitted?
+    const bestResource = RESOURCE_TYPES.reduce((best, r) => {
+      const ak = RESOURCE_ABILITY_MAP[r] as keyof Player['abilities'];
+      const score = (actingPlayer.abilities as any)[ak] ?? 0;
+      const bak = RESOURCE_ABILITY_MAP[best] as keyof Player['abilities'];
+      const bestScore = (actingPlayer.abilities as any)[bak] ?? 0;
+      return score > bestScore ? r : best;
+    }, RESOURCE_TYPES[0]);
+    const committedBest = (currentBoardState.commitments[actingPlayer.id]?.[bestResource] ?? 0);
+    const hoarding = resource !== bestResource && committedBest === 0 && actingPlayer.resources[bestResource] > 0;
+
+    const nashScore = Math.round((effectiveness * 0.4) + (deficitFilled ? 30 : 0) + (hoarding ? -20 : 0));
+    const passed = nashScore >= 40;
+    const reason = !passed
+      ? `You're committing a resource you're not effective at${hoarding ? ' while keeping your strongest resource uncommitted' : ''}. Play to your strengths.`
+      : deficitFilled
+        ? 'Filling a critical resource gap — strong collaborative commitment.'
+        : 'Good resource commitment matching your abilities.';
+
+    console.log(`NASH_CHECK commit_resource ${resource}×${amount}: eff=${effectiveness} deficit=${deficitFilled} hoarding=${hoarding} score=${nashScore} → ${passed ? 'PASS' : 'FAIL'}`);
+    return { passed, nashScore, reason, selfishness: hoarding ? 60 : 20, consideration: Math.min(100, nashScore) };
+  }
+
+  if (action.type === 'cast_vote') {
+    const featureId = action.payload as string;
+    const tile = currentBoardState.tiles.find(t => t.id === featureId);
+    if (!tile) return { passed: true, nashScore: 50, reason: 'Feature not found.', selfishness: 0, consideration: 50 };
+
+    const ownMatch = playerBuchi.filter(obj => (tile.objectivesServed[obj] ?? 0) >= 0.3).length;
+    const othersMatch = otherPlayers.filter(p => {
+      const pBuchi = BUCHI_OBJECTIVES[p.roleId] || [];
+      return pBuchi.some(obj => (tile.objectivesServed[obj] ?? 0) >= 0.3);
+    }).length;
+
+    const passed = !(ownMatch > 0 && othersMatch === 0);
+    const reason = !passed
+      ? 'You voted for something only you benefit from. Consider group needs.'
+      : othersMatch >= 2
+        ? 'Your vote reflects group needs — multiple players benefit.'
+        : 'Acceptable vote — some group benefit.';
+
+    const nashScore = passed ? Math.min(100, 30 + othersMatch * 20) : 15;
+    console.log(`NASH_CHECK cast_vote "${featureId}": ownMatch=${ownMatch} othersMatch=${othersMatch} → ${passed ? 'PASS' : 'FAIL'}`);
+    return { passed, nashScore, reason, selfishness: ownMatch > 0 && othersMatch === 0 ? 80 : 20, consideration: Math.min(100, nashScore) };
+  }
+
+  if (action.type === 'propose_trade') {
+    const { offeredType, offeredAmount, requestedType, requestedAmount, targetPlayerId } = action.payload as {
+      offeredType: ResourceType; offeredAmount: number; requestedType: ResourceType; requestedAmount: number; targetPlayerId: string;
+    };
+    const targetPlayer = allPlayers.find(p => p.id === targetPlayerId);
+    if (!targetPlayer) return { passed: true, nashScore: 50, reason: 'Target not found.', selfishness: 0, consideration: 50 };
+
+    const offerAbility = RESOURCE_ABILITY_MAP[offeredType] as keyof Player['abilities'];
+    const requestAbility = RESOURCE_ABILITY_MAP[requestedType] as keyof Player['abilities'];
+    const playerAValue = offeredAmount * calculateEffectiveness((actingPlayer.abilities as any)[offerAbility] ?? 0) / 100 * 5;
+    const playerBValue = requestedAmount * calculateEffectiveness((targetPlayer.abilities as any)[requestAbility] ?? 0) / 100 * 5;
+    const maxVal = Math.max(playerAValue, playerBValue, 0.01);
+    const fairness = Math.min(playerAValue, playerBValue) / maxVal;
+
+    const passed = fairness >= 0.6;
+    const reason = !passed
+      ? 'This trade heavily favors one side. Negotiate better terms.'
+      : 'Fair trade — both sides gain effective value.';
+
+    console.log(`NASH_CHECK propose_trade: fairness=${fairness.toFixed(2)} → ${passed ? 'PASS' : 'FAIL'}`);
+    return { passed, nashScore: Math.round(fairness * 100), reason, selfishness: Math.round((1 - fairness) * 100), consideration: Math.round(fairness * 100) };
+  }
+
+  return { passed: true, nashScore: 50, reason: 'Unknown action type.', selfishness: 0, consideration: 50 };
+}
+
+// ---------------------------------------------------------------------------
+// 10. calculateBuchiSatisfaction
+// ---------------------------------------------------------------------------
+
+export function calculateBuchiSatisfaction(
+  player: Player,
+  boardState: { tiles: VisionFeatureTile[] },
+): BuchiSatisfactionResult {
+  const buchiObjs = BUCHI_OBJECTIVES[player.roleId] || [];
+  const roleWeights = OBJECTIVE_WEIGHTS[player.roleId] || {};
+  const threshold = SURVIVAL_THRESHOLDS[player.roleId] || 10;
+
+  const results = buchiObjs.map(obj => {
+    // Sum tile contributions for this objective, weighted by tile cost
+    const rawScore = boardState.tiles.reduce((sum, tile) => {
+      const tileWeight = tile.objectivesServed[obj] ?? 0;
+      const tileCost = RESOURCE_TYPES.reduce((s, r) => s + (tile.resourceCost[r] ?? 0), 0);
+      return sum + tileWeight * tileCost;
+    }, 0);
+    // Scale by role weight
+    const w = roleWeights[obj as ObjectiveId] ?? 1;
+    const scaled = rawScore * (w / 5); // normalize weight to ~1.0 range
+    const objThreshold = threshold * 0.5; // per-objective threshold is half the survival threshold
+    return { name: obj, current: Math.round(scaled * 10) / 10, threshold: objThreshold, met: scaled >= objThreshold };
+  });
+
+  const metCount = results.filter(r => r.met).length;
+  const satisfactionPercentage = buchiObjs.length > 0 ? Math.round((metCount / buchiObjs.length) * 100) : 100;
+
+  console.log(`BUCHI_CHECK ${player.name} (${player.roleId}): ${metCount}/${buchiObjs.length} met = ${satisfactionPercentage}%`);
+
+  return {
+    playerName: player.name,
+    role: player.roleId,
+    buchiObjectives: results,
+    overallSatisfied: metCount === buchiObjs.length,
+    satisfactionPercentage,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 11. calculateCollaborativeScore
+// ---------------------------------------------------------------------------
+
+export function calculateCollaborativeScore(
+  allPlayers: Player[],
+  boardState: { tiles: VisionFeatureTile[]; commitments: Record<string, Record<ResourceType, number>> },
+  nashHistory: number[],
+  hybridCount: number,
+  tradeCount: number,
+): CollaborativeScoreResult {
+  // Nash average
+  const nashAverage = nashHistory.length > 0
+    ? Math.round(nashHistory.reduce((s, n) => s + n, 0) / nashHistory.length)
+    : 50;
+
+  // Buchi coverage
+  const allBuchi = allPlayers.map(p => calculateBuchiSatisfaction(p, boardState));
+  const totalObjectives = allBuchi.reduce((s, b) => s + b.buchiObjectives.length, 0);
+  const metObjectives = allBuchi.reduce((s, b) => s + b.buchiObjectives.filter(o => o.met).length, 0);
+  const buchiCoverage = totalObjectives > 0 ? Math.round((metObjectives / totalObjectives) * 100) : 0;
+
+  // Resource equity (inverse Gini coefficient simplified)
+  const playerTotals = allPlayers.map(p => {
+    const pc = boardState.commitments[p.id];
+    if (!pc) return 0;
+    return RESOURCE_TYPES.reduce((s, r) => s + (pc[r] ?? 0), 0);
+  });
+  const totalCommitted = playerTotals.reduce((s, v) => s + v, 0);
+  const meanCommit = totalCommitted / Math.max(allPlayers.length, 1);
+  const variance = playerTotals.reduce((s, v) => s + Math.abs(v - meanCommit), 0) / Math.max(allPlayers.length, 1);
+  const maxDeviation = meanCommit || 1;
+  const resourceEquity = Math.round(Math.max(0, 100 - (variance / maxDeviation) * 100));
+
+  // Feature diversity
+  const coveredObjectives = new Set<string>();
+  for (const tile of boardState.tiles) {
+    for (const obj of ALL_OBJECTIVES) {
+      if ((tile.objectivesServed[obj] ?? 0) >= 0.3) coveredObjectives.add(obj);
+    }
+  }
+  const featureDiversity = Math.round((coveredObjectives.size / ALL_OBJECTIVES.length) * 100);
+
+  const hybridBonus = hybridCount * 10;
+  const tradeBonus = tradeCount * 5;
+
+  const score = Math.round(
+    nashAverage * 0.3 + buchiCoverage * 0.3 + resourceEquity * 0.2 + featureDiversity * 0.1 + hybridBonus + tradeBonus
+  );
+
+  console.log(`COLLABORATIVE_SCORE: ${score} (nash=${nashAverage} buchi=${buchiCoverage} equity=${resourceEquity} diversity=${featureDiversity} +hybrid=${hybridBonus} +trade=${tradeBonus})`);
+
+  return {
+    score,
+    breakdown: { nashAverage, buchiCoverage, resourceEquity, featureDiversity, hybridBonus, tradeBonus },
+    sharedBalanceAchieved: score >= 60,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 12. checkSharedBalance
+// ---------------------------------------------------------------------------
+
+export function checkSharedBalance(
+  collaborativeScore: CollaborativeScoreResult,
+  allPlayersBuchi: BuchiSatisfactionResult[],
+): SharedBalanceResult {
+  const blockers: string[] = [];
+
+  // Check for players with 0% satisfaction
+  for (const pb of allPlayersBuchi) {
+    if (pb.satisfactionPercentage === 0) {
+      const unmet = pb.buchiObjectives.filter(o => !o.met).map(o => o.name).join(', ');
+      blockers.push(`[${pb.playerName}] has 0% objective satisfaction — vision ignores ${unmet}`);
+    }
+  }
+
+  if (collaborativeScore.breakdown.nashAverage < 35) {
+    blockers.push(`Nash average ${collaborativeScore.breakdown.nashAverage} — players are not considering each other`);
+  }
+
+  if (collaborativeScore.breakdown.resourceEquity < 25) {
+    blockers.push(`Resource equity ${collaborativeScore.breakdown.resourceEquity} — distribution is severely uneven`);
+  }
+
+  const balanced = collaborativeScore.score >= 60 && blockers.length === 0;
+  const loopBack = !balanced;
+  const loopTarget = collaborativeScore.breakdown.featureDiversity < 50
+    ? 'tile_selection'
+    : collaborativeScore.breakdown.resourceEquity < 30
+      ? 'resource_negotiation'
+      : 'tile_selection';
+
+  console.log(`SHARED_BALANCE: ${balanced ? 'ACHIEVED' : 'NOT ACHIEVED'} score=${collaborativeScore.score} blockers=${blockers.length}`);
+
+  return { balanced, score: collaborativeScore.score, blockers, loopBack, loopTarget };
+}
+
+// ---------------------------------------------------------------------------
+// 13. evaluateGoalShot
+// ---------------------------------------------------------------------------
+
+export function evaluateGoalShot(
+  collaborativeScore: CollaborativeScoreResult,
+  allPlayersBuchi: BuchiSatisfactionResult[],
+): GoalShotResult {
+  const score = collaborativeScore.score;
+  const allAbove40 = allPlayersBuchi.every(p => p.satisfactionPercentage >= 40);
+  const anyAtZero = allPlayersBuchi.some(p => p.satisfactionPercentage === 0);
+  const mostSatisfied = allPlayersBuchi.filter(p => p.satisfactionPercentage >= 40).length >= Math.ceil(allPlayersBuchi.length * 0.6);
+
+  if (score >= 60 && allAbove40) {
+    console.log(`GOAL_SHOT: GOAL! score=${score}`);
+    return { result: 'goal', score, feedback: 'Vision achieved! The group found shared balance.', loopBack: false };
+  }
+
+  if (score >= 45 && mostSatisfied) {
+    const unsatisfied = allPlayersBuchi.filter(p => p.satisfactionPercentage < 40).map(p => p.playerName);
+    console.log(`GOAL_SHOT: NEAR MISS score=${score} unsatisfied=[${unsatisfied}]`);
+    return {
+      result: 'near_miss', score,
+      feedback: `Almost there! ${unsatisfied.length > 0 ? `${unsatisfied.join(', ')} still need adjustments.` : 'Minor adjustments needed.'}`,
+      loopBack: false,
+    };
+  }
+
+  const blockerNames = allPlayersBuchi.filter(p => p.satisfactionPercentage === 0).map(p => p.playerName);
+  console.log(`GOAL_SHOT: MISS score=${score} blockers=[${blockerNames}]`);
+  return {
+    result: 'miss', score,
+    feedback: `Vision not balanced.${blockerNames.length > 0 ? ` ${blockerNames.join(', ')} have no objectives met.` : ''} Rethink the approach.`,
+    loopBack: true,
   };
 }
