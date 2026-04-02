@@ -70,6 +70,10 @@ const ICON_EMOJI: Record<string, string> = {
   light_mode: '\u2600\uFE0F', signpost: '\u{1FAA7}', delete: '\u{1F5D1}\uFE0F', water: '\u{1F4A7}',
   forest: '\u{1F333}', store: '\u{1F3EA}', groups: '\u{1F465}', child_care: '\u{1F476}',
   deck: '\u{1F3E1}', directions_walk: '\u{1F6B6}', nature: '\u{1F331}',
+  // Batch 2 tile icons
+  solar_power: '\u2600\uFE0F', theater_comedy: '\u{1F3AD}', museum: '\u{1F3DB}\uFE0F',
+  accessible: '\u267F', nightlife: '\u{1F303}', psychiatry: '\u{1F98B}',
+  sensors: '\u{1F4E1}', construction: '\u{1F6E0}\uFE0F', palette: '\u{1F3A8}',
 };
 
 function emojiFor(icon: string): string {
