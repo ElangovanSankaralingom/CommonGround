@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { GameSession, Player, ChallengeCard, ResourceType } from '../../core/models/types';
 import { ROLE_COLORS } from '../../core/models/constants';
@@ -126,7 +126,28 @@ export default function SeriesBuilderPhase({
   const [reqAmount, setReqAmount] = useState(1);
   const [reqTargetIdx, setReqTargetIdx] = useState(0);
 
-  const hiddenThreshold = visionBoard.threshold;
+  // Round tracking + multi-series
+  const [currentRound, setCurrentRound] = useState(1);
+  const [tasksThisRound, setTasksThisRound] = useState(0);
+  const [showRoundSummary, setShowRoundSummary] = useState(false);
+  const [allSeries, setAllSeries] = useState<Series[]>([]);
+  const [activeSeriesIdx, setActiveSeriesIdx] = useState(0);
+  const MAX_ROUNDS = 4;
+
+  // Initialize allSeries from activeSeries
+  useEffect(() => {
+    if (allSeries.length === 0) setAllSeries([activeSeries]);
+  }, []);
+
+  const hiddenThreshold = useMemo(() => {
+    // Scale threshold by feature count collaboration expectation
+    const featureCount = visionBoard.tiles.length;
+    const collabExpectation = featureCount >= 6 ? 2.8 : featureCount >= 5 ? 2.5 : featureCount >= 4 ? 2.2 : 2.0;
+    const base = visionBoard.threshold;
+    const adjusted = Math.round(base * collabExpectation);
+    console.log(`THRESHOLD_ADJUSTED: base=${base} × collabExpectation=${collabExpectation} (${featureCount} features) = ${adjusted}`);
+    return adjusted;
+  }, [visionBoard.threshold, visionBoard.tiles.length]);
   const currentPlayer = sorted[currentPlayerIdx];
   const zoneId = useMemo(() => {
     const map: Record<string, string> = { boating_pond: 'z3', main_entrance: 'z1', fountain_plaza: 'z2', herbal_garden: 'z4', walking_track: 'z5', playground: 'z6', ppp_zone: 'z13' };
@@ -276,6 +297,22 @@ export default function SeriesBuilderPhase({
     setMyContributions({ budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 });
     setShowCreator(false);
 
+    // Track round completion
+    const newTaskCount = tasksThisRound + 1;
+    setTasksThisRound(newTaskCount);
+    const activePlayers = sorted.filter(p => canPlayerAct(p, lockedByPlayer[p.id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 })).length;
+
+    if (newTaskCount >= Math.min(sorted.length, activePlayers) && newTaskCount >= 2) {
+      // Round complete — show summary
+      console.log(`ROUND_COMPLETE: round=${currentRound} tasks=${newTaskCount} seriesTotal=${activeSeries.runningTotal}`);
+      if (currentRound >= MAX_ROUNDS) {
+        setStage('results'); // Auto-end after max rounds
+      } else {
+        setShowRoundSummary(true);
+      }
+      return;
+    }
+
     let nextIdx = (currentPlayerIdx + 1) % sorted.length;
     let attempts = 0;
     while (!canPlayerAct(sorted[nextIdx], lockedByPlayer[sorted[nextIdx].id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 }) && attempts < sorted.length) {
@@ -324,6 +361,53 @@ export default function SeriesBuilderPhase({
     if (attempts >= sorted.length) { setStage('results'); } else { setCurrentPlayerIdx(nextIdx); }
     setShowCreator(false);
   }, [currentPlayerIdx, sorted, lockedByPlayer]);
+
+  // ─── Round Summary Handlers ───
+  const continueBuilding = useCallback(() => {
+    sounds.playButtonClick();
+    setShowRoundSummary(false);
+    setCurrentRound(prev => prev + 1);
+    setTasksThisRound(0);
+    setCurrentPlayerIdx(0);
+    console.log('CONTINUE_BUILDING: starting round', currentRound + 1);
+  }, [currentRound]);
+
+  const startNewSeries = useCallback(() => {
+    sounds.playButtonClick();
+    const newSeries = createSeries(`Series ${String.fromCharCode(65 + allSeries.length)}`);
+    setAllSeries(prev => [...prev, newSeries]);
+    setActiveSeries(newSeries);
+    setActiveSeriesIdx(allSeries.length);
+    setShowRoundSummary(false);
+    setCurrentRound(prev => prev + 1);
+    setTasksThisRound(0);
+    setCurrentPlayerIdx(0);
+    console.log('SERIES_CREATED:', newSeries.name);
+  }, [allSeries]);
+
+  const [finishVoteOpen, setFinishVoteOpen] = useState(false);
+  const [finishVotes, setFinishVotes] = useState<Record<string, boolean>>({});
+
+  const proposeFinish = useCallback(() => {
+    sounds.playButtonClick();
+    setFinishVoteOpen(true);
+    setFinishVotes({});
+  }, []);
+
+  const castFinishVote = useCallback((playerId: string, vote: boolean) => {
+    setFinishVotes(prev => {
+      const next = { ...prev, [playerId]: vote };
+      const yesCount = Object.values(next).filter(Boolean).length;
+      if (yesCount >= 3) {
+        console.log('FINISH_VOTE_PASSED: moving to results');
+        setTimeout(() => { setFinishVoteOpen(false); setShowRoundSummary(false); setStage('results'); }, 500);
+      } else if (Object.keys(next).length >= sorted.length) {
+        console.log('FINISH_VOTE_FAILED: not enough votes');
+        setTimeout(() => setFinishVoteOpen(false), 1500);
+      }
+      return next;
+    });
+  }, [sorted]);
 
   // ─── 4-Stage Task Flow ───
   const otherPlayers = useMemo(() => sorted.filter(p => p.id !== currentPlayer?.id), [sorted, currentPlayer]);
@@ -504,6 +588,7 @@ export default function SeriesBuilderPhase({
       <div style={{ borderBottom: `1px solid ${T.outlineVariant}`, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', padding: '8px 20px', gap: 12 }}>
           <h2 style={{ fontFamily: T.fontHeadline, color: T.primary, fontSize: 16, margin: 0, fontWeight: 700 }}>Phase 4: Build the Path</h2>
+          <span style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant, background: T.containerHigh, borderRadius: 4, padding: '2px 8px' }}>Round {currentRound}/{MAX_ROUNDS}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{
               background: T.containerHigh, borderRadius: 6, padding: '4px 10px', fontSize: 11,
@@ -571,6 +656,23 @@ export default function SeriesBuilderPhase({
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* ─── LEFT: Series Timeline ─── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px 20px', overflow: 'hidden' }}>
+          {/* Series tabs (when multiple series) */}
+          {allSeries.length > 1 && (
+            <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+              {allSeries.map((s, i) => (
+                <button key={s.id} onClick={() => { setActiveSeries(s); setActiveSeriesIdx(i); }}
+                  style={{
+                    padding: '4px 12px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                    background: i === activeSeriesIdx ? T.containerHigh : 'transparent',
+                    borderBottom: i === activeSeriesIdx ? `2px solid ${T.primary}` : `2px solid transparent`,
+                    fontFamily: T.fontBody, fontSize: 10, fontWeight: i === activeSeriesIdx ? 700 : 400,
+                    color: i === activeSeriesIdx ? T.primary : T.onSurfaceVariant,
+                  }}>
+                  {s.name} ({s.tasks.length} tasks · {s.runningTotal.toFixed(1)} pts)
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
             <span style={{ fontFamily: T.fontHeadline, fontSize: 15, color: T.onSurface, fontWeight: 700 }}>{activeSeries.name}</span>
             <span style={{ fontSize: 12, color: T.onSurfaceVariant }}>{activeSeries.tasks.length} tasks</span>
@@ -1237,6 +1339,108 @@ export default function SeriesBuilderPhase({
             <div style={{ fontFamily: T.fontHeadline, fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{currentReaction.title}</div>
             <div style={{ fontSize: 13, lineHeight: '18px', marginBottom: 8 }}>{currentReaction.description}</div>
             <div style={{ fontSize: 11, opacity: 0.8 }}>{currentReaction.effect.type.replace(/_/g, ' ')} &middot; {currentReaction.effect.duration.replace(/_/g, ' ')}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── ROUND SUMMARY OVERLAY ─── */}
+      <AnimatePresence>
+        {showRoundSummary && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: 'absolute', inset: 0, background: 'rgba(22,19,12,0.95)', backdropFilter: 'blur(8px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <div style={{ background: T.container, borderRadius: 12, padding: 28, maxWidth: 520, width: '90%', boxShadow: T.woodBevel, border: `1px solid ${T.outlineVariant}15` }}>
+              <div style={{ fontFamily: T.fontHeadline, fontSize: 22, color: T.tertiary, textAlign: 'center', marginBottom: 16 }}>
+                Round {currentRound} Complete
+              </div>
+
+              {/* Series stats */}
+              <div style={{ background: T.containerHigh, borderRadius: 8, padding: 14, marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 14, color: T.onSurface }}>{activeSeries.name}</span>
+                  <span style={{ fontFamily: T.fontNumber, fontSize: 18, fontWeight: 700, color: T.tertiary }}>{activeSeries.runningTotal.toFixed(1)} pts</span>
+                </div>
+                <div style={{ fontSize: 11, color: T.onSurfaceVariant }}>{activeSeries.tasks.length} tasks · {chainInfo}</div>
+                {/* Layer coverage */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map(layer => {
+                    const cov = layerCoverage[layer];
+                    return (
+                      <div key={layer} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <span style={{ fontSize: 9 }}>{LAYER_ICONS[layer]}</span>
+                        <div style={{ flex: 1, height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{ width: `${cov.percent}%`, height: '100%', background: LAYER_COLORS[layer], borderRadius: 2 }} />
+                        </div>
+                        <span style={{ fontSize: 8, color: LAYER_COLORS[layer] }}>{cov.percent}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Threshold status */}
+              <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                {thresholdCrossed ? (
+                  <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.tertiary }}>{'\u2728'} The zone is beginning to transform! ({transformLevel}%)</div>
+                ) : (
+                  <>
+                    <div style={{ height: 8, background: T.surface, borderRadius: 4, overflow: 'hidden', marginBottom: 4 }}>
+                      <div style={{ height: '100%', width: `${Math.min(100, (activeSeries.runningTotal / hiddenThreshold) * 100)}%`, background: T.primary, borderRadius: 4, transition: 'width 0.5s' }} />
+                    </div>
+                    <div style={{ fontFamily: T.fontBody, fontSize: 11, color: T.onSurfaceVariant }}>The vision is forming but not yet complete. More work is needed.</div>
+                  </>
+                )}
+              </div>
+
+              {/* Resource remaining */}
+              <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 16, textAlign: 'center' }}>
+                Resources remaining: {sorted.reduce((s, p) => s + RES_TYPES.reduce((ss, r) => ss + Math.max(0, (resourcePools[p.id]?.[r] || 0) - (lockedByPlayer[p.id]?.[r] || 0)), 0), 0)} / {sorted.length * 12} tokens
+              </div>
+
+              {/* Finish vote */}
+              {finishVoteOpen && (
+                <div style={{ background: T.surface, borderRadius: 8, padding: 12, marginBottom: 12, border: `1px solid ${T.outlineVariant}` }}>
+                  <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.onSurface, marginBottom: 8 }}>Finish Phase 4? Best series becomes the plan.</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 4 }}>
+                    {sorted.map(p => {
+                      const v = finishVotes[p.id];
+                      return (
+                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ fontSize: 10, color: T.onSurfaceVariant }}>{p.name}:</span>
+                          {v === undefined ? (
+                            <>
+                              <button onClick={() => castFinishVote(p.id, true)} style={{ padding: '2px 8px', background: T.primary, color: T.surface, border: 'none', borderRadius: 4, fontSize: 9, cursor: 'pointer' }}>Yes</button>
+                              <button onClick={() => castFinishVote(p.id, false)} style={{ padding: '2px 8px', background: T.outlineVariant, color: T.onSurface, border: 'none', borderRadius: 4, fontSize: 9, cursor: 'pointer' }}>No</button>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 9, color: v ? T.primary : '#e55' }}>{v ? 'Yes' : 'No'}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button onClick={continueBuilding} style={{
+                  padding: '10px 20px', background: T.primary, color: T.surface, border: 'none', borderRadius: 8,
+                  fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                }}>Continue Building {activeSeries.name}</button>
+                {allSeries.length < 4 && (
+                  <button onClick={startNewSeries} style={{
+                    padding: '8px 16px', background: 'transparent', color: T.tertiary, border: `1px solid ${T.tertiary}40`,
+                    borderRadius: 8, fontFamily: T.fontBody, fontSize: 12, cursor: 'pointer',
+                  }}>Start New Series</button>
+                )}
+                <button onClick={proposeFinish} style={{
+                  padding: '6px 16px', background: 'transparent', color: T.onSurfaceVariant, border: `1px solid ${T.outlineVariant}`,
+                  borderRadius: 8, fontFamily: T.fontBody, fontSize: 11, cursor: 'pointer',
+                }}>Finish Phase</button>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

@@ -30,6 +30,8 @@ import { DeckDisplay } from '../effects/ResourceAnimation';
 import type { NashEngineOutput } from '../../core/engine/nashEngine';
 import GameEnvironment, { SoundControl } from '../components/GameEnvironment';
 import PaymentDay from '../components/PaymentDay';
+import { getVisionTilesForZoneAndSet, toFeatureTile, generateLayeredVision, type FeatureTile } from '../../core/content/featureTiles';
+import { calculateThreshold } from '../../core/engine/visionBoardEngine';
 
 // ── Role metadata ────────────────────────────────────────────────
 
@@ -1105,6 +1107,91 @@ export default function GameScreen() {
               <span>Back</span>
             </button>
           )}
+
+          {/* ── DEV: Skip & Phase Selector (testing only) ── */}
+          <div style={{
+            position: 'absolute', bottom: 8, right: 8, zIndex: 9999,
+            display: 'flex', gap: 4, alignItems: 'center',
+          }}>
+            <select
+              onChange={(e) => {
+                const target = e.target.value as typeof gamifiedPhase;
+                if (!target) return;
+                // Auto-generate vision data for downstream phases
+                const zone = session.board?.zones ? Object.keys(session.board.zones)[0] || 'boating_pond' : 'boating_pond';
+                const zoneMap: Record<string, string> = { boating_pond: 'z3', main_entrance: 'z1', fountain_plaza: 'z2', herbal_garden: 'z4', walking_track: 'z5', playground: 'z6', ppp_zone: 'z13' };
+                const zId = zoneMap[zone] || 'z3';
+                if (target === 'deliberation' || target === 'relay_race' || target === 'scoring') {
+                  // Need vision board data
+                  const infra = getVisionTilesForZoneAndSet(zId, 'infrastructure');
+                  const comm = getVisionTilesForZoneAndSet(zId, 'community');
+                  const eco = getVisionTilesForZoneAndSet(zId, 'ecology');
+                  const picks = [infra[0], comm[0], eco[0]].filter(Boolean);
+                  const tiles = picks.map(t => toFeatureTile(t));
+                  const thr = calculateThreshold(picks, 3, players);
+                  const vision = generateLayeredVision(picks, zone.replace(/_/g, ' '));
+                  setVisionBoard({
+                    tiles, threshold: thr.threshold,
+                    objectivesCovered: ['safety', 'community', 'greenery'],
+                  });
+                  console.log('DEV_SKIP: Auto-generated vision for', zone, 'threshold:', thr.threshold, 'features:', picks.map(p => p.name));
+                }
+                if (target === 'relay_race' || target === 'scoring') { advancePhase(); }
+                setGamifiedPhase(target);
+                console.log('DEV_JUMP: → ', target);
+              }}
+              value=""
+              style={{
+                background: 'rgba(224,72,56,0.15)', border: '1px solid rgba(224,72,56,0.3)',
+                borderRadius: 4, padding: '3px 6px', fontSize: 9, color: '#e04838',
+                fontFamily: 'Manrope, sans-serif', cursor: 'pointer', opacity: 0.6,
+              }}
+            >
+              <option value="">DEV: Jump to...</option>
+              <option value="event_roll">1. Winds of Change</option>
+              <option value="challenge">2. Investigate</option>
+              <option value="investigation">2b. Deep Investigation</option>
+              <option value="deliberation">3. Vision Board</option>
+              <option value="relay_race">4. Build the Path</option>
+              <option value="scoring">5. Park Guardian</option>
+            </select>
+            <button
+              onClick={() => {
+                const PHASE_FORWARD: Record<string, typeof gamifiedPhase> = {
+                  event_roll: 'challenge', challenge: 'investigation', investigation: 'deliberation',
+                  deliberation: 'relay_race', relay_race: 'scoring', scoring: 'round_transition',
+                };
+                const next = gamifiedPhase ? PHASE_FORWARD[gamifiedPhase] : null;
+                if (!next) return;
+                // Auto-generate needed data when skipping vision board
+                if (gamifiedPhase === 'deliberation') {
+                  const zone = session.board?.zones ? Object.keys(session.board.zones)[0] || 'boating_pond' : 'boating_pond';
+                  const zoneMap: Record<string, string> = { boating_pond: 'z3', main_entrance: 'z1', fountain_plaza: 'z2', herbal_garden: 'z4', walking_track: 'z5', playground: 'z6', ppp_zone: 'z13' };
+                  const zId = zoneMap[zone] || 'z3';
+                  const infra = getVisionTilesForZoneAndSet(zId, 'infrastructure');
+                  const comm = getVisionTilesForZoneAndSet(zId, 'community');
+                  const eco = getVisionTilesForZoneAndSet(zId, 'ecology');
+                  const picks = [infra[0], comm[0], eco[0]].filter(Boolean);
+                  const tiles = picks.map(t => toFeatureTile(t));
+                  const thr = calculateThreshold(picks, 3, players);
+                  setVisionBoard({ tiles, threshold: thr.threshold, objectivesCovered: ['safety', 'community', 'greenery'] });
+                  console.log('DEV_SKIP: Vision Board → auto-generated vision for', zone, 'threshold:', thr.threshold);
+                }
+                advancePhase();
+                setGamifiedPhase(next);
+                console.log('DEV_SKIP:', gamifiedPhase, '→', next);
+              }}
+              style={{
+                background: 'rgba(224,72,56,0.15)', border: '1px solid rgba(224,72,56,0.3)',
+                borderRadius: 4, padding: '3px 8px', fontSize: 9, color: '#e04838',
+                fontFamily: 'Manrope, sans-serif', cursor: 'pointer', opacity: 0.6,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+            >
+              DEV: Skip to Next {'\u2192'}
+            </button>
+          </div>
         </div>
       ) : (
       <React.Fragment>
