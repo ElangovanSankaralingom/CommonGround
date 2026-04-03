@@ -5,7 +5,8 @@ import { ROLE_COLORS } from '../../core/models/constants';
 import {
   type VisionFeatureTile, type HybridTile, type ObjectiveId, type FeatureTile,
   HYBRID_TILES, getVisionTilesForZone, getVisionTilesForZoneAndSet, toFeatureTile,
-  type FeatureSet, FEATURE_SET_LABELS,
+  type FeatureSet, type PlacemakingLayer, FEATURE_SET_LABELS,
+  LAYER_COLORS, LAYER_LABELS,
   RESOURCE_ABILITY_MAP, calculateEffectiveness,
 } from '../../core/content/featureTiles';
 import {
@@ -561,9 +562,15 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
     sounds.playButtonClick();
   }, [boardNotes, ballHolder, isMyTurn]);
 
-  // Negotiation set state (separate from individual picks set)
-  const [negFeatureSet, setNegFeatureSet] = useState<FeatureSet>('infrastructure');
-  const negTiles = useMemo(() => getVisionTilesForZoneAndSet(zoneId, negFeatureSet), [zoneId, negFeatureSet]);
+  // All zone features sorted by pick popularity (for group negotiation)
+  const allNegTiles = useMemo(() => {
+    return [...allZoneTiles].sort((a, b) => {
+      const aCount = Object.values(playerPicks).filter(picks => picks.includes(a.id)).length;
+      const bCount = Object.values(playerPicks).filter(picks => picks.includes(b.id)).length;
+      if (bCount !== aCount) return bCount - aCount;
+      return a.name.localeCompare(b.name);
+    });
+  }, [allZoneTiles, playerPicks]);
 
   // Build a pick count lookup from individual picks
   const pickCountMap = useMemo(() => {
@@ -582,24 +589,14 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
     const onBoardIds = new Set(boardNotes.map(n => n.tileId));
     return (
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', gap: 0 }}>
-        {/* LEFT: Full Feature Pool with set tabs */}
+        {/* LEFT: All features in one sorted list (no tabs) */}
         <div style={{ width: '40%', display: 'flex', flexDirection: 'column', borderRight: `1px solid ${T.outlineVariant}` }}>
-          <div style={{ padding: '8px 10px 0' }}>
-            <div style={{ fontFamily: T.fontHeadline, fontSize: 13, color: T.primary, marginBottom: 6 }}>ALL FEATURES</div>
-            {/* Set tabs */}
-            <div style={{ display: 'flex', borderBottom: `1px solid rgba(69,72,60,0.15)`, marginBottom: 6 }}>
-              {(['infrastructure', 'community', 'ecology'] as FeatureSet[]).map(fs => (
-                <button key={fs} onClick={() => setNegFeatureSet(fs)} style={{
-                  flex: 1, padding: '5px 4px', background: negFeatureSet === fs ? 'rgba(174,212,86,0.12)' : 'transparent',
-                  border: 'none', borderBottom: negFeatureSet === fs ? `2px solid ${T.primary}` : '2px solid transparent',
-                  color: negFeatureSet === fs ? T.primary : T.onSurfaceVariant,
-                  fontFamily: T.fontBody, fontSize: 9, fontWeight: 600, cursor: 'pointer',
-                }}>{FEATURE_SET_LABELS[fs]}</button>
-              ))}
-            </div>
+          <div style={{ padding: '8px 10px 4px' }}>
+            <div style={{ fontFamily: T.fontHeadline, fontSize: 13, color: T.primary, marginBottom: 2 }}>ALL FEATURES</div>
+            <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.outlineVariant, marginBottom: 4 }}>{allNegTiles.length} features · sorted by popularity</div>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px 10px' }}>
-            {negTiles.map(tile => {
+            {allNegTiles.map(tile => {
               const isOnBoard = onBoardIds.has(tile.id);
               const pickInfo = pickCountMap[tile.id];
               const pickCount = pickInfo?.count || 0;
@@ -623,7 +620,10 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
                   onMouseLeave={(e) => { if (!isOnBoard) (e.currentTarget as HTMLElement).style.background = isOnBoard ? `${T.primary}05` : '#1e1b14'; }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 16, color: T.onSurfaceVariant }}>{emojiFor(tile.icon)}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                      <span style={{ fontSize: 16, color: T.onSurfaceVariant }}>{emojiFor(tile.icon)}</span>
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: LAYER_COLORS[tile.layer] || T.outlineVariant }} title={LAYER_LABELS[tile.layer]} />
+                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 11, color: T.onSurface, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{tile.name}</span>
@@ -643,9 +643,9 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
                 </div>
               );
             })}
-            {negTiles.length === 0 && (
+            {allNegTiles.length === 0 && (
               <div style={{ fontFamily: T.fontBody, fontSize: 11, color: T.outlineVariant, padding: 10, textAlign: 'center' }}>
-                No features available for this zone in this set
+                No features available for this zone
               </div>
             )}
           </div>
