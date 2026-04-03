@@ -346,22 +346,36 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
                 style={{
                   background: picked ? T.containerHigh : T.container, boxShadow: T.woodBevel,
                   borderRadius: 8, padding: 10, marginBottom: 6, cursor: 'pointer',
-                  border: picked ? `1px solid ${T.primary}` : '1px solid transparent',
-                  opacity: picked ? 0.5 : 1,
+                  borderLeft: picked ? `3px solid ${T.primary}` : '3px solid transparent',
+                  border: picked ? `1px solid rgba(174,212,86,0.3)` : '1px solid transparent',
                 }}
                 onClick={() => {
                   if (!isMyTurn(ballHolder?.id)) return;
-                  if (myPicks.length >= 3 || picked) return;
+                  if (picked) {
+                    // Toggle OFF — remove from picks
+                    setPlayerPicks(prev => ({
+                      ...prev, [ballHolder.id]: (prev[ballHolder.id] || []).filter(id => id !== tile.id),
+                    }));
+                    console.log('FEATURE_REMOVED:', tile.name, 'by', ballHolder.name);
+                    return;
+                  }
+                  if (myPicks.length >= 3) {
+                    setNashToast('Remove a feature first \u2014 maximum 3 picks');
+                    setTimeout(() => setNashToast(null), 2500);
+                    return;
+                  }
                   const nash = nashCheckAction({ type: 'place_tile', payload: tile }, ballHolder, sorted, { tiles: visionTiles, commitments });
                   setNashHistory(prev => [...prev, nash.nashScore]);
                   if (!nash.passed) { triggerBallDrop(nash.reason); return; }
                   if (nash.nashScore >= 25 && nash.nashScore <= 40) setNashToast('Borderline collaborative');
                   setPlayerPicks(prev => ({ ...prev, [ballHolder.id]: [...(prev[ballHolder.id] || []), tile.id] }));
+                  console.log('FEATURE_ADDED:', tile.name, 'by', ballHolder.name);
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 18 }}>{emojiFor(tile.icon)}</span>
                   <span style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, color: T.onSurface }}>{tile.name}</span>
+                  {picked && <span style={{ fontSize: 12, color: T.primary, marginLeft: 'auto' }}>{'\u2713'}</span>}
                 </div>
                 <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant, marginTop: 2 }}>{tile.description}</div>
                 <div style={{ fontFamily: T.fontNumber, fontSize: 10, marginTop: 4, display: 'flex', gap: 6 }}>
@@ -398,19 +412,42 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   {[0, 1, 2].map(slot => {
                     const tid = pPicks[slot];
-                    const tile = tid ? availableTiles.find(t => t.id === tid) : null;
+                    const tile = tid ? allZoneTiles.find(t => t.id === tid) || availableTiles.find(t => t.id === tid) : null;
+                    const canRemove = active && tile;
                     return (
-                      <div key={slot} style={{
-                        flex: 1, background: T.surface, borderRadius: 6, padding: 6,
-                        border: `1px dashed ${T.outlineVariant}`, minHeight: 32,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
+                      <div key={slot}
+                        onClick={() => {
+                          if (!canRemove || !isMyTurn(ballHolder?.id)) return;
+                          setPlayerPicks(prev => ({
+                            ...prev, [p.id]: (prev[p.id] || []).filter(id => id !== tid),
+                          }));
+                          console.log('FEATURE_REMOVED:', tile?.name, 'by', p.name, '(slot click)');
+                          sounds.playButtonClick();
+                        }}
+                        style={{
+                          flex: 1, background: T.surface, borderRadius: 6, padding: 6,
+                          border: tile ? `1px solid ${T.outlineVariant}` : `1px dashed ${T.outlineVariant}`,
+                          minHeight: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: canRemove ? 'pointer' : 'default', position: 'relative',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => { if (canRemove) (e.currentTarget as HTMLElement).style.background = 'rgba(224,72,56,0.1)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = T.surface; }}
+                      >
                         {tile ? (
-                          <span style={{ fontFamily: T.fontBody, fontSize: 11, color: T.onSurface }}>
-                            {emojiFor(tile.icon)} {tile.name}
-                          </span>
+                          <>
+                            <span style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurface }}>
+                              {emojiFor(tile.icon)} {tile.name}
+                            </span>
+                            {canRemove && (
+                              <span style={{
+                                position: 'absolute', top: 2, right: 4, fontSize: 10, color: '#e04838',
+                                opacity: 0.6, fontWeight: 700, lineHeight: 1,
+                              }}>{'\u00D7'}</span>
+                            )}
+                          </>
                         ) : (
-                          <span style={{ fontFamily: T.fontBody, fontSize: 10, color: T.outlineVariant }}>[Pick {slot + 1}]</span>
+                          <span style={{ fontFamily: T.fontBody, fontSize: 9, color: T.outlineVariant, opacity: 0.4 }}>+ Pick {slot + 1}</span>
                         )}
                       </div>
                     );
