@@ -301,6 +301,14 @@ export function calculateThreshold(
   if (coveredCategories >= 5) placemakingMult *= 0.9;
   else if (coveredCategories <= 2) placemakingMult *= 1.15;
 
+  // Layer balance: 3 placemaking layers = lower threshold
+  const layersCovered = ['foundation', 'activation', 'sustainability'].filter(layer =>
+    selectedTiles.some(t => (t as any).layer === layer)
+  ).length;
+  if (layersCovered === 3) { placemakingMult *= 0.85; console.log('THRESHOLD_LAYERS: all 3 layers → ×0.85'); }
+  else if (layersCovered === 1) { placemakingMult *= 1.2; console.log('THRESHOLD_LAYERS: only 1 layer → ×1.2'); }
+  else { console.log('THRESHOLD_LAYERS:', layersCovered, 'layers → ×1.0'); }
+
   const threshold = Math.round(basePoints * placemakingMult * diffMultiplier);
 
   console.log(`THRESHOLD_CALC: tokens=${grandTotal} avgEff=${(avgEffectiveness * 100).toFixed(1)}% base=${basePoints.toFixed(1)} placemaking=${placemakingMult} diff=${diffMultiplier} → threshold=${threshold}`);

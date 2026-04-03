@@ -130,6 +130,8 @@ export function calculatePoints(tokens: number, effectivenessPercent: number): n
 
 export type ObjectiveId = 'safety' | 'greenery' | 'access' | 'culture' | 'revenue' | 'community';
 
+export type PlacemakingLayer = 'foundation' | 'activation' | 'sustainability';
+
 export interface VisionFeatureTile {
   id: string;
   name: string;
@@ -139,6 +141,7 @@ export interface VisionFeatureTile {
   objectivesServed: Record<ObjectiveId, number>;
   compatibleZones: string[];
   hybridsWith: string[];
+  layer: PlacemakingLayer;
 }
 
 export interface HybridTile {
@@ -157,205 +160,205 @@ export const FEATURE_TILES: VisionFeatureTile[] = [
     description: 'Clear and restore the blocked 450mm RCC drainage network.',
     resourceCost: { budget: 3, knowledge: 2, volunteer: 1, material: 3, influence: 1 },
     objectivesServed: { safety: 0.6, greenery: 0.8, access: 0.2, culture: 0, revenue: 0.3, community: 0.4 },
-    compatibleZones: ['z3', 'z4', 'z5'], hybridsWith: ['water_filtration', 'irrigation_link'] },
+    compatibleZones: ['z1', 'z3', 'z4', 'z13'], hybridsWith: ['water_filtration', 'irrigation_link'], layer: 'foundation' },
   { id: 'water_filtration', name: 'Water Filtration Unit', icon: 'water_drop',
     description: 'Install biological filtration to restore water quality to bathing standard.',
     resourceCost: { budget: 2, knowledge: 3, volunteer: 0, material: 2, influence: 1 },
     objectivesServed: { safety: 0.7, greenery: 0.9, access: 0.3, culture: 0, revenue: 0.4, community: 0.5 },
-    compatibleZones: ['z3', 'z2'], hybridsWith: ['drainage_system'] },
+    compatibleZones: ['z3'], hybridsWith: ['drainage_system'], layer: 'foundation' },
   { id: 'community_seating', name: 'Community Seating Area', icon: 'chair',
     description: 'Shaded benches and gathering space for residents and elderly visitors.',
     resourceCost: { budget: 1, knowledge: 0, volunteer: 2, material: 2, influence: 0 },
     objectivesServed: { safety: 0.2, greenery: 0.1, access: 0.7, culture: 0.4, revenue: 0.1, community: 0.9 },
-    compatibleZones: ['z1', 'z2', 'z3', 'z5', 'z6'], hybridsWith: ['cafe_space'] },
+    compatibleZones: ['z1', 'z2', 'z3', 'z4', 'z5', 'z6'], hybridsWith: ['cafe_space'], layer: 'activation' },
   { id: 'cafe_space', name: 'Community Cafe Kiosk', icon: 'local_cafe',
     description: 'Small vendor space generating revenue while serving visitors.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 1, material: 2, influence: 2 },
     objectivesServed: { safety: 0.1, greenery: 0, access: 0.3, culture: 0.5, revenue: 0.9, community: 0.6 },
-    compatibleZones: ['z1', 'z2', 'z3', 'z13'], hybridsWith: ['community_seating'] },
+    compatibleZones: ['z1', 'z2', 'z3', 'z13'], hybridsWith: ['community_seating'], layer: 'activation' },
   { id: 'native_plants', name: 'Native Plant Restoration', icon: 'park',
     description: 'Replant indigenous species to restore biodiversity and reduce maintenance.',
     resourceCost: { budget: 1, knowledge: 2, volunteer: 3, material: 1, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 1.0, access: 0.2, culture: 0.3, revenue: 0.1, community: 0.4 },
-    compatibleZones: ['z3', 'z4', 'z5', 'z6'], hybridsWith: ['ecological_buffer'] },
+    compatibleZones: ['z3', 'z4', 'z5', 'z6'], hybridsWith: ['ecological_buffer'], layer: 'sustainability' },
   { id: 'playground_equipment', name: 'Playground Equipment Overhaul', icon: 'sports_soccer',
     description: 'Replace rusted equipment with safe modern play structures.',
     resourceCost: { budget: 3, knowledge: 1, volunteer: 1, material: 3, influence: 1 },
     objectivesServed: { safety: 0.9, greenery: 0.1, access: 0.5, culture: 0.3, revenue: 0.2, community: 0.8 },
-    compatibleZones: ['z6'], hybridsWith: ['safety_surfacing'] },
+    compatibleZones: ['z6'], hybridsWith: ['safety_surfacing'], layer: 'foundation' },
   { id: 'safety_surfacing', name: 'Impact-Absorbing Surface', icon: 'layers',
     description: 'Rubber safety flooring in fall zones around play equipment.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 1, material: 3, influence: 0 },
     objectivesServed: { safety: 1.0, greenery: 0, access: 0.3, culture: 0, revenue: 0, community: 0.5 },
-    compatibleZones: ['z6'], hybridsWith: ['playground_equipment'] },
+    compatibleZones: ['z5', 'z6'], hybridsWith: ['playground_equipment'], layer: 'foundation' },
   { id: 'walking_path', name: 'Walking Path Restoration', icon: 'route',
     description: 'Repair cracked slabs, install root barriers, restore full width.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 2, material: 2, influence: 0 },
     objectivesServed: { safety: 0.6, greenery: 0.3, access: 0.9, culture: 0.2, revenue: 0.2, community: 0.7 },
-    compatibleZones: ['z5', 'z1'], hybridsWith: ['path_lighting'] },
+    compatibleZones: ['z1', 'z4', 'z5', 'z13'], hybridsWith: ['path_lighting'], layer: 'foundation' },
   { id: 'path_lighting', name: 'Solar Path Lighting', icon: 'light_mode',
     description: 'Replace 8 dead light poles with solar-powered units for evening safety.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 0, material: 2, influence: 1 },
     objectivesServed: { safety: 0.9, greenery: 0.1, access: 0.6, culture: 0.1, revenue: 0.3, community: 0.7 },
-    compatibleZones: ['z5', 'z1', 'z3'], hybridsWith: ['walking_path'] },
+    compatibleZones: ['z1', 'z2', 'z3', 'z5', 'z6', 'z13'], hybridsWith: ['walking_path'], layer: 'foundation' },
   { id: 'signage_system', name: 'Wayfinding & Information Signage', icon: 'signpost',
     description: 'Distance markers, directional signs, and interpretive boards.',
     resourceCost: { budget: 1, knowledge: 1, volunteer: 1, material: 1, influence: 0 },
     objectivesServed: { safety: 0.3, greenery: 0.1, access: 0.6, culture: 0.5, revenue: 0.2, community: 0.4 },
-    compatibleZones: ['z1', 'z2', 'z3', 'z5', 'z6', 'z13'], hybridsWith: [] },
+    compatibleZones: ['z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z13'], hybridsWith: [], layer: 'activation' },
   { id: 'waste_management', name: 'Waste Collection System', icon: 'delete',
     description: 'Segregated bins with scheduled collection and composting station.',
     resourceCost: { budget: 1, knowledge: 0, volunteer: 2, material: 1, influence: 1 },
     objectivesServed: { safety: 0.4, greenery: 0.5, access: 0.3, culture: 0.2, revenue: 0.1, community: 0.6 },
-    compatibleZones: ['z1', 'z2', 'z3', 'z4', 'z5', 'z6'], hybridsWith: [] },
+    compatibleZones: ['z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z13'], hybridsWith: [], layer: 'sustainability' },
   { id: 'irrigation_link', name: 'Irrigation Network Extension', icon: 'water',
     description: 'Extend water supply from tanker point or restored Z3 junction to garden beds.',
     resourceCost: { budget: 1, knowledge: 2, volunteer: 1, material: 2, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 0.9, access: 0.1, culture: 0.1, revenue: 0.2, community: 0.5 },
-    compatibleZones: ['z4', 'z3'], hybridsWith: ['drainage_system'] },
+    compatibleZones: ['z3', 'z4'], hybridsWith: ['drainage_system'], layer: 'sustainability' },
   { id: 'ecological_buffer', name: 'Ecological Buffer Zone', icon: 'forest',
     description: 'Natural barrier of native vegetation to protect pond from runoff.',
     resourceCost: { budget: 1, knowledge: 2, volunteer: 3, material: 1, influence: 1 },
     objectivesServed: { safety: 0.2, greenery: 1.0, access: 0.1, culture: 0.3, revenue: 0.1, community: 0.3 },
-    compatibleZones: ['z3', 'z4'], hybridsWith: ['native_plants'] },
+    compatibleZones: ['z3', 'z4', 'z5'], hybridsWith: ['native_plants'], layer: 'sustainability' },
   { id: 'vendor_market', name: 'Organized Vendor Market', icon: 'store',
     description: 'Designated vendor area with infrastructure freeing up main pathways.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 2, material: 2, influence: 3 },
     objectivesServed: { safety: 0.3, greenery: 0, access: 0.8, culture: 0.5, revenue: 0.8, community: 0.7 },
-    compatibleZones: ['z1', 'z13'], hybridsWith: ['cafe_space'] },
+    compatibleZones: ['z1', 'z13'], hybridsWith: ['cafe_space'], layer: 'activation' },
   { id: 'community_governance', name: 'Community Management Committee', icon: 'groups',
     description: 'Resident-led maintenance and oversight body with Corporation coordination.',
     resourceCost: { budget: 0, knowledge: 1, volunteer: 3, material: 0, influence: 2 },
     objectivesServed: { safety: 0.3, greenery: 0.3, access: 0.4, culture: 0.6, revenue: 0.3, community: 1.0 },
-    compatibleZones: ['z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z13'], hybridsWith: [] },
+    compatibleZones: ['z3', 'z4', 'z6', 'z13'], hybridsWith: [], layer: 'activation' },
   { id: 'fountain_repair', name: 'Fountain Motor Replacement', icon: 'water_drop',
     description: 'Replace burnt pump motor and resolve SPV-Corporation warranty deadlock.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 0, material: 2, influence: 3 },
     objectivesServed: { safety: 0.4, greenery: 0.5, access: 0.5, culture: 0.7, revenue: 0.4, community: 0.8 },
-    compatibleZones: ['z2'], hybridsWith: [] },
+    compatibleZones: ['z2'], hybridsWith: [], layer: 'foundation' },
   // ── New tiles (batch 2) ────────────────────────────────────────
   { id: 'solar_pump', name: 'Solar-Powered Water Pump', icon: 'solar_power',
     description: 'Off-grid pump for fountain and irrigation using rooftop solar panels.',
     resourceCost: { budget: 2, knowledge: 2, volunteer: 1, material: 3, influence: 0 },
     objectivesServed: { safety: 0.3, greenery: 0.7, access: 0.2, culture: 0.1, revenue: 0.2, community: 0.4 },
-    compatibleZones: ['z2', 'z3', 'z4'], hybridsWith: ['fountain_repair', 'irrigation_link'] },
+    compatibleZones: ['z1', 'z2', 'z3', 'z4', 'z13'], hybridsWith: ['fountain_repair', 'irrigation_link'], layer: 'foundation' },
   { id: 'amphitheatre', name: 'Open-Air Amphitheatre', icon: 'theater_comedy',
     description: 'Tiered stone seating for cultural events, school programs, and community meetings.',
     resourceCost: { budget: 3, knowledge: 1, volunteer: 2, material: 3, influence: 1 },
     objectivesServed: { safety: 0.1, greenery: 0.1, access: 0.5, culture: 1.0, revenue: 0.5, community: 0.9 },
-    compatibleZones: ['z2', 'z13'], hybridsWith: ['community_seating'] },
+    compatibleZones: ['z2', 'z13'], hybridsWith: ['community_seating'], layer: 'activation' },
   { id: 'heritage_trail', name: 'Heritage Interpretation Trail', icon: 'museum',
     description: 'Marked walking route connecting historical and ecological points with QR code info boards.',
     resourceCost: { budget: 1, knowledge: 3, volunteer: 2, material: 1, influence: 0 },
     objectivesServed: { safety: 0.2, greenery: 0.3, access: 0.7, culture: 0.9, revenue: 0.4, community: 0.6 },
-    compatibleZones: ['z1', 'z3', 'z5'], hybridsWith: ['signage_system', 'walking_path'] },
+    compatibleZones: ['z1', 'z3', 'z5'], hybridsWith: ['signage_system', 'walking_path'], layer: 'activation' },
   { id: 'rainwater_harvest', name: 'Rainwater Harvesting System', icon: 'water_drop',
     description: 'Collection tanks at park buildings to supplement irrigation during dry months.',
     resourceCost: { budget: 2, knowledge: 2, volunteer: 1, material: 2, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 0.8, access: 0.1, culture: 0.2, revenue: 0.1, community: 0.3 },
-    compatibleZones: ['z3', 'z4', 'z5'], hybridsWith: ['irrigation_link', 'drainage_system'] },
+    compatibleZones: ['z3', 'z4', 'z5'], hybridsWith: ['irrigation_link', 'drainage_system'], layer: 'foundation' },
   { id: 'disability_access', name: 'Universal Accessibility Retrofit', icon: 'accessible',
     description: 'Ramps, tactile paths, and wheelchair-friendly surfaces across the zone.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 1, material: 3, influence: 2 },
     objectivesServed: { safety: 0.5, greenery: 0, access: 1.0, culture: 0.3, revenue: 0.2, community: 0.8 },
-    compatibleZones: ['z1', 'z2', 'z5', 'z6'], hybridsWith: ['walking_path'] },
+    compatibleZones: ['z1', 'z2', 'z5', 'z6', 'z13'], hybridsWith: ['walking_path'], layer: 'foundation' },
   { id: 'night_market', name: 'Weekend Night Market', icon: 'nightlife',
     description: 'Designated evening vendor zone with lighting and waste management built in.',
     resourceCost: { budget: 2, knowledge: 0, volunteer: 3, material: 2, influence: 3 },
     objectivesServed: { safety: 0.4, greenery: 0, access: 0.5, culture: 0.7, revenue: 1.0, community: 0.8 },
-    compatibleZones: ['z1', 'z2', 'z13'], hybridsWith: ['vendor_market', 'cafe_space'] },
+    compatibleZones: ['z1', 'z2', 'z13'], hybridsWith: ['vendor_market', 'cafe_space'], layer: 'activation' },
   { id: 'butterfly_garden', name: 'Butterfly & Pollinator Garden', icon: 'psychiatry',
     description: 'Native flowering plants attracting pollinators with educational signage.',
     resourceCost: { budget: 1, knowledge: 2, volunteer: 3, material: 1, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 1.0, access: 0.3, culture: 0.6, revenue: 0.3, community: 0.7 },
-    compatibleZones: ['z3', 'z4', 'z5'], hybridsWith: ['native_plants', 'ecological_buffer'] },
+    compatibleZones: ['z3', 'z4', 'z5', 'z6'], hybridsWith: ['native_plants', 'ecological_buffer'], layer: 'sustainability' },
   { id: 'smart_monitoring', name: 'IoT Environmental Monitoring', icon: 'sensors',
     description: 'Water quality sensors, footfall counters, and air quality monitors with public dashboard.',
     resourceCost: { budget: 2, knowledge: 3, volunteer: 0, material: 2, influence: 1 },
     objectivesServed: { safety: 0.6, greenery: 0.4, access: 0.2, culture: 0.1, revenue: 0.3, community: 0.5 },
-    compatibleZones: ['z2', 'z3', 'z4', 'z5'], hybridsWith: ['water_filtration'] },
+    compatibleZones: ['z2', 'z3', 'z4', 'z5', 'z6'], hybridsWith: ['water_filtration'], layer: 'foundation' },
   { id: 'skill_workshop', name: 'Community Skill Workshop Space', icon: 'construction',
     description: 'Covered area for gardening workshops, repair cafes, and environmental education.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 3, material: 2, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 0.2, access: 0.4, culture: 0.8, revenue: 0.3, community: 1.0 },
-    compatibleZones: ['z4', 'z6', 'z13'], hybridsWith: ['community_governance'] },
+    compatibleZones: ['z4', 'z6', 'z13'], hybridsWith: ['community_governance'], layer: 'activation' },
   { id: 'public_art', name: 'Community Mural & Art Installations', icon: 'palette',
     description: 'Local artist murals replacing graffiti with children art workshop component.',
     resourceCost: { budget: 1, knowledge: 0, volunteer: 3, material: 1, influence: 1 },
     objectivesServed: { safety: 0.2, greenery: 0.1, access: 0.3, culture: 1.0, revenue: 0.2, community: 0.9 },
-    compatibleZones: ['z1', 'z2', 'z3', 'z6', 'z13'], hybridsWith: ['heritage_trail'] },
+    compatibleZones: ['z1', 'z3', 'z6', 'z13'], hybridsWith: ['heritage_trail'], layer: 'activation' },
   // ── Set B: Community & Culture features ────────────────────
   { id: 'outdoor_classroom', name: 'Outdoor Classroom', icon: 'school',
     description: 'Shaded learning space for environmental education and school visits.',
     resourceCost: { budget: 1, knowledge: 2, volunteer: 2, material: 1, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 0.2, access: 0.4, culture: 0.9, revenue: 0.2, community: 0.8 },
-    compatibleZones: ['z3', 'z4', 'z6'], hybridsWith: ['skill_workshop'] },
+    compatibleZones: ['z4', 'z6'], hybridsWith: ['skill_workshop'], layer: 'activation' },
   { id: 'senior_wellness', name: 'Senior Wellness Corner', icon: 'elderly',
     description: 'Exercise equipment and shaded seating designed for elderly residents.',
     resourceCost: { budget: 2, knowledge: 1, volunteer: 1, material: 2, influence: 0 },
     objectivesServed: { safety: 0.5, greenery: 0.1, access: 0.8, culture: 0.3, revenue: 0.1, community: 0.9 },
-    compatibleZones: ['z2', 'z3', 'z5'], hybridsWith: ['community_seating'] },
+    compatibleZones: ['z2', 'z5'], hybridsWith: ['community_seating'], layer: 'activation' },
   { id: 'youth_sports', name: 'Youth Sports Zone', icon: 'sports_soccer',
     description: 'Informal play area with markings for cricket, badminton, and kabaddi.',
     resourceCost: { budget: 2, knowledge: 0, volunteer: 3, material: 2, influence: 1 },
     objectivesServed: { safety: 0.4, greenery: 0.1, access: 0.6, culture: 0.7, revenue: 0.3, community: 1.0 },
-    compatibleZones: ['z2', 'z6', 'z13'], hybridsWith: ['playground_equipment'] },
+    compatibleZones: ['z2', 'z6', 'z13'], hybridsWith: ['playground_equipment'], layer: 'activation' },
   { id: 'womens_corner', name: 'Womens Safety Corner', icon: 'female',
     description: 'Well-lit gathering space with emergency call point and clear sightlines.',
     resourceCost: { budget: 1, knowledge: 1, volunteer: 2, material: 1, influence: 1 },
     objectivesServed: { safety: 0.9, greenery: 0.1, access: 0.7, culture: 0.4, revenue: 0.1, community: 0.8 },
-    compatibleZones: ['z1', 'z2', 'z3', 'z5'], hybridsWith: ['path_lighting'] },
+    compatibleZones: ['z1', 'z5', 'z6'], hybridsWith: ['path_lighting'], layer: 'activation' },
   { id: 'cultural_wall', name: 'Community Story Wall', icon: 'auto_stories',
     description: 'Interactive wall displaying neighbourhood history, ecological data, and resident stories.',
     resourceCost: { budget: 1, knowledge: 2, volunteer: 3, material: 1, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 0.1, access: 0.3, culture: 1.0, revenue: 0.2, community: 0.9 },
-    compatibleZones: ['z1', 'z2', 'z3', 'z13'], hybridsWith: ['heritage_trail'] },
+    compatibleZones: ['z2', 'z4', 'z13'], hybridsWith: ['heritage_trail'], layer: 'activation' },
   { id: 'pet_friendly', name: 'Pet-Friendly Zone', icon: 'pets',
     description: 'Fenced area with water station for dogs and small pets.',
     resourceCost: { budget: 1, knowledge: 0, volunteer: 1, material: 2, influence: 1 },
     objectivesServed: { safety: 0.3, greenery: 0.2, access: 0.5, culture: 0.3, revenue: 0.2, community: 0.7 },
-    compatibleZones: ['z3', 'z5'], hybridsWith: [] },
+    compatibleZones: ['z3', 'z5'], hybridsWith: [], layer: 'activation' },
   { id: 'reading_nook', name: 'Open-Air Reading Nook', icon: 'menu_book',
     description: 'Covered seating with small book exchange shelf and charging points.',
     resourceCost: { budget: 1, knowledge: 1, volunteer: 1, material: 1, influence: 0 },
     objectivesServed: { safety: 0.2, greenery: 0.1, access: 0.5, culture: 0.8, revenue: 0.1, community: 0.7 },
-    compatibleZones: ['z2', 'z3', 'z5'], hybridsWith: [] },
+    compatibleZones: ['z2', 'z3', 'z5'], hybridsWith: [], layer: 'activation' },
   // ── Set C: Ecology & Revenue features ──────────────────────
   { id: 'fish_restocking', name: 'Native Fish Restocking', icon: 'phishing',
     description: 'Introduce native fish species that control algae and attract birdwatchers.',
     resourceCost: { budget: 1, knowledge: 3, volunteer: 1, material: 1, influence: 1 },
     objectivesServed: { safety: 0.2, greenery: 1.0, access: 0.2, culture: 0.4, revenue: 0.3, community: 0.5 },
-    compatibleZones: ['z3'], hybridsWith: ['water_filtration'] },
+    compatibleZones: ['z3'], hybridsWith: ['water_filtration'], layer: 'sustainability' },
   { id: 'composting_hub', name: 'Community Composting Hub', icon: 'compost',
     description: 'Neighbourhood organic waste collection with compost sold to nurseries.',
     resourceCost: { budget: 1, knowledge: 1, volunteer: 3, material: 1, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 0.7, access: 0.2, culture: 0.3, revenue: 0.5, community: 0.8 },
-    compatibleZones: ['z4', 'z3'], hybridsWith: ['waste_management'] },
+    compatibleZones: ['z2', 'z4', 'z6', 'z13'], hybridsWith: ['waste_management'], layer: 'sustainability' },
   { id: 'eco_tourism', name: 'Eco-Tourism Circuit', icon: 'tour',
     description: 'Guided nature walk with birdwatching stations and QR info boards. Rs 20 entry.',
     resourceCost: { budget: 2, knowledge: 2, volunteer: 2, material: 1, influence: 1 },
     objectivesServed: { safety: 0.2, greenery: 0.6, access: 0.5, culture: 0.7, revenue: 0.8, community: 0.6 },
-    compatibleZones: ['z3', 'z4', 'z5'], hybridsWith: ['heritage_trail'] },
+    compatibleZones: ['z1', 'z5', 'z13'], hybridsWith: ['heritage_trail'], layer: 'sustainability' },
   { id: 'solar_charging', name: 'Solar Charging Station', icon: 'solar_power',
     description: 'Phone charging kiosk powered by park solar panels. Free for residents.',
     resourceCost: { budget: 2, knowledge: 2, volunteer: 0, material: 3, influence: 0 },
     objectivesServed: { safety: 0.3, greenery: 0.3, access: 0.6, culture: 0.2, revenue: 0.4, community: 0.5 },
-    compatibleZones: ['z1', 'z2', 'z5'], hybridsWith: ['solar_pump'] },
+    compatibleZones: ['z1', 'z2', 'z5', 'z13'], hybridsWith: ['solar_pump'], layer: 'sustainability' },
   { id: 'medicinal_garden', name: 'Medicinal Plant Trail', icon: 'spa',
     description: 'Labeled trail of 20+ medicinal plants with traditional usage descriptions.',
     resourceCost: { budget: 1, knowledge: 3, volunteer: 2, material: 1, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 0.9, access: 0.4, culture: 0.8, revenue: 0.3, community: 0.7 },
-    compatibleZones: ['z4', 'z3'], hybridsWith: ['native_plants'] },
+    compatibleZones: ['z3', 'z4'], hybridsWith: ['native_plants'], layer: 'sustainability' },
   { id: 'food_forest', name: 'Micro Food Forest', icon: 'forest',
     description: 'Multi-layer planting with fruit trees, shrubs, and ground cover producing free food.',
     resourceCost: { budget: 1, knowledge: 2, volunteer: 3, material: 1, influence: 0 },
     objectivesServed: { safety: 0.1, greenery: 1.0, access: 0.2, culture: 0.5, revenue: 0.4, community: 0.8 },
-    compatibleZones: ['z3', 'z4'], hybridsWith: ['ecological_buffer'] },
+    compatibleZones: ['z3', 'z4', 'z13'], hybridsWith: ['ecological_buffer'], layer: 'sustainability' },
   { id: 'vendor_cooperative', name: 'Vendor Cooperative Model', icon: 'handshake',
     description: 'Organized vendor group with shared infrastructure, collective bargaining, and fair pricing.',
     resourceCost: { budget: 1, knowledge: 1, volunteer: 2, material: 1, influence: 3 },
     objectivesServed: { safety: 0.3, greenery: 0, access: 0.5, culture: 0.4, revenue: 1.0, community: 0.9 },
-    compatibleZones: ['z1', 'z13'], hybridsWith: ['vendor_market'] },
+    compatibleZones: ['z1', 'z13'], hybridsWith: ['vendor_market'], layer: 'sustainability' },
 ];
 
 export const HYBRID_TILES: HybridTile[] = [
@@ -442,24 +445,25 @@ export function getVisionTilesForZone(zoneId: string): VisionFeatureTile[] {
 // ─── Feature Sets (A/B/C) ────────────────────────────────────────
 export type FeatureSet = 'infrastructure' | 'community' | 'ecology';
 
+// Strict set assignments — each feature in EXACTLY ONE set, no duplicates
 const SET_A_IDS = new Set([
-  'drainage_system', 'water_filtration', 'community_seating', 'cafe_space', 'native_plants',
-  'playground_equipment', 'safety_surfacing', 'walking_path', 'path_lighting', 'signage_system',
-  'waste_management', 'irrigation_link', 'ecological_buffer', 'vendor_market', 'community_governance',
-  'fountain_repair', 'solar_pump', 'amphitheatre', 'heritage_trail', 'rainwater_harvest',
-  'disability_access', 'night_market', 'butterfly_garden', 'smart_monitoring', 'skill_workshop', 'public_art',
+  // Infrastructure & Safety: fixes PHYSICAL PROBLEMS
+  'drainage_system', 'water_filtration', 'walking_path', 'path_lighting',
+  'playground_equipment', 'safety_surfacing', 'disability_access',
+  'fountain_repair', 'solar_pump', 'smart_monitoring', 'rainwater_harvest',
 ]);
 const SET_B_IDS = new Set([
-  'outdoor_classroom', 'senior_wellness', 'youth_sports', 'womens_corner', 'cultural_wall',
-  'pet_friendly', 'reading_nook',
-  // Also include key infrastructure tiles players might need
-  'community_seating', 'walking_path', 'path_lighting', 'disability_access', 'signage_system', 'community_governance',
+  // Community & Culture: brings PEOPLE BACK
+  'community_seating', 'cafe_space', 'amphitheatre', 'heritage_trail',
+  'signage_system', 'community_governance', 'skill_workshop', 'public_art',
+  'outdoor_classroom', 'senior_wellness', 'youth_sports', 'womens_corner',
+  'cultural_wall', 'reading_nook', 'pet_friendly', 'night_market', 'vendor_market',
 ]);
 const SET_C_IDS = new Set([
-  'fish_restocking', 'composting_hub', 'eco_tourism', 'solar_charging', 'medicinal_garden',
-  'food_forest', 'vendor_cooperative',
-  // Also include key infra tiles
-  'drainage_system', 'water_filtration', 'native_plants', 'ecological_buffer', 'irrigation_link', 'waste_management',
+  // Ecology & Revenue: creates LONG-TERM SUSTAINABILITY
+  'native_plants', 'ecological_buffer', 'irrigation_link', 'waste_management',
+  'butterfly_garden', 'fish_restocking', 'composting_hub', 'eco_tourism',
+  'solar_charging', 'medicinal_garden', 'food_forest', 'vendor_cooperative',
 ]);
 
 const SET_MAP: Record<FeatureSet, Set<string>> = {
@@ -475,6 +479,96 @@ export const FEATURE_SET_LABELS: Record<FeatureSet, string> = {
 export function getVisionTilesForZoneAndSet(zoneId: string, featureSet: FeatureSet): VisionFeatureTile[] {
   const setIds = SET_MAP[featureSet];
   return FEATURE_TILES.filter(t => t.compatibleZones.includes(zoneId) && setIds.has(t.id));
+}
+
+/** Log feature availability per zone per set (call once for debugging) */
+export function logFeatureAvailability(): void {
+  const zones = ['z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z13'];
+  const sets: FeatureSet[] = ['infrastructure', 'community', 'ecology'];
+  for (const z of zones) {
+    for (const s of sets) {
+      const count = getVisionTilesForZoneAndSet(z, s).length;
+      const label = `FEATURES_AVAILABLE: ${z} ${FEATURE_SET_LABELS[s]}`;
+      if (count < 4) console.warn(`LOW_FEATURES: ${z} ${FEATURE_SET_LABELS[s]} only ${count}`);
+      else console.log(`${label}: ${count}`);
+    }
+  }
+}
+
+// ─── Three-Layer Placemaking System ─────────────────────────────
+
+export const LAYER_COLORS: Record<PlacemakingLayer, string> = {
+  foundation: '#5d8ac4', activation: '#e9c349', sustainability: '#aed456',
+};
+export const LAYER_ICONS: Record<PlacemakingLayer, string> = {
+  foundation: '\u{1F527}', activation: '\u{1F465}', sustainability: '\u{1F33F}',
+};
+export const LAYER_LABELS: Record<PlacemakingLayer, string> = {
+  foundation: 'Foundation', activation: 'Activation', sustainability: 'Sustainability',
+};
+export const LAYER_SUBTITLES: Record<PlacemakingLayer, string> = {
+  foundation: 'Makes it work', activation: 'Makes it alive', sustainability: 'Makes it last',
+};
+
+const FOUNDATION_KW = ['drainage', 'pipe', 'repair', 'fix', 'clear', 'install', 'construct', 'build', 'infrastructure', 'safety', 'structural', 'foundation', 'electrical', 'plumbing', 'restore', 'replace', 'surface', 'pave', 'light', 'ramp', 'access', 'path', 'road', 'concrete', 'equipment', 'motor', 'pump', 'filtration'];
+const ACTIVATION_KW = ['community', 'seating', 'gathering', 'cafe', 'vendor', 'market', 'cultural', 'heritage', 'workshop', 'art', 'mural', 'event', 'amphitheatre', 'signage', 'wayfinding', 'education', 'classroom', 'senior', 'elderly', 'youth', 'sports', 'committee', 'meeting', 'resident', 'neighbourhood', 'people', 'visitor', 'family', 'children', 'women', 'governance'];
+const SUSTAINABILITY_KW = ['native', 'plant', 'ecology', 'ecological', 'biodiversity', 'green', 'sustainable', 'maintenance fund', 'revenue', 'income', 'self-sustaining', 'compost', 'irrigation', 'water harvest', 'solar', 'long-term', 'ongoing', 'annual', 'monthly check', 'monitoring', 'prevent', 'protect', 'buffer', 'pollinator', 'fish', 'food forest', 'medicinal', 'organic', 'natural'];
+
+export function detectLayers(title: string, description: string): Record<PlacemakingLayer, boolean> {
+  const text = (title + ' ' + description).toLowerCase();
+  return {
+    foundation: FOUNDATION_KW.some(kw => text.includes(kw)),
+    activation: ACTIVATION_KW.some(kw => text.includes(kw)),
+    sustainability: SUSTAINABILITY_KW.some(kw => text.includes(kw)),
+  };
+}
+
+export function generateLayeredVision(selectedFeatures: VisionFeatureTile[], zoneName: string): {
+  statement: string;
+  layers: Record<PlacemakingLayer, string[]>;
+  layerCount: number;
+  isFullyIntegrated: boolean;
+} {
+  const foundation = selectedFeatures.filter(f => f.layer === 'foundation');
+  const activation = selectedFeatures.filter(f => f.layer === 'activation');
+  const sustainability = selectedFeatures.filter(f => f.layer === 'sustainability');
+  const fNames = foundation.map(f => f.name.toLowerCase()).join(' and ');
+  const aNames = activation.map(f => f.name.toLowerCase()).join(' and ');
+  const sNames = sustainability.map(f => f.name.toLowerCase()).join(' and ');
+  let statement: string;
+  if (foundation.length > 0 && activation.length > 0 && sustainability.length > 0) {
+    statement = `Restore ${zoneName} by fixing ${fNames} as the foundation, so that ${aNames} can bring people back, sustained long-term by ${sNames}.`;
+  } else if (foundation.length > 0 && activation.length > 0) {
+    statement = `Repair ${zoneName} through ${fNames}, enabling ${aNames} to revitalize community use.`;
+  } else if (foundation.length > 0 && sustainability.length > 0) {
+    statement = `Fix ${zoneName} with ${fNames}, protected long-term by ${sNames}.`;
+  } else if (activation.length > 0 && sustainability.length > 0) {
+    statement = `Activate ${zoneName} through ${aNames}, sustained by ${sNames}.`;
+  } else {
+    statement = `Improve ${zoneName} through ${selectedFeatures.map(f => f.name.toLowerCase()).join(', ')}.`;
+  }
+  return {
+    statement,
+    layers: { foundation: foundation.map(f => f.name), activation: activation.map(f => f.name), sustainability: sustainability.map(f => f.name) },
+    layerCount: [foundation, activation, sustainability].filter(a => a.length > 0).length,
+    isFullyIntegrated: foundation.length > 0 && activation.length > 0 && sustainability.length > 0,
+  };
+}
+
+export function calculateLayerCoverage(tasks: { title: string; description: string }[]): Record<PlacemakingLayer, { count: number; percent: number }> {
+  let f = 0, a = 0, s = 0;
+  for (const t of tasks) {
+    const d = detectLayers(t.title, t.description);
+    if (d.foundation) f++;
+    if (d.activation) a++;
+    if (d.sustainability) s++;
+  }
+  const total = tasks.length || 1;
+  return {
+    foundation: { count: f, percent: Math.round(f / total * 100) },
+    activation: { count: a, percent: Math.round(a / total * 100) },
+    sustainability: { count: s, percent: Math.round(s / total * 100) },
+  };
 }
 
 // Starting tokens per role (12 total each)

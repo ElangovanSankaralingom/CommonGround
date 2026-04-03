@@ -547,7 +547,7 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
     const merged: VisionFeatureTile = {
       id: hybrid.id, name: hybrid.name, icon: hybrid.icon, description: hybrid.description,
       resourceCost: hybrid.resourceCost, objectivesServed: hybrid.objectivesServed,
-      compatibleZones: [], hybridsWith: [],
+      compatibleZones: [], hybridsWith: [], layer: 'foundation',
     };
     const newNote: BoardNote = {
       id: Date.now().toString(), tileId: hybrid.id, tile: merged,

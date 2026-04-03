@@ -2,7 +2,12 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { GameSession, Player, ChallengeCard, ResourceType } from '../../core/models/types';
 import { ROLE_COLORS } from '../../core/models/constants';
-import { type FeatureTile, calculateEffectiveness, RESOURCE_ABILITY_MAP, STARTING_TOKENS } from '../../core/content/featureTiles';
+import {
+  type FeatureTile, type PlacemakingLayer,
+  calculateEffectiveness, RESOURCE_ABILITY_MAP, STARTING_TOKENS,
+  detectLayers, calculateLayerCoverage, generateLayeredVision,
+  LAYER_COLORS, LAYER_ICONS, LAYER_LABELS, LAYER_SUBTITLES,
+} from '../../core/content/featureTiles';
 import {
   type TaskCard, type Series, type TaskCategory, type TaskContribution,
   createSeries, placeTask, calculateChainBonus, calculateContributionPoints,
@@ -143,6 +148,28 @@ export default function SeriesBuilderPhase({
     const display = found.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' \u2192 ');
     return `\u{1F517} ${display}${bonus > 0 ? ` (+${bonus})` : ''}`;
   }, [chainResult]);
+
+  // ─── Layer coverage for series ───
+  const layerCoverage = useMemo(() => {
+    const tasks = activeSeries.tasks.map(t => ({ title: t.title, description: t.description }));
+    return calculateLayerCoverage(tasks);
+  }, [activeSeries.tasks.length, activeSeries]);
+
+  // ─── Layered vision statement ───
+  const layeredVision = useMemo(() => {
+    const zoneName = challenge?.affectedZoneIds?.[0]?.replace(/_/g, ' ') || 'the zone';
+    // Convert FeatureTile[] to VisionFeatureTile-like for generation
+    return generateLayeredVision(visionBoard.tiles.map(t => ({
+      ...t, resourceCost: { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 },
+      objectivesServed: { safety: 0, greenery: 0, access: 0, culture: 0, revenue: 0, community: 0 },
+      compatibleZones: [], hybridsWith: [], layer: 'foundation' as PlacemakingLayer,
+    })), zoneName);
+  }, [visionBoard.tiles, challenge]);
+
+  // ─── Live layer detection for task form ───
+  const formLayerDetection = useMemo(() => {
+    return detectLayers(taskTitle, taskDesc);
+  }, [taskTitle, taskDesc]);
 
   // ─── Available for current player ───
   const availableForCurrent = useMemo(() => {
@@ -493,28 +520,49 @@ export default function SeriesBuilderPhase({
             ))}
           </div>
         </div>
-        {/* Connected vision statement */}
-        <div style={{ padding: '6px 20px 8px', background: '#1e1b14', borderLeft: `4px solid ${T.primary}`, marginLeft: 16, marginRight: 16, marginBottom: 8, borderRadius: 4 }}>
-          <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 3 }}>COMBINED VISION</div>
-          <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.onSurface, fontWeight: 500, lineHeight: '16px' }}>
-            {(() => {
-              const names = visionBoard.tiles.map(t => t.name.toLowerCase());
-              const zone = challenge?.affectedZoneIds?.[0]?.replace(/_/g, ' ') || 'the zone';
-              if (names.length === 0) return 'No features selected.';
-              if (names.length === 1) return `${zone} will be improved through ${names[0]}.`;
-              if (names.length === 2) return `${zone} will be restored through ${names[0]} supported by ${names[1]}.`;
-              const last = names[names.length - 1];
-              const rest = names.slice(0, -1);
-              return `${zone} will be transformed through ${rest.join(', ')}, and ${last}.`;
-            })()}
+        {/* Layered vision statement + three-layer display */}
+        <div style={{ padding: '8px 20px', background: '#1e1b14', borderLeft: `4px solid ${T.primary}`, marginLeft: 16, marginRight: 16, marginBottom: 8, borderRadius: 4 }}>
+          <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, letterSpacing: 1.5, marginBottom: 3 }}>INTEGRATED VISION</div>
+          <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.onSurface, fontWeight: 500, lineHeight: '16px', marginBottom: 8 }}>
+            {layeredVision.statement}
           </div>
-          <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' as const }}>
-            {visionBoard.tiles.map((tile, i) => (
-              <React.Fragment key={i}>
-                {i > 0 && <span style={{ fontSize: 10, color: T.outlineVariant }}>{'\u2192'}</span>}
-                <span style={{ fontSize: 9, color: T.primary, background: `${T.primary}10`, borderRadius: 3, padding: '1px 6px' }}>{tile.name}</span>
-              </React.Fragment>
-            ))}
+          {/* Three-layer boxes */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map((layer, i) => {
+              const features = visionBoard.tiles.filter((_, idx) => {
+                // Approximate: check feature name against layer keywords
+                const d = detectLayers(visionBoard.tiles[idx]?.name || '', visionBoard.tiles[idx]?.description || '');
+                return d[layer];
+              });
+              const hasFeatures = layeredVision.layers[layer].length > 0 || features.length > 0;
+              return (
+                <React.Fragment key={layer}>
+                  {i > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+                      <span style={{ fontSize: 8, color: T.outlineVariant }}>{i === 1 ? 'enables' : 'sustained by'}</span>
+                      <span style={{ fontSize: 10, color: T.outlineVariant }}>{'\u2192'}</span>
+                    </div>
+                  )}
+                  <div style={{
+                    flex: 1, background: `${LAYER_COLORS[layer]}10`, border: `1px solid ${LAYER_COLORS[layer]}20`,
+                    borderRadius: 6, padding: '6px 8px', opacity: hasFeatures ? 1 : 0.3, minWidth: 0,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                      <span style={{ fontSize: 10 }}>{LAYER_ICONS[layer]}</span>
+                      <span style={{ fontSize: 8, fontWeight: 700, color: LAYER_COLORS[layer], textTransform: 'uppercase' as const }}>{LAYER_LABELS[layer]}</span>
+                    </div>
+                    {hasFeatures ? (
+                      <div style={{ fontSize: 9, color: T.onSurfaceVariant, lineHeight: '12px' }}>
+                        {layeredVision.layers[layer].slice(0, 2).join(', ') || features.map(f => f.name).slice(0, 2).join(', ')}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 8, color: T.onSurfaceVariant }}>{'\u26A0'} Not addressed</div>
+                    )}
+                    <div style={{ fontSize: 7, color: T.onSurfaceVariant, opacity: 0.5, fontStyle: 'italic', marginTop: 2 }}>{LAYER_SUBTITLES[layer]}</div>
+                  </div>
+                </React.Fragment>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -523,11 +571,30 @@ export default function SeriesBuilderPhase({
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* ─── LEFT: Series Timeline ─── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px 20px', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
             <span style={{ fontFamily: T.fontHeadline, fontSize: 15, color: T.onSurface, fontWeight: 700 }}>{activeSeries.name}</span>
             <span style={{ fontSize: 12, color: T.onSurfaceVariant }}>{activeSeries.tasks.length} tasks</span>
             <span style={{ fontFamily: T.fontNumber, fontSize: 18, color: T.tertiary, fontWeight: 'bold' }}>{activeSeries.runningTotal.toFixed(1)} pts</span>
           </div>
+          {/* Layer coverage bars */}
+          {activeSeries.tasks.length > 0 && (
+            <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+              {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map(layer => {
+                const cov = layerCoverage[layer];
+                const warn = cov.percent < 30 && activeSeries.tasks.length >= 2;
+                return (
+                  <div key={layer} style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+                    <span style={{ fontSize: 9 }}>{LAYER_ICONS[layer]}</span>
+                    <div style={{ flex: 1, height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ width: `${cov.percent}%`, height: '100%', background: LAYER_COLORS[layer], borderRadius: 2, transition: 'width 0.3s' }} />
+                    </div>
+                    <span style={{ fontSize: 8, color: LAYER_COLORS[layer] }}>{cov.percent}%</span>
+                    {warn && <span style={{ fontSize: 8 }}>{'\u26A0'}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Timeline scroll */}
           <div ref={timelineRef} style={{ display: 'flex', gap: 10, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 10, flex: 1, alignItems: 'flex-start' }}>
@@ -604,6 +671,26 @@ export default function SeriesBuilderPhase({
                         {t.innovationMultiplier > 1 && <div>{'\u00D7'} Innovation: {'\u00D7'}{t.innovationMultiplier}</div>}
                       </div>
                     )}
+
+                    {/* Layer badges on expanded card */}
+                    {isExpanded && (() => {
+                      const taskLayers = detectLayers(t.title, t.description);
+                      return (
+                        <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
+                          {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map(l => (
+                            <div key={l} style={{
+                              display: 'flex', alignItems: 'center', gap: 2, padding: '1px 5px', borderRadius: 8,
+                              background: taskLayers[l] ? `${LAYER_COLORS[l]}15` : 'transparent',
+                              opacity: taskLayers[l] ? 1 : 0.2,
+                            }}>
+                              <span style={{ fontSize: 7 }}>{LAYER_ICONS[l]}</span>
+                              <span style={{ fontSize: 7, color: taskLayers[l] ? LAYER_COLORS[l] : T.outlineVariant }}>{LAYER_LABELS[l]}</span>
+                              {taskLayers[l] ? <span style={{ fontSize: 7, color: LAYER_COLORS[l] }}>{'\u2713'}</span> : <span style={{ fontSize: 7, color: T.outlineVariant }}>{'\u2717'}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
 
                     <div style={{ fontFamily: T.fontNumber, fontSize: 13, fontWeight: 'bold', color: TASK_COLORS[t.taskType] || T.onSurface, marginTop: 6, textAlign: 'right' as const }}>
                       {t.finalTotal.toFixed(1)}
@@ -725,6 +812,32 @@ export default function SeriesBuilderPhase({
                   </div>
                 )}
               </div>
+
+              {/* Layer detection pills */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map(layer => {
+                  const active = formLayerDetection[layer];
+                  return (
+                    <div key={layer} style={{
+                      display: 'flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 10,
+                      background: active ? `${LAYER_COLORS[layer]}15` : 'transparent',
+                      opacity: active ? 1 : 0.25, transition: 'all 0.3s',
+                      border: `1px solid ${active ? LAYER_COLORS[layer] + '30' : 'transparent'}`,
+                    }}>
+                      <span style={{ fontSize: 9 }}>{LAYER_ICONS[layer]}</span>
+                      <span style={{ fontSize: 8, color: active ? LAYER_COLORS[layer] : T.onSurfaceVariant, fontWeight: 600 }}>{LAYER_LABELS[layer]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {(() => {
+                const detected = Object.values(formLayerDetection).filter(Boolean).length;
+                const missing = (['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).filter(l => !formLayerDetection[l]);
+                if (detected === 0 && (taskTitle || taskDesc)) return <div style={{ fontSize: 8, color: T.onSurfaceVariant, marginBottom: 4, fontStyle: 'italic' }}>Describe how this addresses infrastructure, community, or ecology.</div>;
+                if (detected === 3) return <div style={{ fontSize: 8, color: T.primary, marginBottom: 4, fontStyle: 'italic' }}>{'\u2728'} Integrates all three placemaking layers!</div>;
+                if (detected >= 1 && missing.length > 0) return <div style={{ fontSize: 8, color: LAYER_COLORS[missing[0]], marginBottom: 4, fontStyle: 'italic' }}>Could it also address {missing.map(l => LAYER_LABELS[l].toLowerCase()).join(' or ')}?</div>;
+                return null;
+              })()}
 
               {/* Description + integration prompt */}
               <div style={{ marginBottom: 8 }}>
