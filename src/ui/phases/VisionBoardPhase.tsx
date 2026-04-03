@@ -4,7 +4,8 @@ import type { GameSession, Player, ChallengeCard, ResourceType } from '../../cor
 import { ROLE_COLORS } from '../../core/models/constants';
 import {
   type VisionFeatureTile, type HybridTile, type ObjectiveId, type FeatureTile,
-  HYBRID_TILES, getVisionTilesForZone, toFeatureTile,
+  HYBRID_TILES, getVisionTilesForZone, getVisionTilesForZoneAndSet, toFeatureTile,
+  type FeatureSet, FEATURE_SET_LABELS,
   RESOURCE_ABILITY_MAP, calculateEffectiveness,
 } from '../../core/content/featureTiles';
 import {
@@ -34,6 +35,8 @@ const ICON_EMOJI: Record<string, string> = {
   forest: '🌳', store: '🏪', groups: '👥', child_care: '👶', deck: '🏡', directions_walk: '🚶', nature: '🌱',
   solar_power: '☀️', theater_comedy: '🎭', museum: '🏛️', accessible: '♿', nightlife: '🌃',
   psychiatry: '🦋', sensors: '📡', construction: '🛠️', palette: '🎨',
+  school: '🏫', elderly: '🧓', female: '♀️', auto_stories: '📖', pets: '🐾', menu_book: '📚',
+  phishing: '🐟', compost: '♻️', tour: '🧭', spa: '🌿', handshake: '🤝',
 };
 function emojiFor(icon: string): string { return ICON_EMOJI[icon] || '❓'; }
 const ZONE_LABELS: Record<string, string> = {
@@ -143,7 +146,9 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
     const map: Record<string, string> = { boating_pond: 'z3', main_entrance: 'z1', fountain_plaza: 'z2', herbal_garden: 'z4', walking_track: 'z5', playground: 'z6', ppp_zone: 'z13' };
     return map[challenge?.affectedZoneIds?.[0] || 'boating_pond'] || 'z3';
   }, [challenge]);
-  const availableTiles = useMemo(() => getVisionTilesForZone(zoneId), [zoneId]);
+  const [activeFeatureSet, setActiveFeatureSet] = useState<FeatureSet>('infrastructure');
+  const availableTiles = useMemo(() => getVisionTilesForZoneAndSet(zoneId, activeFeatureSet), [zoneId, activeFeatureSet]);
+  const allZoneTiles = useMemo(() => getVisionTilesForZone(zoneId), [zoneId]); // for hint lookups
   const difficultyDots = challenge?.publicFace?.difficultyRating || 3;
 
   const boardCost = useMemo(() => calculateBoardCost(visionTiles), [visionTiles]);
@@ -169,7 +174,7 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
   // Get feature tiles that would help a specific objective
   const getHintFeatures = useCallback((objectiveName: string) => {
     const objKey = objectiveName.toLowerCase() as ObjectiveId;
-    return availableTiles
+    return allZoneTiles
       .filter(t => (t.objectivesServed[objKey] ?? 0) >= 0.4)
       .sort((a, b) => (b.objectivesServed[objKey] ?? 0) - (a.objectivesServed[objKey] ?? 0))
       .slice(0, 3)
@@ -316,8 +321,23 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
       <div style={{ display: 'flex', flexDirection: 'row', flex: 1, gap: 10, overflow: 'hidden' }}>
         {/* LEFT: Tile list */}
         <div style={{ width: '45%', overflowY: 'auto', padding: 8 }}>
-          <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.primary, marginBottom: 8 }}>
-            {ZONE_LABELS[zoneId] || zoneId} Features ({availableTiles.length})
+          <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.primary, marginBottom: 6 }}>
+            {ZONE_LABELS[zoneId] || zoneId} Features
+          </div>
+          {/* Feature Set Tabs */}
+          <div style={{ display: 'flex', borderBottom: `1px solid rgba(69,72,60,0.15)`, marginBottom: 8 }}>
+            {(['infrastructure', 'community', 'ecology'] as FeatureSet[]).map(fs => (
+              <button key={fs} onClick={() => setActiveFeatureSet(fs)} style={{
+                flex: 1, padding: '6px 4px', background: activeFeatureSet === fs ? 'rgba(174,212,86,0.12)' : 'transparent',
+                border: 'none', borderBottom: activeFeatureSet === fs ? `2px solid ${T.primary}` : '2px solid transparent',
+                color: activeFeatureSet === fs ? T.primary : T.onSurfaceVariant,
+                fontFamily: T.fontBody, fontSize: 9, fontWeight: 600, cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}>{FEATURE_SET_LABELS[fs]}</button>
+            ))}
+          </div>
+          <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.outlineVariant, marginBottom: 6 }}>
+            {availableTiles.length} features available
           </div>
           {availableTiles.map(tile => {
             const picked = myPicks.includes(tile.id);
@@ -899,26 +919,60 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
           </div>
         )}
 
-        {/* Goal Shot or Adjust */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        {/* Goal Shot + Skip buttons */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
           {collabScore?.sharedBalanceAchieved ? (
-            <button onClick={() => {
-              sounds.playButtonClick();
-              setBallState('shooting');
-              const result = evaluateGoalShot(collabScore, buchiResults);
-              setGoalResult(result);
-              if (result.result === 'goal') {
-                setTimeout(() => handleComplete(), 2000);
-              }
-            }} style={{
-              background: T.primary, color: T.surface, border: 'none', borderRadius: 8,
-              padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 14, cursor: 'pointer',
-            }}>Shoot for Goal</button>
+            <>
+              <button onClick={() => {
+                sounds.playButtonClick();
+                setBallState('shooting');
+                const result = evaluateGoalShot(collabScore, buchiResults);
+                setGoalResult(result);
+                if (result.result === 'goal') {
+                  // Don't auto-complete — let player choose Begin Phase 4 or Adjust Further
+                }
+              }} style={{
+                background: T.primary, color: T.surface, border: 'none', borderRadius: 8,
+                padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 14, cursor: 'pointer',
+              }}>Shoot for Goal</button>
+              <button onClick={() => {
+                sounds.playButtonClick();
+                console.log('SKIP_TO_NEXT: balanced, no penalty');
+                handleComplete();
+              }} style={{
+                background: 'transparent', color: T.onSurfaceVariant, border: `1px solid ${T.onSurfaceVariant}`,
+                borderRadius: 8, padding: '10px 20px', fontFamily: T.fontBody, fontSize: 13, cursor: 'pointer',
+              }}>Skip to Next Phase {'\u2192'}</button>
+            </>
           ) : (
-            <button onClick={() => { sounds.playButtonClick(); setScreen('group_negotiation'); }} style={{
-              background: T.secondary, color: T.surface, border: 'none', borderRadius: 8,
-              padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 14, cursor: 'pointer',
-            }}>Adjust Vision</button>
+            <>
+              <button onClick={() => { sounds.playButtonClick(); setScreen('individual_picks'); }} style={{
+                background: T.secondary, color: T.surface, border: 'none', borderRadius: 8,
+                padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 14, cursor: 'pointer',
+              }}>Adjust Vision</button>
+              <button onClick={() => {
+                sounds.playButtonClick();
+                const normalThr = calculateThreshold(visionTiles, difficultyDots).threshold;
+                const penalizedThr = Math.round(normalThr * 1.15);
+                if (confirm(`Warning: Your vision has unresolved gaps.\n\n${unsatisfiedPlayers.map(p => `${p.playerName} (${p.role}) has ${p.satisfactionPercentage}% satisfaction`).join('\n')}\nCollaborative score: ${collabScore?.score || 0}\n\nProceeding adds a +15% difficulty penalty to the hidden threshold.\n\nProceed anyway?`)) {
+                  console.log('SKIP_PENALTY: threshold increased 15%, was', normalThr, 'now', penalizedThr);
+                  // Override visionBoard threshold for downstream
+                  const vision = evaluateVision(visionTiles, sorted);
+                  const final = finalizeBoard(visionTiles, commitments,
+                    visionTiles.map(t => t.id), sorted, difficultyDots);
+                  onPhaseComplete({
+                    tiles: visionTiles.map(t => toFeatureTile(t)),
+                    objectivesCovered: Object.entries(vision.objectiveScores).filter(([, v]) => v >= 30).map(([k]) => k),
+                    threshold: penalizedThr,
+                    visionStatement: final.visionStatement + ' (Finalized without shared balance — +15% threshold penalty)',
+                    consensusLevel: final.consensusLevel,
+                  });
+                }
+              }} style={{
+                background: 'transparent', color: T.outlineVariant, border: `1px solid ${T.outlineVariant}`,
+                borderRadius: 8, padding: '8px 16px', fontFamily: T.fontBody, fontSize: 11, cursor: 'pointer',
+              }}>Skip to Next Phase {'\u2192'}</button>
+            </>
           )}
         </div>
       </div>
@@ -1049,12 +1103,27 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
               background: T.container, borderRadius: 12, padding: 24, boxShadow: T.woodBevel,
               maxWidth: 480, width: '100%',
             }}>
-              {/* GOAL — celebration */}
+              {/* GOAL — celebration with two buttons */}
               {goalResult.result === 'goal' && (
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontFamily: T.fontHeadline, fontSize: 28, fontWeight: 700, color: T.primary }}>GOAL!</div>
                   <div style={{ fontFamily: T.fontNumber, fontSize: 32, color: T.onSurface, margin: '8px 0' }}>{goalResult.score}</div>
-                  <div style={{ fontFamily: T.fontBody, fontSize: 13, color: T.onSurfaceVariant }}>{goalResult.feedback}</div>
+                  <div style={{ fontFamily: T.fontBody, fontSize: 13, color: T.onSurfaceVariant, marginBottom: 16 }}>{goalResult.feedback}</div>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                    <button onClick={() => { sounds.playButtonClick(); setGoalResult(null); handleComplete(); }} style={{
+                      background: T.primary, color: T.surface, border: 'none', borderRadius: 8,
+                      padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                    }}>Begin Phase 4: Series Building {'\u2192'}</button>
+                    <button onClick={() => {
+                      sounds.playButtonClick();
+                      setGoalResult(null);
+                      setScreen('individual_picks');
+                      console.log('ADJUST_AFTER_GOAL: going back to feature selection');
+                    }} style={{
+                      background: 'transparent', color: T.onSurfaceVariant, border: `1px solid ${T.onSurfaceVariant}`,
+                      borderRadius: 8, padding: '10px 16px', fontFamily: T.fontBody, fontSize: 12, cursor: 'pointer',
+                    }}>Adjust Vision Further</button>
+                  </div>
                 </div>
               )}
 
@@ -1153,8 +1222,8 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
                         setAdjustmentAttempts(prev => prev + 1);
                         setGoalResult(null);
                         setHintRevealed(false);
-                        setScreen('group_negotiation');
-                        console.log('NEAR_MISS_ADJUST: attempt', adjustmentAttempts + 1);
+                        setScreen('individual_picks');
+                        console.log('NEAR_MISS_ADJUST: attempt', adjustmentAttempts + 1, '→ feature selection');
                       }} style={{
                         background: T.primary, color: T.surface, border: 'none', borderRadius: 8,
                         padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
@@ -1287,8 +1356,8 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
                         setAdjustmentAttempts(prev => prev + 1);
                         setGoalResult(null);
                         setHintRevealed(false);
-                        setScreen('group_negotiation');
-                        console.log('MISS_ADJUST: attempt', adjustmentAttempts + 1);
+                        setScreen('individual_picks');
+                        console.log('MISS_ADJUST: attempt', adjustmentAttempts + 1, '→ feature selection');
                       }} style={{
                         background: T.primary, color: T.surface, border: 'none', borderRadius: 8,
                         padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
