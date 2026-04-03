@@ -107,6 +107,13 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
   const [starVotes, setStarVotes] = useState<Record<string, number>>({});
   const [goalResult, setGoalResult] = useState<GoalShotResult | null>(null);
   const [hybridMergeCount, setHybridMergeCount] = useState(0);
+  // Near miss tracking
+  const [adjustmentAttempts, setAdjustmentAttempts] = useState(0);
+  const [hintRevealed, setHintRevealed] = useState(false);
+  const [hintTimerElapsed, setHintTimerElapsed] = useState(false);
+  const [overrideTimerElapsed, setOverrideTimerElapsed] = useState(false);
+  const [hintPenaltyApplied, setHintPenaltyApplied] = useState(false);
+  const [overrideApplied, setOverrideApplied] = useState(false);
 
   // Fix 2+3: Drag-to-board, writing box, negotiation log
   interface BoardNote {
@@ -142,6 +149,33 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
   const boardCost = useMemo(() => calculateBoardCost(visionTiles), [visionTiles]);
   const groupBudget = useMemo(() => calculateGroupBudget(sorted), [sorted]);
   const buchiResults = useMemo(() => sorted.map(p => calculateBuchiSatisfaction(p, { tiles: visionTiles })), [sorted, visionTiles]);
+
+  // Unsatisfied players for near miss display
+  const unsatisfiedPlayers = useMemo(() =>
+    buchiResults.filter(b => b.satisfactionPercentage < 40), [buchiResults]);
+
+  // Hint/override timers when goal result is showing
+  useEffect(() => {
+    if (!goalResult || goalResult.result === 'goal') { setHintTimerElapsed(false); setOverrideTimerElapsed(false); return; }
+    setHintTimerElapsed(adjustmentAttempts >= 1 || goalResult.result === 'miss');
+    setOverrideTimerElapsed(adjustmentAttempts >= 2);
+    if (adjustmentAttempts < 1 && goalResult.result !== 'miss') {
+      const hintTimer = setTimeout(() => setHintTimerElapsed(true), 30000);
+      const overrideTimer = setTimeout(() => setOverrideTimerElapsed(true), 60000);
+      return () => { clearTimeout(hintTimer); clearTimeout(overrideTimer); };
+    }
+  }, [goalResult, adjustmentAttempts]);
+
+  // Get feature tiles that would help a specific objective
+  const getHintFeatures = useCallback((objectiveName: string) => {
+    const objKey = objectiveName.toLowerCase() as ObjectiveId;
+    return availableTiles
+      .filter(t => (t.objectivesServed[objKey] ?? 0) >= 0.4)
+      .sort((a, b) => (b.objectivesServed[objKey] ?? 0) - (a.objectivesServed[objKey] ?? 0))
+      .slice(0, 3)
+      .map(t => ({ name: t.name, icon: t.icon, boost: (t.objectivesServed[objKey] ?? 0) * RESOURCE_TYPES.reduce((s, r) => s + t.resourceCost[r], 0) }));
+  }, [availableTiles]);
+
   const possibleHybrids = useMemo(() => {
     const ids = new Set(visionTiles.map(t => t.id));
     return HYBRID_TILES.filter(h => ids.has(h.mergedFrom[0]) && ids.has(h.mergedFrom[1]));
@@ -965,8 +999,14 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontFamily: T.fontBody, fontSize: 14, fontWeight: 700, color: '#fff',
                 border: isHolder ? `2px solid ${T.primary}` : '2px solid transparent',
-                transition: 'border 0.3s',
-              }}>{p.name[0]}</div>
+                transition: 'border 0.3s', position: 'relative',
+              }}>
+                {p.name[0]}
+                {/* Red dot indicator for unsatisfied players after adjustment attempt */}
+                {adjustmentAttempts > 0 && buchi && buchi.satisfactionPercentage < 40 && (
+                  <div style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#e04838' }} />
+                )}
+              </div>
               <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant, marginTop: 2 }}>{p.name.split(' ')[0]}</div>
               {/* Buchi dots */}
               <div style={{ display: 'flex', gap: 2, justifyContent: 'center', marginTop: 1 }}>
@@ -998,34 +1038,276 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
       <AnimatePresence>
         {goalResult && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{
-              position: 'absolute', inset: 0, background: 'rgba(22,19,12,0.85)',
+              position: 'absolute', inset: 0, background: 'rgba(22,19,12,0.88)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
+              overflowY: 'auto', padding: 20,
             }}
           >
             <div style={{
-              background: T.container, borderRadius: 16, padding: 28, boxShadow: T.woodBevel,
-              textAlign: 'center', maxWidth: 360,
+              background: T.container, borderRadius: 12, padding: 24, boxShadow: T.woodBevel,
+              maxWidth: 480, width: '100%',
             }}>
-              <div style={{
-                fontFamily: T.fontHeadline, fontSize: 28, fontWeight: 700,
-                color: goalResult.result === 'goal' ? T.primary : goalResult.result === 'near_miss' ? T.tertiary : '#e55',
-              }}>
-                {goalResult.result === 'goal' ? 'GOAL!' : goalResult.result === 'near_miss' ? 'Near Miss' : 'Miss'}
-              </div>
-              <div style={{ fontFamily: T.fontNumber, fontSize: 32, color: T.onSurface, margin: '8px 0' }}>{goalResult.score}</div>
-              <div style={{ fontFamily: T.fontBody, fontSize: 13, color: T.onSurfaceVariant }}>{goalResult.feedback}</div>
-              {goalResult.result !== 'goal' && (
-                <button onClick={() => {
-                  sounds.playButtonClick();
-                  setGoalResult(null);
-                  if (goalResult.loopBack) setScreen('group_negotiation');
-                }} style={{
-                  background: T.secondary, color: T.surface, border: 'none', borderRadius: 8,
-                  padding: '8px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13,
-                  cursor: 'pointer', marginTop: 14,
-                }}>Adjust Vision</button>
+              {/* GOAL — celebration */}
+              {goalResult.result === 'goal' && (
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontFamily: T.fontHeadline, fontSize: 28, fontWeight: 700, color: T.primary }}>GOAL!</div>
+                  <div style={{ fontFamily: T.fontNumber, fontSize: 32, color: T.onSurface, margin: '8px 0' }}>{goalResult.score}</div>
+                  <div style={{ fontFamily: T.fontBody, fontSize: 13, color: T.onSurfaceVariant }}>{goalResult.feedback}</div>
+                </div>
+              )}
+
+              {/* NEAR MISS — show problems, not solutions */}
+              {goalResult.result === 'near_miss' && (
+                <div>
+                  <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                    <div style={{ fontFamily: T.fontHeadline, fontSize: 24, fontWeight: 700, color: T.tertiary }}>NEAR MISS</div>
+                    <div style={{ fontFamily: T.fontNumber, fontSize: 28, color: T.onSurface, margin: '6px 0' }}>{goalResult.score}</div>
+                    <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.onSurfaceVariant }}>
+                      The group collaborated well — but not everyone was heard.
+                    </div>
+                  </div>
+
+                  {/* Unsatisfied player problem cards */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+                    {unsatisfiedPlayers.map(bp => (
+                      <div key={bp.playerName} style={{
+                        background: '#1e1b14', borderLeft: `4px solid ${(ROLE_COLORS as Record<string, string>)[bp.role] || T.outlineVariant}`,
+                        borderRadius: 4, padding: 12,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <div style={{
+                            width: 32, height: 32, borderRadius: '50%', background: (ROLE_COLORS as Record<string, string>)[bp.role] || '#666',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: T.fontBody, fontSize: 14, fontWeight: 700, color: '#fff',
+                          }}>{bp.playerName[0]}</div>
+                          <div>
+                            <div style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, color: T.onSurface }}>{bp.playerName}</div>
+                            <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant, textTransform: 'capitalize' }}>{bp.role}</div>
+                          </div>
+                          <div style={{ marginLeft: 'auto', fontFamily: T.fontNumber, fontSize: 14, fontWeight: 700, color: '#e04838' }}>
+                            {bp.satisfactionPercentage}%
+                          </div>
+                        </div>
+                        {bp.buchiObjectives.filter(o => !o.met).map(obj => (
+                          <div key={obj.name} style={{ marginBottom: 6 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: T.fontBody, fontSize: 11, color: T.onSurfaceVariant, marginBottom: 2 }}>
+                              <span style={{ textTransform: 'capitalize' }}>{obj.name}</span>
+                              <span style={{ fontFamily: T.fontNumber, color: '#e04838' }}>{obj.current.toFixed(1)} / {obj.threshold}</span>
+                            </div>
+                            <div style={{ height: 5, background: T.outlineVariant, borderRadius: 2, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${Math.min(100, (obj.current / Math.max(obj.threshold, 0.01)) * 100)}%`, background: '#e04838', borderRadius: 2 }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {unsatisfiedPlayers.length === 0 && (
+                      <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.onSurfaceVariant, textAlign: 'center' }}>
+                        All players are close — collaborative score needs a small boost.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Hint panel (revealed on click) */}
+                  <AnimatePresence>
+                    {hintRevealed && unsatisfiedPlayers.length > 0 && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                        style={{ overflow: 'hidden', marginBottom: 12 }}
+                      >
+                        <div style={{ background: '#1a1f14', borderRadius: 4, padding: 10, border: `1px solid rgba(174,212,86,0.15)` }}>
+                          <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.primary, fontWeight: 700, marginBottom: 6 }}>
+                            HINT (-5 score penalty applied)
+                          </div>
+                          {unsatisfiedPlayers.slice(0, 2).map(bp => {
+                            const unmetObj = bp.buchiObjectives.find(o => !o.met);
+                            if (!unmetObj) return null;
+                            const hints = getHintFeatures(unmetObj.name);
+                            return (
+                              <div key={bp.playerName} style={{ marginBottom: 6 }}>
+                                <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3 }}>
+                                  To address {bp.playerName}{'\u2019'}s {unmetObj.name} gap of {(unmetObj.threshold - unmetObj.current).toFixed(1)}:
+                                </div>
+                                {hints.map(h => (
+                                  <div key={h.name} style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8, marginBottom: 2 }}>
+                                    <span style={{ fontSize: 12 }}>{emojiFor(h.icon)}</span>
+                                    <span style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurface }}>{h.name}</span>
+                                    <span style={{ fontFamily: T.fontNumber, fontSize: 9, color: T.primary }}>+{h.boost.toFixed(1)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Buttons */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {adjustmentAttempts < 3 && (
+                      <button onClick={() => {
+                        sounds.playButtonClick();
+                        setAdjustmentAttempts(prev => prev + 1);
+                        setGoalResult(null);
+                        setHintRevealed(false);
+                        setScreen('group_negotiation');
+                        console.log('NEAR_MISS_ADJUST: attempt', adjustmentAttempts + 1);
+                      }} style={{
+                        background: T.primary, color: T.surface, border: 'none', borderRadius: 8,
+                        padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                      }}>Adjust Vision</button>
+                    )}
+                    {(hintTimerElapsed || adjustmentAttempts >= 1) && !hintRevealed && (
+                      <button onClick={() => {
+                        sounds.playButtonClick();
+                        setHintRevealed(true);
+                        if (!hintPenaltyApplied) {
+                          setHintPenaltyApplied(true);
+                          console.log('HINT_USED: near miss guidance for', unsatisfiedPlayers.map(p => p.playerName).join(', '), '-5 collaborative score');
+                        }
+                      }} style={{
+                        background: 'transparent', color: T.onSurfaceVariant, border: `1px solid ${T.onSurfaceVariant}`,
+                        borderRadius: 8, padding: '8px 16px', fontFamily: T.fontBody, fontSize: 12, cursor: 'pointer',
+                      }}>Show Hint</button>
+                    )}
+                    {(overrideTimerElapsed || adjustmentAttempts >= 2) && (
+                      <button onClick={() => {
+                        sounds.playButtonClick();
+                        const overrideMsg = unsatisfiedPlayers.map(p => `${p.playerName} (${p.role})`).join(', ');
+                        if (confirm(`Are you sure? ${overrideMsg}'s objectives will not be met. In real planning, these stakeholders would likely oppose the project.`)) {
+                          setOverrideApplied(true);
+                          console.log('OVERRIDE:', overrideMsg, 'objectives excluded, -10 collaborative score');
+                          setGoalResult(null);
+                          handleComplete();
+                        }
+                      }} style={{
+                        background: 'transparent', color: T.outlineVariant, border: 'none', borderRadius: 8,
+                        padding: '6px 16px', fontFamily: T.fontBody, fontSize: 11, cursor: 'pointer',
+                      }}>
+                        Override and Proceed
+                      </button>
+                    )}
+                    {adjustmentAttempts >= 2 && (
+                      <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.outlineVariant, textAlign: 'center' }}>
+                        Proceed without addressing {unsatisfiedPlayers.map(p => p.playerName).join(', ')}{'\u2019'}s needs
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* MISS — show all problems */}
+              {goalResult.result === 'miss' && (
+                <div>
+                  <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                    <div style={{ fontFamily: T.fontHeadline, fontSize: 24, fontWeight: 700, color: '#e04838' }}>NOT BALANCED</div>
+                    <div style={{ fontFamily: T.fontNumber, fontSize: 28, color: T.onSurface, margin: '6px 0' }}>{goalResult.score}</div>
+                    <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.onSurfaceVariant }}>
+                      Vision not balanced. Multiple stakeholders were not considered.
+                    </div>
+                  </div>
+
+                  {/* All unsatisfied players */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                    {unsatisfiedPlayers.map(bp => (
+                      <div key={bp.playerName} style={{
+                        background: '#1e1b14', borderLeft: `4px solid ${(ROLE_COLORS as Record<string, string>)[bp.role] || T.outlineVariant}`,
+                        borderRadius: 4, padding: 10,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: '50%', background: (ROLE_COLORS as Record<string, string>)[bp.role] || '#666',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: T.fontBody, fontSize: 11, fontWeight: 700, color: '#fff',
+                          }}>{bp.playerName[0]}</div>
+                          <span style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 12, color: T.onSurface }}>{bp.playerName}</span>
+                          <span style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant, textTransform: 'capitalize' }}>({bp.role})</span>
+                          <span style={{ marginLeft: 'auto', fontFamily: T.fontNumber, fontSize: 12, color: '#e04838' }}>{bp.satisfactionPercentage}%</span>
+                        </div>
+                        {bp.buchiObjectives.filter(o => !o.met).map(obj => (
+                          <div key={obj.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                            <span style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant, textTransform: 'capitalize', width: 60 }}>{obj.name}</span>
+                            <div style={{ flex: 1, height: 4, background: T.outlineVariant, borderRadius: 2, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${Math.min(100, (obj.current / Math.max(obj.threshold, 0.01)) * 100)}%`, background: '#e04838', borderRadius: 2 }} />
+                            </div>
+                            <span style={{ fontFamily: T.fontNumber, fontSize: 9, color: '#e04838', width: 45, textAlign: 'right' }}>{obj.current.toFixed(1)}/{obj.threshold}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Hint (available immediately for miss) */}
+                  {!hintRevealed && (
+                    <button onClick={() => {
+                      sounds.playButtonClick();
+                      setHintRevealed(true);
+                      if (!hintPenaltyApplied) {
+                        setHintPenaltyApplied(true);
+                        console.log('HINT_USED: miss guidance for', unsatisfiedPlayers.map(p => p.playerName).join(', '), '-5 collaborative score');
+                      }
+                    }} style={{
+                      background: 'transparent', color: T.onSurfaceVariant, border: `1px solid ${T.onSurfaceVariant}`,
+                      borderRadius: 8, padding: '6px 14px', fontFamily: T.fontBody, fontSize: 11, cursor: 'pointer', marginBottom: 8,
+                    }}>Show Hint</button>
+                  )}
+                  <AnimatePresence>
+                    {hintRevealed && (
+                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} style={{ overflow: 'hidden', marginBottom: 10 }}>
+                        <div style={{ background: '#1a1f14', borderRadius: 4, padding: 8, border: `1px solid rgba(174,212,86,0.15)` }}>
+                          <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.primary, fontWeight: 700, marginBottom: 4 }}>HINT (-5 penalty)</div>
+                          {unsatisfiedPlayers.slice(0, 3).map(bp => {
+                            const unmetObj = bp.buchiObjectives.find(o => !o.met);
+                            if (!unmetObj) return null;
+                            const hints = getHintFeatures(unmetObj.name);
+                            return (
+                              <div key={bp.playerName} style={{ marginBottom: 4 }}>
+                                <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant }}>{bp.playerName}{'\u2019'}s {unmetObj.name} gap ({(unmetObj.threshold - unmetObj.current).toFixed(1)}):</div>
+                                {hints.map(h => (
+                                  <div key={h.name} style={{ marginLeft: 8, fontFamily: T.fontBody, fontSize: 9, color: T.onSurface }}>
+                                    {emojiFor(h.icon)} {h.name} (+{h.boost.toFixed(1)})
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Buttons */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {adjustmentAttempts < 3 && (
+                      <button onClick={() => {
+                        sounds.playButtonClick();
+                        setAdjustmentAttempts(prev => prev + 1);
+                        setGoalResult(null);
+                        setHintRevealed(false);
+                        setScreen('group_negotiation');
+                        console.log('MISS_ADJUST: attempt', adjustmentAttempts + 1);
+                      }} style={{
+                        background: T.primary, color: T.surface, border: 'none', borderRadius: 8,
+                        padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                      }}>Adjust Vision</button>
+                    )}
+                    {adjustmentAttempts >= 3 && (
+                      <button onClick={() => {
+                        sounds.playButtonClick();
+                        console.log('OVERRIDE: forced after 3 attempts,', unsatisfiedPlayers.map(p => `${p.playerName}(${p.role})`).join(', '), 'excluded');
+                        setOverrideApplied(true);
+                        setGoalResult(null);
+                        handleComplete();
+                      }} style={{
+                        background: T.secondary, color: T.surface, border: 'none', borderRadius: 8,
+                        padding: '10px 20px', fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                      }}>Override and Proceed</button>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
           </motion.div>
