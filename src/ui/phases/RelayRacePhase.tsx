@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { GameSession, Player, ChallengeCard, ResourceType } from '../../core/models/types';
 import { ROLE_COLORS } from '../../core/models/constants';
-import { type FeatureTile, calculateEffectiveness, RESOURCE_ABILITY_MAP } from '../../core/content/featureTiles';
+import { type FeatureTile, calculateEffectiveness, RESOURCE_ABILITY_MAP, STARTING_TOKENS } from '../../core/content/featureTiles';
 import {
   type TaskCard, type Series, type TaskCategory, type TaskContribution,
   createSeries, placeTask, calculateChainBonus, calculateContributionPoints,
@@ -72,7 +72,16 @@ export default function SeriesBuilderPhase({
   const [activeSeries, setActiveSeries] = useState<Series>(() => createSeries('Series A'));
   const [resourcePools, setResourcePools] = useState<Record<string, Record<ResourceType, number>>>(() => {
     const m: Record<string, Record<ResourceType, number>> = {};
-    players.forEach(p => { m[p.id] = { ...p.resources }; });
+    players.forEach(p => {
+      // Use STARTING_TOKENS as the guaranteed source for role-based token allocation (12 per player)
+      // Fall back to player.resources if STARTING_TOKENS doesn't have this role
+      const roleTokens = STARTING_TOKENS[p.roleId as keyof typeof STARTING_TOKENS];
+      const tokens = roleTokens
+        ? { ...roleTokens }
+        : { budget: p.resources.budget || 2, knowledge: p.resources.knowledge || 2, volunteer: p.resources.volunteer || 2, material: p.resources.material || 2, influence: p.resources.influence || 2 };
+      m[p.id] = tokens;
+      console.log(`PHASE4_INIT: ${p.name} (${p.roleId}) resources: B:${tokens.budget} K:${tokens.knowledge} V:${tokens.volunteer} M:${tokens.material} I:${tokens.influence} total:${Object.values(tokens).reduce((s, v) => s + v, 0)}`);
+    });
     return m;
   });
   const [lockedByPlayer, setLockedByPlayer] = useState<Record<string, Record<ResourceType, number>>>(() => {
@@ -118,6 +127,7 @@ export default function SeriesBuilderPhase({
     const locked = lockedByPlayer[currentPlayer?.id] || { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 };
     const avail: Record<ResourceType, number> = { budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 };
     RES_TYPES.forEach(r => { avail[r] = Math.max(0, (pool[r] || 0) - (locked[r] || 0)); });
+    console.log(`RESOURCE_READ: ${currentPlayer?.name} pool=[${RES_TYPES.map(r => `${r[0].toUpperCase()}:${pool[r]}`).join(' ')}] locked=[${RES_TYPES.map(r => `${r[0].toUpperCase()}:${locked[r]}`).join(' ')}] avail=[${RES_TYPES.map(r => `${r[0].toUpperCase()}:${avail[r]}`).join(' ')}]`);
     return avail;
   }, [resourcePools, lockedByPlayer, currentPlayer]);
 
@@ -175,6 +185,8 @@ export default function SeriesBuilderPhase({
     contributions.forEach(c => {
       newLocked[c.playerId] = { ...newLocked[c.playerId] };
       newLocked[c.playerId][c.resourceType] = (newLocked[c.playerId][c.resourceType] || 0) + c.tokensCommitted;
+      const remaining = (pools[c.playerId]?.[c.resourceType] || 0);
+      console.log(`RESOURCE_LOCK: ${c.playerName} ${c.resourceType} -${c.tokensCommitted} remaining:${remaining}`);
     });
     setLockedByPlayer(newLocked);
     setActiveSeries({ ...activeSeries });
