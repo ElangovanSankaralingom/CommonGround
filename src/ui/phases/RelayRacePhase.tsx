@@ -105,6 +105,12 @@ export default function SeriesBuilderPhase({
   const [transformText, setTransformText] = useState('');
   const timelineRef = useRef<HTMLDivElement>(null);
 
+  // Collaboration window state
+  const [collabOpen, setCollabOpen] = useState(false);
+  const [collabTimer, setCollabTimer] = useState(30);
+  const [joinedContributions, setJoinedContributions] = useState<TaskContribution[]>([]);
+  const collabTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const hiddenThreshold = visionBoard.threshold;
   const currentPlayer = sorted[currentPlayerIdx];
   const zoneId = useMemo(() => {
@@ -145,8 +151,9 @@ export default function SeriesBuilderPhase({
   }, [myContributions, currentPlayer]);
 
   // ─── Commit Task ───
-  const commitTask = useCallback(() => {
-    if (!selectedType || !taskTitle.trim()) return;
+  const commitTask = useCallback((extraContributions?: TaskContribution[]) => {
+    console.log('LOCK_CLICKED', { type: selectedType, title: taskTitle, contributions: myContributions, total: liveTotal });
+    if (!selectedType || !taskTitle.trim()) { console.log('LOCK_VALIDATION_FAIL: type or title missing'); return; }
     sounds.playButtonClick();
 
     const contributions: TaskContribution[] = [];
@@ -159,7 +166,9 @@ export default function SeriesBuilderPhase({
         });
       }
     });
-    if (contributions.length === 0) return;
+    // Add joined players' contributions from collaboration window
+    if (extraContributions) contributions.push(...extraContributions);
+    if (contributions.length === 0) { console.log('LOCK_VALIDATION_FAIL: no resources committed'); return; }
 
     const task: TaskCard = {
       id: `task_${Date.now()}`, seriesId: activeSeries.id, turnNumber: activeSeries.tasks.length + 1,
@@ -223,7 +232,7 @@ export default function SeriesBuilderPhase({
       nextIdx = (nextIdx + 1) % sorted.length; attempts++;
     }
     if (attempts >= sorted.length) { setStage('results'); } else { setCurrentPlayerIdx(nextIdx); }
-  }, [selectedType, taskTitle, taskDesc, taskCriteria, crossPerspective, myContributions, currentPlayer, activeSeries, hiddenThreshold, resourcePools, lockedByPlayer, thresholdCrossed, transformLevel, currentPlayerIdx, sorted, zoneId, drawnCards]);
+  }, [selectedType, taskTitle, taskDesc, taskCriteria, crossPerspective, myContributions, liveTotal, currentPlayer, activeSeries, hiddenThreshold, resourcePools, lockedByPlayer, thresholdCrossed, transformLevel, currentPlayerIdx, sorted, zoneId, drawnCards]);
 
   // ─── Complete Series ───
   const completeSeries = useCallback(() => {
@@ -265,6 +274,75 @@ export default function SeriesBuilderPhase({
     if (attempts >= sorted.length) { setStage('results'); } else { setCurrentPlayerIdx(nextIdx); }
     setShowCreator(false);
   }, [currentPlayerIdx, sorted, lockedByPlayer]);
+
+  // ─── Collaboration Window ───
+  const openCollaboration = useCallback(() => {
+    sounds.playButtonClick();
+    setCollabOpen(true);
+    setCollabTimer(30);
+    setJoinedContributions([]);
+    collabTimerRef.current = setInterval(() => {
+      setCollabTimer(prev => {
+        if (prev <= 1) {
+          if (collabTimerRef.current) clearInterval(collabTimerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    console.log('COLLAB_WINDOW_OPEN:', taskTitle);
+  }, [taskTitle]);
+
+  const joinTask = useCallback((joiner: Player, resource: ResourceType, tokens: number) => {
+    if (tokens <= 0) return;
+    const avail = (resourcePools[joiner.id]?.[resource] || 0) - (lockedByPlayer[joiner.id]?.[resource] || 0);
+    const actual = Math.min(tokens, avail);
+    if (actual <= 0) return;
+    const { effectiveness, basePoints } = calculateContributionPoints(joiner, resource, actual);
+    setJoinedContributions(prev => {
+      // Remove previous contribution from this player for this resource
+      const filtered = prev.filter(c => !(c.playerId === joiner.id && c.resourceType === resource));
+      return [...filtered, {
+        playerId: joiner.id, playerName: joiner.name, playerRole: joiner.roleId,
+        resourceType: resource, tokensCommitted: actual, effectiveness, basePoints, justification: '',
+      }];
+    });
+    console.log(`COLLAB_JOIN: ${joiner.name} adds ${actual} ${resource} (${effectiveness}% = ${basePoints.toFixed(1)} pts)`);
+  }, [resourcePools, lockedByPlayer]);
+
+  const lockCollabTask = useCallback(() => {
+    if (collabTimerRef.current) clearInterval(collabTimerRef.current);
+    setCollabOpen(false);
+    commitTask(joinedContributions);
+    setJoinedContributions([]);
+  }, [commitTask, joinedContributions]);
+
+  // Auto-lock when timer expires
+  React.useEffect(() => {
+    if (collabOpen && collabTimer <= 0) {
+      lockCollabTask();
+    }
+  }, [collabOpen, collabTimer, lockCollabTask]);
+
+  // Cleanup timer on unmount
+  React.useEffect(() => {
+    return () => { if (collabTimerRef.current) clearInterval(collabTimerRef.current); };
+  }, []);
+
+  // Collaboration score preview
+  const collabPreview = useMemo(() => {
+    const allContribs = [
+      ...RES_TYPES.filter(r => myContributions[r] > 0).map(r => {
+        const { effectiveness, basePoints } = calculateContributionPoints(currentPlayer, r, myContributions[r]);
+        return { role: currentPlayer?.roleId || '', basePoints };
+      }),
+      ...joinedContributions.map(c => ({ role: c.playerRole, basePoints: c.basePoints })),
+    ];
+    const uniqueRoles = new Set(allContribs.map(c => c.role)).size;
+    const baseSum = allContribs.reduce((s, c) => s + c.basePoints, 0);
+    const mult = getCombinationMultiplier(uniqueRoles);
+    return { uniqueRoles, baseSum, mult, combined: Math.round(baseSum * mult * 10) / 10 };
+  }, [myContributions, joinedContributions, currentPlayer]);
 
   // ═════════════════════════════════════════════════════════════════
   // RESULTS STAGE
@@ -577,21 +655,135 @@ export default function SeriesBuilderPhase({
               </div>
 
               {/* Action buttons */}
-              <button
-                onClick={commitTask}
-                disabled={!selectedType || !taskTitle.trim() || liveTotal === 0}
-                style={{
-                  width: '100%', padding: '10px 0', background: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? T.outlineVariant : T.primary,
-                  color: T.surface, border: 'none', borderRadius: 6, fontFamily: T.fontHeadline, fontSize: 13, fontWeight: 700, cursor: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? 'default' : 'pointer',
-                  marginBottom: 6,
-                }}
-              >
-                Lock &amp; Place Task
-              </button>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => { sounds.playButtonClick(); setShowCreator(false); }} style={{ flex: 1, padding: '6px 0', background: 'transparent', border: `1px solid ${T.outlineVariant}`, color: T.onSurfaceVariant, borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: T.fontBody }}>Cancel</button>
-                <button onClick={passTurn} style={{ flex: 1, padding: '6px 0', background: 'transparent', border: `1px solid ${T.secondary}`, color: T.secondary, borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: T.fontBody }}>Pass Turn</button>
-              </div>
+              {!collabOpen ? (
+                <>
+                  <button
+                    onClick={openCollaboration}
+                    disabled={!selectedType || !taskTitle.trim() || liveTotal === 0}
+                    style={{
+                      width: '100%', padding: '10px 0',
+                      background: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? T.outlineVariant : T.primary,
+                      color: T.surface, border: 'none', borderRadius: 6, fontFamily: T.fontHeadline, fontSize: 13, fontWeight: 700,
+                      cursor: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? 'default' : 'pointer', marginBottom: 4,
+                    }}
+                  >
+                    Open for Collaboration (30s)
+                  </button>
+                  <button
+                    onClick={() => commitTask()}
+                    disabled={!selectedType || !taskTitle.trim() || liveTotal === 0}
+                    style={{
+                      width: '100%', padding: '7px 0',
+                      background: 'transparent', color: T.onSurfaceVariant,
+                      border: `1px solid ${T.onSurfaceVariant}`, borderRadius: 6,
+                      fontFamily: T.fontBody, fontSize: 11, cursor: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? 'default' : 'pointer',
+                      marginBottom: 4, opacity: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? 0.3 : 1,
+                    }}
+                  >
+                    Lock Solo ({'\u00D7'}1.0)
+                  </button>
+                  <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.outlineVariant, textAlign: 'center', marginBottom: 6 }}>
+                    Solo tasks get no combination bonus
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => { sounds.playButtonClick(); setShowCreator(false); }} style={{ flex: 1, padding: '6px 0', background: 'transparent', border: `1px solid ${T.outlineVariant}`, color: T.onSurfaceVariant, borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: T.fontBody }}>Cancel</button>
+                    <button onClick={passTurn} style={{ flex: 1, padding: '6px 0', background: 'transparent', border: `1px solid ${T.secondary}`, color: T.secondary, borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: T.fontBody }}>Pass Turn</button>
+                  </div>
+                </>
+              ) : (
+                /* ─── Collaboration Window ─── */
+                <div style={{ background: T.surface, borderRadius: 8, padding: 10, border: `1px solid ${T.tertiary}30` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontFamily: T.fontHeadline, fontSize: 12, color: T.tertiary }}>
+                      Collaboration Window
+                    </div>
+                    <div style={{ fontFamily: T.fontNumber, fontSize: 22, fontWeight: 700, color: collabTimer <= 5 ? '#e55' : T.tertiary }}>
+                      {collabTimer}s
+                    </div>
+                  </div>
+
+                  {/* Live score preview */}
+                  <div style={{
+                    background: T.container, borderRadius: 6, padding: 8, marginBottom: 8,
+                    textAlign: 'center',
+                  }}>
+                    <div style={{ fontFamily: T.fontNumber, fontSize: 18, fontWeight: 700, color: T.onSurface }}>
+                      {collabPreview.combined} pts
+                    </div>
+                    <div style={{
+                      fontFamily: T.fontHeadline, fontSize: collabPreview.uniqueRoles >= 4 ? 16 : collabPreview.uniqueRoles >= 3 ? 14 : 12,
+                      fontWeight: 700, marginTop: 2,
+                      color: collabPreview.uniqueRoles >= 4 ? T.primary : collabPreview.uniqueRoles >= 3 ? T.primary : collabPreview.uniqueRoles >= 2 ? T.tertiary : T.onSurfaceVariant,
+                      textShadow: collabPreview.uniqueRoles >= 4 ? `0 0 8px ${T.primary}40` : 'none',
+                    }}>
+                      {collabPreview.uniqueRoles} role{collabPreview.uniqueRoles !== 1 ? 's' : ''} {'\u00D7'}{collabPreview.mult}
+                    </div>
+                  </div>
+
+                  {/* Other players join sections */}
+                  <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant, marginBottom: 6 }}>
+                    Pass device to other players to join:
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    {sorted.filter(p => p.id !== currentPlayer?.id).map(p => {
+                      const pJoined = joinedContributions.filter(c => c.playerId === p.id);
+                      const hasJoined = pJoined.length > 0;
+                      return (
+                        <div key={p.id} style={{
+                          background: hasJoined ? `${T.primary}10` : T.container, borderRadius: 6, padding: 8, marginBottom: 4,
+                          border: hasJoined ? `1px solid ${T.primary}30` : `1px solid transparent`,
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                            <div style={{
+                              width: 20, height: 20, borderRadius: '50%', background: ROLE_COLORS[p.roleId],
+                              fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+                            }}>{p.name[0]}</div>
+                            <span style={{ fontFamily: T.fontBody, fontSize: 11, fontWeight: 700, color: T.onSurface }}>{p.name}</span>
+                            <span style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant }}>{p.roleId}</span>
+                            {hasJoined && <span style={{ marginLeft: 'auto', fontSize: 10, color: T.primary }}>{'\u2713'} Joined</span>}
+                          </div>
+                          {!hasJoined && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {RES_TYPES.map(r => {
+                                const avail = (resourcePools[p.id]?.[r] || 0) - (lockedByPlayer[p.id]?.[r] || 0);
+                                if (avail <= 0) return null;
+                                return (
+                                  <button key={r} onClick={() => joinTask(p, r, 1)}
+                                    style={{
+                                      padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                                      background: RESOURCE_COLORS[r] + '20', color: RESOURCE_COLORS[r],
+                                      fontFamily: T.fontBody, fontSize: 9, fontWeight: 600,
+                                    }}
+                                  >
+                                    +1 {r.slice(0, 3).toUpperCase()} ({avail})
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {hasJoined && (
+                            <div style={{ fontFamily: T.fontNumber, fontSize: 9, color: T.primary }}>
+                              {pJoined.map(c => `${c.resourceType.slice(0, 3).toUpperCase()}:${c.tokensCommitted}`).join(' ')} = {pJoined.reduce((s, c) => s + c.basePoints, 0).toFixed(1)} pts
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Lock Now button */}
+                  <button
+                    onClick={lockCollabTask}
+                    style={{
+                      width: '100%', padding: '8px 0', marginTop: 8,
+                      background: T.primary, color: T.surface, border: 'none', borderRadius: 6,
+                      fontFamily: T.fontHeadline, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    }}
+                  >
+                    Lock Task ({collabPreview.uniqueRoles} contributor{collabPreview.uniqueRoles !== 1 ? 's' : ''})
+                  </button>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
