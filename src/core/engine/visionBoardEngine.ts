@@ -269,12 +269,42 @@ const DIFFICULTY_MULTIPLIERS: Record<number, number> = {
 export function calculateThreshold(
   selectedTiles: VisionFeatureTile[],
   difficultyDots: number,
+  players?: Player[],
 ): ThresholdResult {
   const { grandTotal } = calculateBoardCost(selectedTiles);
-  const multiplier = DIFFICULTY_MULTIPLIERS[difficultyDots] ?? 1.0;
-  const threshold = Math.round(grandTotal * multiplier * 10) / 10;
+  const diffMultiplier = DIFFICULTY_MULTIPLIERS[difficultyDots] ?? 1.0;
 
-  console.log('HIDDEN_THRESHOLD:', threshold);
+  // Smart threshold: convert tokens to points using average group effectiveness
+  // This means the threshold is in the same unit as series points
+  let avgEffectiveness = 0.55; // default 55% if no players available
+  if (players && players.length > 0) {
+    let totalEff = 0; let count = 0;
+    for (const p of players) {
+      for (const r of RESOURCE_TYPES) {
+        const ak = RESOURCE_ABILITY_MAP[r] as string;
+        const score = (p.abilities as unknown as Record<string, number>)[ak] ?? 10;
+        totalEff += calculateEffectiveness(score);
+        count++;
+      }
+    }
+    avgEffectiveness = count > 0 ? (totalEff / count) / 100 : 0.55;
+  }
+
+  // Base points = what it would cost if average players built solo (×1.0 combo)
+  const basePoints = grandTotal * avgEffectiveness * 5;
+
+  // Placemaking quality: diverse objectives lower the threshold
+  let placemakingMult = 1.0;
+  const coveredCategories = ALL_OBJECTIVES.filter(obj =>
+    selectedTiles.some(t => (t.objectivesServed[obj] ?? 0) >= 0.3)
+  ).length;
+  if (coveredCategories >= 5) placemakingMult *= 0.9;
+  else if (coveredCategories <= 2) placemakingMult *= 1.15;
+
+  const threshold = Math.round(basePoints * placemakingMult * diffMultiplier);
+
+  console.log(`THRESHOLD_CALC: tokens=${grandTotal} avgEff=${(avgEffectiveness * 100).toFixed(1)}% base=${basePoints.toFixed(1)} placemaking=${placemakingMult} diff=${diffMultiplier} → threshold=${threshold}`);
+  console.log(`THRESHOLD_CONTEXT: A good 3-role task ≈ 20-25 pts. Threshold ${threshold} needs ~${Math.ceil(threshold / 22)} well-collaborated tasks.`);
 
   return { threshold, isHidden: true };
 }

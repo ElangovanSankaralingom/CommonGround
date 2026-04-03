@@ -105,11 +105,21 @@ export default function SeriesBuilderPhase({
   const [transformText, setTransformText] = useState('');
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  // Collaboration window state
-  const [collabOpen, setCollabOpen] = useState(false);
-  const [collabTimer, setCollabTimer] = useState(30);
+  // Expandable task cards
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+
+  // 4-stage task creation flow: filling → collaboration → summary → (lock)
+  type TaskStage = 'filling' | 'collaboration' | 'summary';
+  const [taskStage, setTaskStage] = useState<TaskStage>('filling');
+  const [collabPlayerIdx, setCollabPlayerIdx] = useState(0);
   const [joinedContributions, setJoinedContributions] = useState<TaskContribution[]>([]);
-  const collabTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [collabJoinerContrib, setCollabJoinerContrib] = useState<Record<ResourceType, number>>({ budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 });
+  const [collabDecisions, setCollabDecisions] = useState<Record<string, 'joined' | 'skipped'>>({});
+  const [resourceRequests, setResourceRequests] = useState<{ targetId: string; resource: ResourceType; amount: number }[]>([]);
+  const [showRequestBuilder, setShowRequestBuilder] = useState(false);
+  const [reqResource, setReqResource] = useState<ResourceType>('budget');
+  const [reqAmount, setReqAmount] = useState(1);
+  const [reqTargetIdx, setReqTargetIdx] = useState(0);
 
   const hiddenThreshold = visionBoard.threshold;
   const currentPlayer = sorted[currentPlayerIdx];
@@ -118,14 +128,21 @@ export default function SeriesBuilderPhase({
     return map[challenge?.affectedZoneIds?.[0] || 'boating_pond'] || 'z3';
   }, [challenge]);
 
-  // ─── Chain info ───
+  // ─── Chain info (recalculates whenever series tasks change) ───
+  const chainResult = useMemo(() => {
+    const seq = activeSeries.tasks.filter(t => t.taskType !== 'innovate').map(t => t.taskType.toLowerCase());
+    return calculateChainBonus(seq);
+  }, [activeSeries.tasks.length, activeSeries]);
+
   const chainInfo = useMemo(() => {
-    const seq = activeSeries.chainSequence;
-    if (seq.length < 2) return 'No chain yet';
-    const result = calculateChainBonus(seq);
-    const last = seq[seq.length - 1];
-    return `\u{1F517} ${seq.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' \u2192 ')} (+${result.bonus})`;
-  }, [activeSeries.chainSequence]);
+    const { chainLength, bonus } = chainResult;
+    const SEQUENCE = ['assess', 'plan', 'design', 'build', 'maintain'];
+    if (chainLength === 0) return 'No chain yet';
+    const found = SEQUENCE.slice(0, chainLength);
+    if (chainLength >= 5) return '\u2728 Full Chain! (+18)';
+    const display = found.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' \u2192 ');
+    return `\u{1F517} ${display}${bonus > 0 ? ` (+${bonus})` : ''}`;
+  }, [chainResult]);
 
   // ─── Available for current player ───
   const availableForCurrent = useMemo(() => {
@@ -198,7 +215,13 @@ export default function SeriesBuilderPhase({
       console.log(`RESOURCE_LOCK: ${c.playerName} ${c.resourceType} -${c.tokensCommitted} remaining:${remaining}`);
     });
     setLockedByPlayer(newLocked);
-    setActiveSeries({ ...activeSeries });
+    // Deep copy to ensure React detects the change in nested arrays
+    setActiveSeries({
+      ...activeSeries,
+      tasks: [...activeSeries.tasks],
+      chainSequence: [...activeSeries.chainSequence],
+      supporters: [...activeSeries.supporters],
+    });
 
     if (result.thresholdCrossed && !thresholdCrossed) {
       setThresholdCrossed(true);
@@ -275,59 +298,86 @@ export default function SeriesBuilderPhase({
     setShowCreator(false);
   }, [currentPlayerIdx, sorted, lockedByPlayer]);
 
-  // ─── Collaboration Window ───
-  const openCollaboration = useCallback(() => {
+  // ─── 4-Stage Task Flow ───
+  const otherPlayers = useMemo(() => sorted.filter(p => p.id !== currentPlayer?.id), [sorted, currentPlayer]);
+
+  // Stage 1 → Stage 2: "This is My Move" opens collaboration
+  const submitMyMove = useCallback(() => {
     sounds.playButtonClick();
-    setCollabOpen(true);
-    setCollabTimer(30);
+    setTaskStage('collaboration');
+    setCollabPlayerIdx(0);
     setJoinedContributions([]);
-    collabTimerRef.current = setInterval(() => {
-      setCollabTimer(prev => {
-        if (prev <= 1) {
-          if (collabTimerRef.current) clearInterval(collabTimerRef.current);
-          return 0;
+    setCollabDecisions({});
+    setCollabJoinerContrib({ budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 });
+    console.log('THIS_IS_MY_MOVE:', taskTitle, 'requests:', resourceRequests.length);
+  }, [taskTitle, resourceRequests]);
+
+  // Stage 2: player joins during carousel
+  const collabJoinerJoin = useCallback(() => {
+    const joiner = otherPlayers[collabPlayerIdx];
+    if (!joiner) return;
+    sounds.playButtonClick();
+    const newContribs: TaskContribution[] = [];
+    RES_TYPES.forEach(r => {
+      if (collabJoinerContrib[r] > 0) {
+        const avail = (resourcePools[joiner.id]?.[r] || 0) - (lockedByPlayer[joiner.id]?.[r] || 0);
+        const actual = Math.min(collabJoinerContrib[r], avail);
+        if (actual > 0) {
+          const { effectiveness, basePoints } = calculateContributionPoints(joiner, r, actual);
+          newContribs.push({ playerId: joiner.id, playerName: joiner.name, playerRole: joiner.roleId, resourceType: r, tokensCommitted: actual, effectiveness, basePoints, justification: '' });
         }
-        return prev - 1;
-      });
-    }, 1000);
-    console.log('COLLAB_WINDOW_OPEN:', taskTitle);
-  }, [taskTitle]);
-
-  const joinTask = useCallback((joiner: Player, resource: ResourceType, tokens: number) => {
-    if (tokens <= 0) return;
-    const avail = (resourcePools[joiner.id]?.[resource] || 0) - (lockedByPlayer[joiner.id]?.[resource] || 0);
-    const actual = Math.min(tokens, avail);
-    if (actual <= 0) return;
-    const { effectiveness, basePoints } = calculateContributionPoints(joiner, resource, actual);
-    setJoinedContributions(prev => {
-      // Remove previous contribution from this player for this resource
-      const filtered = prev.filter(c => !(c.playerId === joiner.id && c.resourceType === resource));
-      return [...filtered, {
-        playerId: joiner.id, playerName: joiner.name, playerRole: joiner.roleId,
-        resourceType: resource, tokensCommitted: actual, effectiveness, basePoints, justification: '',
-      }];
+      }
     });
-    console.log(`COLLAB_JOIN: ${joiner.name} adds ${actual} ${resource} (${effectiveness}% = ${basePoints.toFixed(1)} pts)`);
-  }, [resourcePools, lockedByPlayer]);
+    setJoinedContributions(prev => [...prev, ...newContribs]);
+    setCollabDecisions(prev => ({ ...prev, [joiner.id]: 'joined' }));
+    console.log(`COLLAB_JOIN: ${joiner.name} joins with`, newContribs.map(c => `${c.tokensCommitted} ${c.resourceType}`).join(', '));
+    if (collabPlayerIdx < otherPlayers.length - 1) {
+      setCollabPlayerIdx(prev => prev + 1);
+      setCollabJoinerContrib({ budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 });
+    } else {
+      setTaskStage('summary');
+    }
+  }, [otherPlayers, collabPlayerIdx, collabJoinerContrib, resourcePools, lockedByPlayer]);
 
-  const lockCollabTask = useCallback(() => {
-    if (collabTimerRef.current) clearInterval(collabTimerRef.current);
-    setCollabOpen(false);
+  const collabJoinerSkip = useCallback(() => {
+    const joiner = otherPlayers[collabPlayerIdx];
+    if (!joiner) return;
+    sounds.playButtonClick();
+    setCollabDecisions(prev => ({ ...prev, [joiner.id]: 'skipped' }));
+    console.log(`COLLAB_SKIP: ${joiner.name} passed`);
+    if (collabPlayerIdx < otherPlayers.length - 1) {
+      setCollabPlayerIdx(prev => prev + 1);
+      setCollabJoinerContrib({ budget: 0, knowledge: 0, volunteer: 0, material: 0, influence: 0 });
+    } else {
+      setTaskStage('summary');
+    }
+  }, [otherPlayers, collabPlayerIdx]);
+
+  // Stage 3 → Stage 4: Lock from summary
+  const lockFromSummary = useCallback(() => {
     commitTask(joinedContributions);
     setJoinedContributions([]);
+    setResourceRequests([]);
+    setTaskStage('filling');
+    setShowRequestBuilder(false);
   }, [commitTask, joinedContributions]);
 
-  // Auto-lock when timer expires
-  React.useEffect(() => {
-    if (collabOpen && collabTimer <= 0) {
-      lockCollabTask();
-    }
-  }, [collabOpen, collabTimer, lockCollabTask]);
-
-  // Cleanup timer on unmount
-  React.useEffect(() => {
-    return () => { if (collabTimerRef.current) clearInterval(collabTimerRef.current); };
+  // Cancel: discard everything
+  const cancelTask = useCallback(() => {
+    setTaskStage('filling');
+    setJoinedContributions([]);
+    setCollabDecisions({});
+    setResourceRequests([]);
+    setShowCreator(false);
+    setShowRequestBuilder(false);
   }, []);
+
+  // Skip collaboration — place solo directly
+  const placeSolo = useCallback(() => {
+    sounds.playButtonClick();
+    console.log('SOLO_TASK:', taskTitle, 'by', currentPlayer?.name);
+    commitTask();
+  }, [commitTask, taskTitle, currentPlayer]);
 
   // Collaboration score preview
   const collabPreview = useMemo(() => {
@@ -423,24 +473,49 @@ export default function SeriesBuilderPhase({
 
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: T.surface, fontFamily: T.fontBody, color: T.onSurface, overflow: 'hidden' }}>
-      {/* ─── TOP HEADER ─── */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '10px 20px', gap: 16, borderBottom: `1px solid ${T.outlineVariant}`, flexShrink: 0 }}>
-        <h2 style={{ fontFamily: T.fontHeadline, color: T.primary, fontSize: 18, margin: 0, fontWeight: 700 }}>Phase 4: Build the Path</h2>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {visionBoard.tiles.slice(0, 4).map((tile, i) => (
-            <div key={i} style={{ background: T.containerHigh, borderRadius: 4, padding: '2px 8px', fontSize: 10, color: T.onSurfaceVariant }}>{tile.name}</div>
-          ))}
-          {visionBoard.tiles.length > 4 && <div style={{ fontSize: 10, color: T.onSurfaceVariant }}>+{visionBoard.tiles.length - 4}</div>}
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
-          <div style={{ background: T.containerHigh, borderRadius: 6, padding: '4px 10px', fontSize: 11, color: T.tertiary }}>
-            {chainInfo}
-          </div>
-          {activeEffects.map((eff, i) => (
-            <div key={i} style={{ background: eff.type === 'cost_increase' || eff.type === 'resource_freeze' ? 'rgba(200,60,60,0.2)' : 'rgba(174,212,86,0.2)', borderRadius: 6, padding: '3px 8px', fontSize: 10, color: eff.type === 'cost_increase' || eff.type === 'resource_freeze' ? '#e87' : T.primary }}>
-              {eff.cardTitle} ({eff.turnsRemaining}t)
+      {/* ─── TOP: Vision Banner + Chain ─── */}
+      <div style={{ borderBottom: `1px solid ${T.outlineVariant}`, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '8px 20px', gap: 12 }}>
+          <h2 style={{ fontFamily: T.fontHeadline, color: T.primary, fontSize: 16, margin: 0, fontWeight: 700 }}>Phase 4: Build the Path</h2>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{
+              background: T.containerHigh, borderRadius: 6, padding: '4px 10px', fontSize: 11,
+              color: chainResult.chainLength >= 5 ? T.tertiary : T.onSurfaceVariant,
+              textShadow: chainResult.chainLength >= 5 ? `0 0 8px ${T.tertiary}` : 'none',
+              fontWeight: chainResult.bonus > 0 ? 700 : 400,
+            }}>
+              {chainInfo}
             </div>
-          ))}
+            {activeEffects.map((eff, i) => (
+              <div key={i} style={{ background: eff.type === 'cost_increase' || eff.type === 'resource_freeze' ? 'rgba(200,60,60,0.2)' : 'rgba(174,212,86,0.2)', borderRadius: 6, padding: '3px 8px', fontSize: 10, color: eff.type === 'cost_increase' || eff.type === 'resource_freeze' ? '#e87' : T.primary }}>
+                {eff.cardTitle} ({eff.turnsRemaining}t)
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Connected vision statement */}
+        <div style={{ padding: '6px 20px 8px', background: '#1e1b14', borderLeft: `4px solid ${T.primary}`, marginLeft: 16, marginRight: 16, marginBottom: 8, borderRadius: 4 }}>
+          <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 3 }}>COMBINED VISION</div>
+          <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.onSurface, fontWeight: 500, lineHeight: '16px' }}>
+            {(() => {
+              const names = visionBoard.tiles.map(t => t.name.toLowerCase());
+              const zone = challenge?.affectedZoneIds?.[0]?.replace(/_/g, ' ') || 'the zone';
+              if (names.length === 0) return 'No features selected.';
+              if (names.length === 1) return `${zone} will be improved through ${names[0]}.`;
+              if (names.length === 2) return `${zone} will be restored through ${names[0]} supported by ${names[1]}.`;
+              const last = names[names.length - 1];
+              const rest = names.slice(0, -1);
+              return `${zone} will be transformed through ${rest.join(', ')}, and ${last}.`;
+            })()}
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' as const }}>
+            {visionBoard.tiles.map((tile, i) => (
+              <React.Fragment key={i}>
+                {i > 0 && <span style={{ fontSize: 10, color: T.outlineVariant }}>{'\u2192'}</span>}
+                <span style={{ fontSize: 9, color: T.primary, background: `${T.primary}10`, borderRadius: 3, padding: '1px 6px' }}>{tile.name}</span>
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -456,38 +531,87 @@ export default function SeriesBuilderPhase({
 
           {/* Timeline scroll */}
           <div ref={timelineRef} style={{ display: 'flex', gap: 10, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 10, flex: 1, alignItems: 'flex-start' }}>
-            {activeSeries.tasks.map((t, i) => (
-              <motion.div
-                key={t.id}
-                initial={{ x: 40, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ duration: 0.3 }}
-                style={{ minWidth: 130, maxWidth: 140, background: T.container, borderRadius: 8, overflow: 'hidden', flexShrink: 0, boxShadow: T.woodBevel }}
-              >
-                <div style={{ height: 5, background: TASK_COLORS[t.taskType] || T.onSurface }} />
-                <div style={{ padding: '8px 10px' }}>
-                  <div style={{ fontSize: 9, textTransform: 'uppercase' as const, color: TASK_COLORS[t.taskType] || T.onSurface, letterSpacing: 0.8, marginBottom: 2 }}>
-                    {TASK_ICONS[t.taskType] || ''} {t.taskType}
-                  </div>
-                  <div style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 11, color: T.onSurface, marginBottom: 6, lineHeight: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{t.title}</div>
-                  {t.contributions.map((c, ci) => (
-                    <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: (ROLE_COLORS as Record<string, string>)[c.playerRole] || '#666', fontSize: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{c.playerName[0]}</div>
-                      <span style={{ fontSize: 9, color: T.onSurfaceVariant }}>&times;{c.tokensCommitted}</span>
-                      <span style={{ fontSize: 9, color: RESOURCE_COLORS[c.resourceType] || T.onSurfaceVariant }}>{c.basePoints.toFixed(1)}pts</span>
+            {activeSeries.tasks.map((t, i) => {
+              const isExpanded = expandedTaskId === t.id;
+              return (
+                <motion.div
+                  key={t.id}
+                  initial={{ x: 40, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1, width: isExpanded ? 280 : 140 }}
+                  transition={{ duration: 0.3 }}
+                  onClick={() => setExpandedTaskId(isExpanded ? null : t.id)}
+                  style={{ minWidth: isExpanded ? 280 : 130, maxWidth: isExpanded ? 300 : 140, background: isExpanded ? '#1e1b14' : T.container, borderRadius: 8, overflow: 'hidden', flexShrink: 0, boxShadow: isExpanded ? '0 6px 20px rgba(22,19,12,0.6)' : T.woodBevel, cursor: 'pointer', transition: 'box-shadow 0.3s' }}
+                >
+                  <div style={{ height: 5, background: TASK_COLORS[t.taskType] || T.onSurface }} />
+                  <div style={{ padding: '8px 10px' }}>
+                    <div style={{ fontSize: 9, textTransform: 'uppercase' as const, color: TASK_COLORS[t.taskType] || T.onSurface, letterSpacing: 0.8, marginBottom: 2, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{TASK_ICONS[t.taskType] || ''} {t.taskType}</span>
+                      {isExpanded && <span style={{ fontSize: 12, color: T.onSurfaceVariant, cursor: 'pointer' }}>{'\u00D7'}</span>}
                     </div>
-                  ))}
-                  {t.uniqueRoles > 1 && (
-                    <div style={{ fontSize: 9, color: T.primary, marginTop: 4, background: 'rgba(174,212,86,0.1)', borderRadius: 4, padding: '2px 4px' }}>
-                      &times;{t.combinationMultiplier.toFixed(1)} ({t.uniqueRoles} roles)
+                    <div style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 11, color: T.onSurface, marginBottom: 6, lineHeight: '14px', overflow: isExpanded ? 'visible' : 'hidden', textOverflow: isExpanded ? 'unset' : 'ellipsis', whiteSpace: isExpanded ? 'normal' as const : 'nowrap' as const }}>{t.title}</div>
+
+                    {/* Expanded: full details */}
+                    {isExpanded && (
+                      <div style={{ borderTop: `1px solid ${T.outlineVariant}`, paddingTop: 6, marginBottom: 6 }}>
+                        {t.description && (
+                          <div style={{ marginBottom: 6 }}>
+                            <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 2 }}>How will this be done?</div>
+                            <div style={{ fontSize: 10, color: T.onSurface, lineHeight: '14px' }}>{t.description}</div>
+                          </div>
+                        )}
+                        {t.crossPerspectives.length > 0 && (
+                          <div style={{ marginBottom: 6 }}>
+                            <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 2 }}>How does this help others?</div>
+                            <div style={{ fontSize: 10, color: T.primary, fontStyle: 'italic', lineHeight: '14px' }}>{t.crossPerspectives.map(cp => cp.text).join(' | ')}</div>
+                          </div>
+                        )}
+                        {t.successCriteria && (
+                          <div style={{ marginBottom: 6 }}>
+                            <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 2 }}>Success criteria</div>
+                            <div style={{ fontSize: 10, color: T.onSurface, lineHeight: '14px' }}>{t.successCriteria}</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Contributors */}
+                    {t.contributions.map((c, ci) => (
+                      <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: (ROLE_COLORS as Record<string, string>)[c.playerRole] || '#666', fontSize: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{c.playerName[0]}</div>
+                        {isExpanded ? (
+                          <span style={{ fontSize: 9, color: T.onSurfaceVariant }}>{c.playerName} ({c.playerRole}) {c.resourceType.slice(0, 3).toUpperCase()} {'\u00D7'}{c.tokensCommitted} ({c.effectiveness}%) = {c.basePoints.toFixed(1)} pts</span>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 9, color: T.onSurfaceVariant }}>{'\u00D7'}{c.tokensCommitted}</span>
+                            <span style={{ fontSize: 9, color: RESOURCE_COLORS[c.resourceType] || T.onSurfaceVariant }}>{c.basePoints.toFixed(1)}pts</span>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    {t.uniqueRoles > 1 && (
+                      <div style={{ fontSize: 9, color: T.primary, marginTop: 4, background: 'rgba(174,212,86,0.1)', borderRadius: 4, padding: '2px 4px' }}>
+                        {'\u00D7'}{t.combinationMultiplier.toFixed(1)} ({t.uniqueRoles} roles)
+                      </div>
+                    )}
+
+                    {/* Expanded: points breakdown */}
+                    {isExpanded && (
+                      <div style={{ borderTop: `1px solid ${T.outlineVariant}`, paddingTop: 4, marginTop: 6, fontSize: 9, color: T.onSurfaceVariant }}>
+                        <div>Base: {t.baseTotal.toFixed(1)} {'\u00D7'} {t.combinationMultiplier.toFixed(1)} = {(t.baseTotal * t.combinationMultiplier).toFixed(1)}</div>
+                        {t.crossPerspectiveBonus > 0 && <div>+ Cross-perspective: +{t.crossPerspectiveBonus.toFixed(1)}</div>}
+                        {t.capabilityBonus > 0 && <div>+ Capabilities: +{t.capabilityBonus.toFixed(1)}</div>}
+                        {t.dependencyBonus > 0 && <div>+ Dependencies: +{t.dependencyBonus.toFixed(1)}</div>}
+                        {t.innovationMultiplier > 1 && <div>{'\u00D7'} Innovation: {'\u00D7'}{t.innovationMultiplier}</div>}
+                      </div>
+                    )}
+
+                    <div style={{ fontFamily: T.fontNumber, fontSize: 13, fontWeight: 'bold', color: TASK_COLORS[t.taskType] || T.onSurface, marginTop: 6, textAlign: 'right' as const }}>
+                      {t.finalTotal.toFixed(1)}
                     </div>
-                  )}
-                  <div style={{ fontFamily: T.fontNumber, fontSize: 13, fontWeight: 'bold', color: TASK_COLORS[t.taskType] || T.onSurface, marginTop: 6, textAlign: 'right' as const }}>
-                    {t.finalTotal.toFixed(1)}
                   </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
 
             {/* Add Task Card */}
             <div
@@ -602,9 +726,14 @@ export default function SeriesBuilderPhase({
                 )}
               </div>
 
-              {/* Description */}
+              {/* Description + integration prompt */}
               <div style={{ marginBottom: 8 }}>
                 <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>Description</div>
+                {visionBoard.tiles.length > 1 && (
+                  <div style={{ fontSize: 9, color: T.onSurfaceVariant, opacity: 0.6, fontStyle: 'italic', marginBottom: 4, lineHeight: '12px' }}>
+                    How does this help {visionBoard.tiles.slice(0, 3).map(t => t.name).join(' AND ')} work together?
+                  </div>
+                )}
                 <textarea
                   value={taskDesc} onChange={e => setTaskDesc(e.target.value.slice(0, 300))} placeholder="What does this task accomplish?"
                   style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, resize: 'none' as const, height: 48, boxSizing: 'border-box' as const }}
@@ -654,133 +783,260 @@ export default function SeriesBuilderPhase({
                 Total: {liveTotal.toFixed(1)} pts
               </div>
 
-              {/* Action buttons */}
-              {!collabOpen ? (
+              {/* ═══ STAGE 1: Form buttons (filling) ═══ */}
+              {taskStage === 'filling' && (
                 <>
-                  <button
-                    onClick={openCollaboration}
-                    disabled={!selectedType || !taskTitle.trim() || liveTotal === 0}
-                    style={{
-                      width: '100%', padding: '10px 0',
-                      background: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? T.outlineVariant : T.primary,
-                      color: T.surface, border: 'none', borderRadius: 6, fontFamily: T.fontHeadline, fontSize: 13, fontWeight: 700,
-                      cursor: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? 'default' : 'pointer', marginBottom: 4,
-                    }}
-                  >
-                    Open for Collaboration (30s)
-                  </button>
-                  <button
-                    onClick={() => commitTask()}
-                    disabled={!selectedType || !taskTitle.trim() || liveTotal === 0}
-                    style={{
-                      width: '100%', padding: '7px 0',
-                      background: 'transparent', color: T.onSurfaceVariant,
-                      border: `1px solid ${T.onSurfaceVariant}`, borderRadius: 6,
-                      fontFamily: T.fontBody, fontSize: 11, cursor: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? 'default' : 'pointer',
-                      marginBottom: 4, opacity: (!selectedType || !taskTitle.trim() || liveTotal === 0) ? 0.3 : 1,
-                    }}
-                  >
-                    Lock Solo ({'\u00D7'}1.0)
-                  </button>
-                  <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.outlineVariant, textAlign: 'center', marginBottom: 6 }}>
-                    Solo tasks get no combination bonus
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => { sounds.playButtonClick(); setShowCreator(false); }} style={{ flex: 1, padding: '6px 0', background: 'transparent', border: `1px solid ${T.outlineVariant}`, color: T.onSurfaceVariant, borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: T.fontBody }}>Cancel</button>
-                    <button onClick={passTurn} style={{ flex: 1, padding: '6px 0', background: 'transparent', border: `1px solid ${T.secondary}`, color: T.secondary, borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: T.fontBody }}>Pass Turn</button>
-                  </div>
-                </>
-              ) : (
-                /* ─── Collaboration Window ─── */
-                <div style={{ background: T.surface, borderRadius: 8, padding: 10, border: `1px solid ${T.tertiary}30` }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <div style={{ fontFamily: T.fontHeadline, fontSize: 12, color: T.tertiary }}>
-                      Collaboration Window
-                    </div>
-                    <div style={{ fontFamily: T.fontNumber, fontSize: 22, fontWeight: 700, color: collabTimer <= 5 ? '#e55' : T.tertiary }}>
-                      {collabTimer}s
-                    </div>
-                  </div>
-
-                  {/* Live score preview */}
-                  <div style={{
-                    background: T.container, borderRadius: 6, padding: 8, marginBottom: 8,
-                    textAlign: 'center',
-                  }}>
-                    <div style={{ fontFamily: T.fontNumber, fontSize: 18, fontWeight: 700, color: T.onSurface }}>
-                      {collabPreview.combined} pts
-                    </div>
-                    <div style={{
-                      fontFamily: T.fontHeadline, fontSize: collabPreview.uniqueRoles >= 4 ? 16 : collabPreview.uniqueRoles >= 3 ? 14 : 12,
-                      fontWeight: 700, marginTop: 2,
-                      color: collabPreview.uniqueRoles >= 4 ? T.primary : collabPreview.uniqueRoles >= 3 ? T.primary : collabPreview.uniqueRoles >= 2 ? T.tertiary : T.onSurfaceVariant,
-                      textShadow: collabPreview.uniqueRoles >= 4 ? `0 0 8px ${T.primary}40` : 'none',
-                    }}>
-                      {collabPreview.uniqueRoles} role{collabPreview.uniqueRoles !== 1 ? 's' : ''} {'\u00D7'}{collabPreview.mult}
-                    </div>
-                  </div>
-
-                  {/* Other players join sections */}
-                  <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant, marginBottom: 6 }}>
-                    Pass device to other players to join:
-                  </div>
-                  <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-                    {sorted.filter(p => p.id !== currentPlayer?.id).map(p => {
-                      const pJoined = joinedContributions.filter(c => c.playerId === p.id);
-                      const hasJoined = pJoined.length > 0;
-                      return (
-                        <div key={p.id} style={{
-                          background: hasJoined ? `${T.primary}10` : T.container, borderRadius: 6, padding: 8, marginBottom: 4,
-                          border: hasJoined ? `1px solid ${T.primary}30` : `1px solid transparent`,
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                            <div style={{
-                              width: 20, height: 20, borderRadius: '50%', background: ROLE_COLORS[p.roleId],
-                              fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
-                            }}>{p.name[0]}</div>
-                            <span style={{ fontFamily: T.fontBody, fontSize: 11, fontWeight: 700, color: T.onSurface }}>{p.name}</span>
-                            <span style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant }}>{p.roleId}</span>
-                            {hasJoined && <span style={{ marginLeft: 'auto', fontSize: 10, color: T.primary }}>{'\u2713'} Joined</span>}
+                  {/* Resource requests display */}
+                  {resourceRequests.length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      {resourceRequests.map((rr, i) => {
+                        const target = sorted.find(p => p.id === rr.targetId);
+                        return (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, fontSize: 9, color: T.tertiary }}>
+                            <span>{'\u{1F4CB}'}</span>
+                            <span>Requesting: {rr.amount} {rr.resource} from {target?.name}</span>
+                            <button onClick={() => setResourceRequests(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: '#e55', fontSize: 10, cursor: 'pointer', padding: 0 }}>{'\u00D7'}</button>
                           </div>
-                          {!hasJoined && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                              {RES_TYPES.map(r => {
-                                const avail = (resourcePools[p.id]?.[r] || 0) - (lockedByPlayer[p.id]?.[r] || 0);
-                                if (avail <= 0) return null;
-                                return (
-                                  <button key={r} onClick={() => joinTask(p, r, 1)}
-                                    style={{
-                                      padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
-                                      background: RESOURCE_COLORS[r] + '20', color: RESOURCE_COLORS[r],
-                                      fontFamily: T.fontBody, fontSize: 9, fontWeight: 600,
-                                    }}
-                                  >
-                                    +1 {r.slice(0, 3).toUpperCase()} ({avail})
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {hasJoined && (
-                            <div style={{ fontFamily: T.fontNumber, fontSize: 9, color: T.primary }}>
-                              {pJoined.map(c => `${c.resourceType.slice(0, 3).toUpperCase()}:${c.tokensCommitted}`).join(' ')} = {pJoined.reduce((s, c) => s + c.basePoints, 0).toFixed(1)} pts
-                            </div>
-                          )}
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Request Resources button */}
+                  {!showRequestBuilder && (
+                    <button onClick={() => setShowRequestBuilder(true)} style={{
+                      width: '100%', padding: '6px 0', marginBottom: 6, background: 'transparent',
+                      border: `1px solid rgba(233,195,73,0.4)`, borderRadius: 6, color: T.tertiary,
+                      fontFamily: T.fontBody, fontSize: 11, cursor: 'pointer',
+                    }}>
+                      {'\u{1F91D}'} Request Resources from Others
+                    </button>
+                  )}
+                  {showRequestBuilder && (
+                    <div style={{ background: T.containerHigh, borderRadius: 6, padding: 8, marginBottom: 8 }}>
+                      <div style={{ fontSize: 10, color: T.tertiary, marginBottom: 4, fontWeight: 600 }}>Request resources:</div>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' as const }}>
+                        <select value={reqAmount} onChange={e => setReqAmount(Number(e.target.value))} style={{ background: T.container, color: T.onSurface, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, padding: '2px 4px', fontSize: 10 }}>
+                          {[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                        <select value={reqResource} onChange={e => setReqResource(e.target.value as ResourceType)} style={{ background: T.container, color: T.onSurface, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, padding: '2px 4px', fontSize: 10 }}>
+                          {RES_TYPES.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                        <span style={{ fontSize: 9, color: T.onSurfaceVariant }}>from</span>
+                        <select value={reqTargetIdx} onChange={e => setReqTargetIdx(Number(e.target.value))} style={{ background: T.container, color: T.onSurface, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, padding: '2px 4px', fontSize: 10 }}>
+                          {otherPlayers.map((p, i) => <option key={p.id} value={i}>{p.name} ({p.roleId})</option>)}
+                        </select>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => {
+                          const target = otherPlayers[reqTargetIdx];
+                          if (target) {
+                            setResourceRequests(prev => [...prev, { targetId: target.id, resource: reqResource, amount: reqAmount }]);
+                          }
+                        }} style={{ flex: 1, padding: '4px 0', background: T.tertiary, color: T.surface, border: 'none', borderRadius: 4, fontSize: 10, cursor: 'pointer', fontWeight: 600 }}>Add Request</button>
+                        <button onClick={() => setShowRequestBuilder(false)} style={{ padding: '4px 8px', background: 'transparent', border: `1px solid ${T.outlineVariant}`, color: T.onSurfaceVariant, borderRadius: 4, fontSize: 10, cursor: 'pointer' }}>Done</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* "This is My Move" button */}
+                  <button
+                    onClick={submitMyMove}
+                    disabled={!selectedType || !taskTitle.trim()}
+                    style={{
+                      width: '100%', padding: '12px 0', background: (!selectedType || !taskTitle.trim()) ? T.outlineVariant : T.primary,
+                      color: T.surface, border: 'none', borderRadius: 4, fontFamily: T.fontBody, fontSize: 14, fontWeight: 700,
+                      cursor: (!selectedType || !taskTitle.trim()) ? 'default' : 'pointer',
+                      boxShadow: T.woodBevel, marginBottom: 4, opacity: (!selectedType || !taskTitle.trim()) ? 0.4 : 1,
+                    }}
+                  >
+                    This is My Move {'\u2713'}
+                  </button>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <button onClick={cancelTask} style={{ background: 'none', border: 'none', color: T.onSurfaceVariant, fontSize: 10, cursor: 'pointer', fontFamily: T.fontBody, padding: 0 }}>Cancel</button>
+                    <button onClick={placeSolo} disabled={!selectedType || !taskTitle.trim() || liveTotal === 0}
+                      style={{ background: 'none', border: 'none', color: `${T.onSurfaceVariant}80`, fontSize: 10, cursor: 'pointer', fontFamily: T.fontBody, padding: 0, textDecoration: 'underline' }}>
+                      Skip collaboration {'\u2014'} place solo
+                    </button>
+                  </div>
+                  {liveTotal === 0 && selectedType && taskTitle.trim() && (
+                    <div style={{ fontSize: 9, color: T.onSurfaceVariant, marginTop: 6, fontStyle: 'italic' }}>
+                      You have no resources left {'\u2014'} but your idea and coordination still count. Other players can contribute.
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* ═══ STAGE 2: Collaboration carousel ═══ */}
+              {taskStage === 'collaboration' && (() => {
+                const joiner = otherPlayers[collabPlayerIdx];
+                if (!joiner) return null;
+                const request = resourceRequests.find(rr => rr.targetId === joiner.id);
+                return (
+                  <div style={{ background: T.surface, borderRadius: 8, padding: 10, border: `1px solid ${T.tertiary}30` }}>
+                    {/* Task proposal banner */}
+                    <div style={{ background: `rgba(174,212,86,0.08)`, borderLeft: `4px solid ${T.primary}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                      <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.primary, fontWeight: 700 }}>{'\u{1F4CB}'} TASK PROPOSAL</div>
+                      <div style={{ fontFamily: T.fontBody, fontSize: 11, color: T.onSurface, marginTop: 2 }}>{currentPlayer?.name} proposes: <strong>{taskTitle}</strong></div>
+                      {taskDesc && <div style={{ fontFamily: T.fontBody, fontSize: 9, color: T.onSurfaceVariant, marginTop: 2 }}>{taskDesc}</div>}
+                      <div style={{ fontFamily: T.fontNumber, fontSize: 9, color: T.tertiary, marginTop: 3 }}>
+                        Commits: {RES_TYPES.filter(r => myContributions[r] > 0).map(r => `${r.slice(0, 3).toUpperCase()} {'\u00D7'}${myContributions[r]}`).join(' + ')} = {liveTotal.toFixed(1)} pts
+                      </div>
+                      {resourceRequests.length > 0 && (
+                        <div style={{ marginTop: 4, padding: '4px 0', borderTop: `1px solid ${T.tertiary}20` }}>
+                          <div style={{ fontSize: 9, color: T.tertiary, fontWeight: 700 }}>{'\u26A1'} RESOURCE REQUESTS:</div>
+                          {resourceRequests.map((rr, i) => {
+                            const t = sorted.find(p => p.id === rr.targetId);
+                            return <div key={i} style={{ fontSize: 9, color: T.tertiary }}>{'\u2022'} {rr.amount} {rr.resource} from {t?.name}</div>;
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Live score */}
+                    <div style={{ background: T.container, borderRadius: 6, padding: 6, marginBottom: 8, textAlign: 'center' }}>
+                      <div style={{ fontFamily: T.fontNumber, fontSize: 16, fontWeight: 700, color: T.onSurface }}>{collabPreview.combined} pts</div>
+                      <div style={{
+                        fontFamily: T.fontHeadline, fontSize: collabPreview.uniqueRoles >= 3 ? 14 : 12,
+                        fontWeight: 700, color: collabPreview.uniqueRoles >= 2 ? T.tertiary : T.onSurfaceVariant,
+                      }}>
+                        {collabPreview.uniqueRoles} role{collabPreview.uniqueRoles !== 1 ? 's' : ''} {'\u00D7'}{collabPreview.mult}
+                      </div>
+                      {collabPreview.uniqueRoles < 5 && (
+                        <div style={{ fontSize: 9, color: T.tertiary }}>+1 role = {'\u00D7'}{getCombinationMultiplier(collabPreview.uniqueRoles + 1).toFixed(1)}</div>
+                      )}
+                    </div>
+
+                    {/* Current joiner */}
+                    <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.tertiary, textAlign: 'center', marginBottom: 6 }}>
+                      {'\u{1F504}'} PASS DEVICE TO:
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 8 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: ROLE_COLORS[joiner.roleId], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#fff' }}>{joiner.name[0]}</div>
+                      <div>
+                        <div style={{ fontFamily: T.fontBody, fontWeight: 700, fontSize: 13, color: T.onSurface }}>{joiner.name}</div>
+                        <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'capitalize' }}>{joiner.roleId}</div>
+                      </div>
+                    </div>
+
+                    {/* Request banner */}
+                    {request && (
+                      <div style={{ background: `rgba(233,195,73,0.1)`, border: `1px solid rgba(233,195,73,0.3)`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, color: T.tertiary, fontWeight: 700 }}>{'\u26A1'} {currentPlayer?.name} is asking YOU for: {request.amount} {request.resource}</div>
+                        <div style={{ fontSize: 9, color: T.onSurfaceVariant, marginTop: 2 }}>
+                          Your {request.resource}: {(resourcePools[joiner.id]?.[request.resource] || 0) - (lockedByPlayer[joiner.id]?.[request.resource] || 0)} available
+                        </div>
+                        <button onClick={() => {
+                          setCollabJoinerContrib(prev => ({ ...prev, [request.resource]: Math.min(request.amount, (resourcePools[joiner.id]?.[request.resource] || 0) - (lockedByPlayer[joiner.id]?.[request.resource] || 0)) }));
+                        }} style={{ marginTop: 4, padding: '4px 12px', background: T.primary, color: T.surface, border: 'none', borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>
+                          Accept Request
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Stepper */}
+                    <div style={{ fontSize: 9, color: T.onSurfaceVariant, marginBottom: 4 }}>Your resources:</div>
+                    {RES_TYPES.map(r => {
+                      const avail = (resourcePools[joiner.id]?.[r] || 0) - (lockedByPlayer[joiner.id]?.[r] || 0);
+                      if (avail <= 0) return null;
+                      const ak = RESOURCE_ABILITY_MAP[r] as string;
+                      const eff = calculateEffectiveness((joiner.abilities as unknown as Record<string, number>)[ak] ?? 0);
+                      const val = collabJoinerContrib[r];
+                      return (
+                        <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: RESOURCE_COLORS[r] }} />
+                          <span style={{ fontSize: 9, color: T.onSurfaceVariant, width: 44, textTransform: 'capitalize' }}>{r} ({avail})</span>
+                          <span style={{ fontSize: 8, color: T.outlineVariant, width: 24 }}>{eff}%</span>
+                          <button onClick={() => setCollabJoinerContrib(prev => ({ ...prev, [r]: Math.max(0, prev[r] - 1) }))} style={{ width: 18, height: 18, background: T.container, border: `1px solid ${T.outlineVariant}`, borderRadius: 3, color: T.onSurface, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>{'\u2212'}</button>
+                          <span style={{ fontFamily: T.fontNumber, fontSize: 11, color: T.onSurface, width: 14, textAlign: 'center' }}>{val}</span>
+                          <button onClick={() => setCollabJoinerContrib(prev => ({ ...prev, [r]: Math.min(avail, prev[r] + 1) }))} style={{ width: 18, height: 18, background: T.container, border: `1px solid ${T.outlineVariant}`, borderRadius: 3, color: T.onSurface, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>+</button>
+                          {val > 0 && <span style={{ fontSize: 8, color: T.primary }}>{(val * (eff / 100) * 5).toFixed(1)}</span>}
+                        </div>
+                      );
+                    })}
+
+                    {/* Join/Skip */}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                      <button onClick={collabJoinerJoin} disabled={Object.values(collabJoinerContrib).every(v => v === 0)}
+                        style={{ flex: 1, padding: '8px 0', background: Object.values(collabJoinerContrib).some(v => v > 0) ? T.primary : T.outlineVariant, color: T.surface, border: 'none', borderRadius: 6, fontFamily: T.fontBody, fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: Object.values(collabJoinerContrib).some(v => v > 0) ? 1 : 0.4 }}>
+                        Join
+                      </button>
+                      <button onClick={collabJoinerSkip}
+                        style={{ flex: 1, padding: '8px 0', background: 'transparent', color: T.onSurfaceVariant, border: `1px solid ${T.onSurfaceVariant}`, borderRadius: 6, fontFamily: T.fontBody, fontSize: 11, cursor: 'pointer' }}>Skip</button>
+                    </div>
+                    <div style={{ display: 'flex', gap: 3, justifyContent: 'center', marginTop: 6 }}>
+                      {otherPlayers.map((_, i) => (
+                        <div key={i} style={{ width: 5, height: 5, borderRadius: '50%', background: i < collabPlayerIdx ? T.primary : i === collabPlayerIdx ? T.tertiary : T.outlineVariant }} />
+                      ))}
+                    </div>
+                    <button onClick={() => setTaskStage('summary')} style={{ width: '100%', padding: '3px 0', marginTop: 4, background: 'transparent', color: T.outlineVariant, border: 'none', fontSize: 9, cursor: 'pointer' }}>End collaboration early</button>
+                  </div>
+                );
+              })()}
+
+              {/* ═══ STAGE 3: Summary — proposer locks ═══ */}
+              {taskStage === 'summary' && (
+                <div style={{ background: T.surface, borderRadius: 8, padding: 10, border: `1px solid ${T.primary}30` }}>
+                  <div style={{ fontFamily: T.fontHeadline, fontSize: 14, color: T.tertiary, textAlign: 'center', marginBottom: 6 }}>
+                    {'\u{1F504}'} PASS DEVICE BACK TO: {currentPlayer?.name}
+                  </div>
+                  <div style={{ fontFamily: T.fontHeadline, fontSize: 12, color: T.onSurface, marginBottom: 8 }}>Task Summary</div>
+
+                  {/* Contributors */}
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                      <div style={{ width: 14, height: 14, borderRadius: '50%', background: ROLE_COLORS[currentPlayer?.roleId || ''] || '#666', fontSize: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{currentPlayer?.name[0]}</div>
+                      <span style={{ fontSize: 10, color: T.onSurface }}>{currentPlayer?.name}: {liveTotal.toFixed(1)} pts</span>
+                    </div>
+                    {otherPlayers.map(p => {
+                      const d = collabDecisions[p.id];
+                      const pC = joinedContributions.filter(c => c.playerId === p.id);
+                      return (
+                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                          <div style={{ width: 14, height: 14, borderRadius: '50%', background: ROLE_COLORS[p.roleId], fontSize: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>{p.name[0]}</div>
+                          <span style={{ fontSize: 10, color: d === 'joined' ? T.onSurface : T.outlineVariant }}>
+                            {p.name}: {d === 'joined' ? `${pC.reduce((s, c) => s + c.basePoints, 0).toFixed(1)} pts` : 'Skipped'}
+                          </span>
                         </div>
                       );
                     })}
                   </div>
 
-                  {/* Lock Now button */}
-                  <button
-                    onClick={lockCollabTask}
-                    style={{
-                      width: '100%', padding: '8px 0', marginTop: 8,
-                      background: T.primary, color: T.surface, border: 'none', borderRadius: 6,
-                      fontFamily: T.fontHeadline, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    }}
-                  >
-                    Lock Task ({collabPreview.uniqueRoles} contributor{collabPreview.uniqueRoles !== 1 ? 's' : ''})
+                  {/* Score */}
+                  <div style={{ background: T.container, borderRadius: 6, padding: 8, marginBottom: 8, textAlign: 'center' }}>
+                    <div style={{ fontFamily: T.fontNumber, fontSize: 22, fontWeight: 700, color: T.primary }}>{collabPreview.combined} pts</div>
+                    <div style={{ fontSize: 11, color: T.tertiary }}>{collabPreview.uniqueRoles} role{collabPreview.uniqueRoles !== 1 ? 's' : ''} {'\u00D7'}{collabPreview.mult}</div>
+                  </div>
+
+                  {/* Request results */}
+                  {resourceRequests.length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      {resourceRequests.map((rr, i) => {
+                        const t = sorted.find(p => p.id === rr.targetId);
+                        const d = collabDecisions[rr.targetId];
+                        const accepted = d === 'joined' && joinedContributions.some(c => c.playerId === rr.targetId && c.resourceType === rr.resource);
+                        return (
+                          <div key={i} style={{ fontSize: 9, color: accepted ? T.primary : T.onSurfaceVariant }}>
+                            {accepted ? '\u2713' : '\u2717'} {rr.amount} {rr.resource} from {t?.name} {'\u2014'} {accepted ? 'Accepted' : 'Declined'}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Lock button */}
+                  <button onClick={lockFromSummary} style={{
+                    width: '100%', padding: '12px 0', background: T.primary, color: T.surface,
+                    border: 'none', borderRadius: 4, fontFamily: T.fontBody, fontSize: 14, fontWeight: 700,
+                    cursor: 'pointer', boxShadow: T.woodBevel, marginBottom: 4,
+                  }}>
+                    Lock &amp; Place Task {'\u2014'} {collabPreview.combined} pts
+                  </button>
+                  <div style={{ fontSize: 8, color: T.outlineVariant, textAlign: 'center', marginBottom: 6 }}>
+                    Resources will be permanently locked for all contributors
+                  </div>
+                  <button onClick={cancelTask} style={{ width: '100%', padding: '4px 0', background: 'transparent', color: T.onSurfaceVariant, border: 'none', fontSize: 10, cursor: 'pointer', fontFamily: T.fontBody }}>
+                    Cancel {'\u2014'} Discard Everything
                   </button>
                 </div>
               )}
