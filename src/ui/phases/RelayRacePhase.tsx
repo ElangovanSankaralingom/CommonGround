@@ -16,6 +16,7 @@ import {
 import { getPlayerCapabilities, activateCapability, type Capability } from '../../core/engine/capabilityEngine';
 import { drawReactionCard, tickReactionEffects, type ReactionCard, type ReactionEffect } from '../../core/engine/reactionCards';
 import { sounds } from '../../utils/sounds';
+import { generateTaskCards, type TaskCard as GenTaskCard, type GeneratedCards } from '../../core/content/taskCardGenerator';
 
 // ─── Design Tokens ──────────────────────────────────────────────
 const T = {
@@ -126,6 +127,12 @@ export default function SeriesBuilderPhase({
   const [reqAmount, setReqAmount] = useState(1);
   const [reqTargetIdx, setReqTargetIdx] = useState(0);
 
+  // Card-based task creation (state only — generation happens after zoneId is declared)
+  const [selectedActionCard, setSelectedActionCard] = useState<GenTaskCard | null>(null);
+  const [selectedMethods, setSelectedMethods] = useState<GenTaskCard[]>([]);
+  const [selectedWho, setSelectedWho] = useState<GenTaskCard | null>(null);
+  const [selectedOutcome, setSelectedOutcome] = useState<GenTaskCard | null>(null);
+
   // Round tracking + multi-series
   const [currentRound, setCurrentRound] = useState(1);
   const [tasksThisRound, setTasksThisRound] = useState(0);
@@ -169,6 +176,33 @@ export default function SeriesBuilderPhase({
     const display = found.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' \u2192 ');
     return `\u{1F517} ${display}${bonus > 0 ? ` (+${bonus})` : ''}`;
   }, [chainResult]);
+
+  // ─── Card-based task generation ───
+  const generatedCards = useMemo((): GeneratedCards | null => {
+    if (!selectedType || selectedType === 'innovate' || !currentPlayer) return null;
+    const featureNames = visionBoard.tiles.map(t => t.name);
+    const zn = challenge?.affectedZoneIds?.[0]?.replace(/_/g, ' ') || 'the zone';
+    const cluesFound: string[] = [];
+    console.log('CARD_GENERATION_INPUT:', { zoneId, zoneName: zn, selectedFeatures: featureNames, cluesFound, taskType: selectedType, playerRole: currentPlayer.roleId });
+    return generateTaskCards(zoneId, zn, featureNames, selectedType, currentPlayer.roleId, cluesFound);
+  }, [selectedType, currentPlayer, visionBoard.tiles, zoneId, challenge]);
+
+  const autoDescription = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedActionCard) parts.push(selectedActionCard.text);
+    if (selectedMethods.length > 0) parts.push(selectedMethods.map(m => m.text).join('. '));
+    if (selectedWho) parts.push(selectedWho.text);
+    if (selectedOutcome) parts.push('Outcome: ' + selectedOutcome.text);
+    return parts.join('. ');
+  }, [selectedActionCard, selectedMethods, selectedWho, selectedOutcome]);
+
+  useEffect(() => {
+    if (selectedActionCard) { setTaskTitle(selectedActionCard.text); setTaskDesc(autoDescription); }
+  }, [selectedActionCard, autoDescription]);
+
+  useEffect(() => {
+    setSelectedActionCard(null); setSelectedMethods([]); setSelectedWho(null); setSelectedOutcome(null);
+  }, [selectedType]);
 
   // ─── Layer coverage for series ───
   const layerCoverage = useMemo(() => {
@@ -899,80 +933,152 @@ export default function SeriesBuilderPhase({
                 })}
               </div>
 
-              {/* Title */}
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>Title</div>
-                <input
-                  value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="Task title..."
-                  style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 12, fontFamily: T.fontBody, boxSizing: 'border-box' as const }}
-                />
-                {selectedType && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 4, marginTop: 4 }}>
-                    {(SUGGESTED_TASKS[selectedType] || []).slice(0, 3).map(s => (
-                      <button key={s} onClick={() => setTaskTitle(s)} style={{ background: T.containerHigh, border: 'none', borderRadius: 10, padding: '2px 8px', fontSize: 9, color: T.onSurfaceVariant, cursor: 'pointer' }}>{s}</button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* ═══ CARD-BASED TASK CREATION (for non-INNOVATE types) ═══ */}
+              {selectedType && selectedType !== 'innovate' && generatedCards ? (
+                <div>
+                  {/* ROW 1: ACTION — What do you do? */}
+                  <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>What do you do?</div>
+                  {generatedCards.actionCards.map(card => {
+                    const isSel = selectedActionCard?.id === card.id;
+                    return (
+                      <div key={card.id} onClick={() => setSelectedActionCard(isSel ? null : card)}
+                        style={{
+                          background: isSel ? `${T.primary}08` : T.container, border: isSel ? `2px solid ${T.primary}` : `1px solid ${T.outlineVariant}20`,
+                          borderRadius: 8, padding: '10px 12px', marginBottom: 6, cursor: 'pointer', transition: 'border-color 0.15s', position: 'relative',
+                        }}>
+                        <div style={{ fontFamily: T.fontBody, fontSize: 12, fontWeight: 700, color: T.onSurface, paddingRight: card.featureRef ? 80 : 0 }}>{card.text}</div>
+                        {card.featureRef && (
+                          <span style={{ position: 'absolute', top: 8, right: 8, background: `${T.primary}15`, border: `1px solid ${T.primary}30`, borderRadius: 10, padding: '1px 7px', fontSize: 8, color: T.primary }}>{card.featureRef}</span>
+                        )}
+                        {isSel && <span style={{ position: 'absolute', right: 10, bottom: 8, color: T.primary, fontSize: 14 }}>{'\u2713'}</span>}
+                      </div>
+                    );
+                  })}
 
-              {/* Layer detection pills */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-                {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map(layer => {
-                  const active = formLayerDetection[layer];
-                  return (
-                    <div key={layer} style={{
-                      display: 'flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 10,
-                      background: active ? `${LAYER_COLORS[layer]}15` : 'transparent',
-                      opacity: active ? 1 : 0.25, transition: 'all 0.3s',
-                      border: `1px solid ${active ? LAYER_COLORS[layer] + '30' : 'transparent'}`,
-                    }}>
-                      <span style={{ fontSize: 9 }}>{LAYER_ICONS[layer]}</span>
-                      <span style={{ fontSize: 8, color: active ? LAYER_COLORS[layer] : T.onSurfaceVariant, fontWeight: 600 }}>{LAYER_LABELS[layer]}</span>
+                  {/* ROW 2: METHOD — How will it be done? */}
+                  {selectedActionCard && generatedCards.methodCards[selectedActionCard.id] && (
+                    <div style={{ marginTop: 10, opacity: 1, transition: 'opacity 0.3s' }}>
+                      <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>How will it be done?</div>
+                      {generatedCards.methodCards[selectedActionCard.id].map(card => {
+                        const isSel = selectedMethods.some(m => m.id === card.id);
+                        const isClue = !!card.clueRef;
+                        return (
+                          <div key={card.id} onClick={() => {
+                            setSelectedMethods(prev => isSel ? prev.filter(m => m.id !== card.id) : prev.length >= 2 ? prev : [...prev, card]);
+                          }}
+                            style={{
+                              background: isClue ? `${T.tertiary}05` : '#1e1b14',
+                              border: isSel ? `2px solid ${T.tertiary}` : isClue ? `1px solid ${T.tertiary}30` : `1px solid ${T.outlineVariant}15`,
+                              borderRadius: 6, padding: '8px 12px', marginBottom: 5, cursor: 'pointer', position: 'relative',
+                            }}>
+                            <div style={{ fontFamily: T.fontBody, fontSize: 11, color: T.onSurface }}>{card.text}</div>
+                            {isClue && <span style={{ fontSize: 8, color: T.tertiary, fontWeight: 600 }}>CLUE CONNECTED</span>}
+                            {isSel && <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: T.tertiary, fontSize: 12 }}>{'\u2713'}</span>}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-              {(() => {
-                const detected = Object.values(formLayerDetection).filter(Boolean).length;
-                const missing = (['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).filter(l => !formLayerDetection[l]);
-                if (detected === 0 && (taskTitle || taskDesc)) return <div style={{ fontSize: 8, color: T.onSurfaceVariant, marginBottom: 4, fontStyle: 'italic' }}>Describe how this addresses infrastructure, community, or ecology.</div>;
-                if (detected === 3) return <div style={{ fontSize: 8, color: T.primary, marginBottom: 4, fontStyle: 'italic' }}>{'\u2728'} Integrates all three placemaking layers!</div>;
-                if (detected >= 1 && missing.length > 0) return <div style={{ fontSize: 8, color: LAYER_COLORS[missing[0]], marginBottom: 4, fontStyle: 'italic' }}>Could it also address {missing.map(l => LAYER_LABELS[l].toLowerCase()).join(' or ')}?</div>;
-                return null;
-              })()}
+                  )}
 
-              {/* Description + integration prompt */}
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>Description</div>
-                {visionBoard.tiles.length > 1 && (
-                  <div style={{ fontSize: 9, color: T.onSurfaceVariant, opacity: 0.6, fontStyle: 'italic', marginBottom: 4, lineHeight: '12px' }}>
-                    How does this help {visionBoard.tiles.slice(0, 3).map(t => t.name).join(' AND ')} work together?
+                  {/* ROW 3: WHO — Who is involved? */}
+                  {selectedMethods.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>Who is involved?</div>
+                      {generatedCards.whoCards.map(card => {
+                        const isSel = selectedWho?.id === card.id;
+                        return (
+                          <div key={card.id} onClick={() => setSelectedWho(isSel ? null : card)}
+                            style={{
+                              background: '#1e1b14', border: isSel ? `2px solid ${T.primary}` : `1px solid ${T.outlineVariant}15`,
+                              borderRadius: 6, padding: '7px 12px', marginBottom: 5, cursor: 'pointer', position: 'relative',
+                            }}>
+                            <div style={{ fontFamily: T.fontBody, fontSize: 11, color: T.onSurface }}>{card.text}</div>
+                            {isSel && <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: T.primary, fontSize: 12 }}>{'\u2713'}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* ROW 4: OUTCOME — What does it accomplish? */}
+                  {selectedWho && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>What does it accomplish?</div>
+                      {generatedCards.outcomeCards.map(card => {
+                        const isSel = selectedOutcome?.id === card.id;
+                        return (
+                          <div key={card.id} onClick={() => setSelectedOutcome(isSel ? null : card)}
+                            style={{
+                              background: '#1e1b14', border: isSel ? `2px solid ${T.primary}` : `1px solid ${T.outlineVariant}15`,
+                              borderRadius: 6, padding: '7px 12px', marginBottom: 5, cursor: 'pointer', position: 'relative',
+                            }}>
+                            <div style={{ fontFamily: T.fontBody, fontSize: 11, color: T.onSurface }}>{card.text}</div>
+                            {isSel && <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: T.primary, fontSize: 12 }}>{'\u2713'}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Assembled preview */}
+                  {selectedOutcome && (
+                    <div style={{ marginTop: 10, background: T.surface, border: `1px solid ${T.outlineVariant}15`, borderRadius: 6, padding: 10 }}>
+                      <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, marginBottom: 4, letterSpacing: 0.5 }}>Your task:</div>
+                      <div style={{ fontFamily: T.fontBody, fontSize: 11, color: `${T.onSurface}CC`, lineHeight: '15px' }}>{autoDescription}</div>
+                    </div>
+                  )}
+
+                  {/* Layer detection pills */}
+                  <div style={{ display: 'flex', gap: 4, marginTop: 8, marginBottom: 4 }}>
+                    {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map(layer => {
+                      const active = formLayerDetection[layer];
+                      return (
+                        <div key={layer} style={{
+                          display: 'flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 10,
+                          background: active ? `${LAYER_COLORS[layer]}15` : 'transparent',
+                          opacity: active ? 1 : 0.25, transition: 'all 0.3s',
+                          border: `1px solid ${active ? LAYER_COLORS[layer] + '30' : 'transparent'}`,
+                        }}>
+                          <span style={{ fontSize: 9 }}>{LAYER_ICONS[layer]}</span>
+                          <span style={{ fontSize: 8, color: active ? LAYER_COLORS[layer] : T.onSurfaceVariant, fontWeight: 600 }}>{LAYER_LABELS[layer]}</span>
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
-                <textarea
-                  value={taskDesc} onChange={e => setTaskDesc(e.target.value.slice(0, 300))} placeholder="What does this task accomplish?"
-                  style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, resize: 'none' as const, height: 48, boxSizing: 'border-box' as const }}
-                />
-                <div style={{ fontSize: 9, color: T.outlineVariant, textAlign: 'right' as const }}>{taskDesc.length}/300</div>
-              </div>
 
-              {/* Cross-perspective */}
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>How does this help others?</div>
-                <textarea
-                  value={crossPerspective} onChange={e => setCrossPerspective(e.target.value)} placeholder="Cross-role perspective..."
-                  style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, resize: 'none' as const, height: 36, boxSizing: 'border-box' as const }}
-                />
-              </div>
-
-              {/* Success criteria */}
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>Success Criteria</div>
-                <input
-                  value={taskCriteria} onChange={e => setTaskCriteria(e.target.value)} placeholder="How do we know it worked?"
-                  style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, boxSizing: 'border-box' as const }}
-                />
-              </div>
+                  {/* Cross-perspective */}
+                  <div style={{ marginTop: 6, marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>How does this help others?</div>
+                    <textarea value={crossPerspective} onChange={e => setCrossPerspective(e.target.value)} placeholder="Cross-role perspective..."
+                      style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, resize: 'none' as const, height: 36, boxSizing: 'border-box' as const }} />
+                  </div>
+                </div>
+              ) : selectedType === 'innovate' ? (
+                /* ═══ INNOVATE — free-text mode ═══ */
+                <div>
+                  <div style={{ fontFamily: T.fontBody, fontSize: 12, color: T.tertiary, marginBottom: 8 }}>INNOVATION MODE — No standard cards. Share your unique idea.</div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>Title</div>
+                    <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="Your innovation..."
+                      style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 12, fontFamily: T.fontBody, boxSizing: 'border-box' as const }} />
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>Description</div>
+                    <textarea value={taskDesc} onChange={e => setTaskDesc(e.target.value.slice(0, 300))} placeholder="Describe your creative solution..."
+                      style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, resize: 'none' as const, height: 60, boxSizing: 'border-box' as const }} />
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>How does this help others?</div>
+                    <textarea value={crossPerspective} onChange={e => setCrossPerspective(e.target.value)} placeholder="Cross-role perspective..."
+                      style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, resize: 'none' as const, height: 36, boxSizing: 'border-box' as const }} />
+                  </div>
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>Success Criteria</div>
+                    <input value={taskCriteria} onChange={e => setTaskCriteria(e.target.value)} placeholder="How do we know it worked?"
+                      style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, boxSizing: 'border-box' as const }} />
+                  </div>
+                </div>
+              ) : null}
 
               {/* Resource steppers */}
               <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 6, textTransform: 'uppercase' as const }}>Commit Resources</div>
