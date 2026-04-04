@@ -1121,32 +1121,6 @@ export default function SeriesBuilderPhase({
                     </div>
                   )}
 
-                  {/* Assembled preview */}
-                  {selectedOutcome && (
-                    <div style={{ marginTop: 10, background: T.surface, border: `1px solid ${T.outlineVariant}15`, borderRadius: 6, padding: 10 }}>
-                      <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, marginBottom: 4, letterSpacing: 0.5 }}>Your task:</div>
-                      <div style={{ fontFamily: T.fontBody, fontSize: 11, color: `${T.onSurface}CC`, lineHeight: '15px' }}>{autoDescription}</div>
-                    </div>
-                  )}
-
-                  {/* Layer detection pills */}
-                  <div style={{ display: 'flex', gap: 4, marginTop: 8, marginBottom: 4 }}>
-                    {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map(layer => {
-                      const active = formLayerDetection[layer];
-                      return (
-                        <div key={layer} style={{
-                          display: 'flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 10,
-                          background: active ? `${LAYER_COLORS[layer]}15` : 'transparent',
-                          opacity: active ? 1 : 0.25, transition: 'all 0.3s',
-                          border: `1px solid ${active ? LAYER_COLORS[layer] + '30' : 'transparent'}`,
-                        }}>
-                          <span style={{ fontSize: 9 }}>{LAYER_ICONS[layer]}</span>
-                          <span style={{ fontSize: 8, color: active ? LAYER_COLORS[layer] : T.onSurfaceVariant, fontWeight: 600 }}>{LAYER_LABELS[layer]}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-
                   {/* ═══ LOCAL INSIGHT SPEECH BUBBLE ═══ */}
                   {selectedOutcome && !localInsightSaved && (
                     <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -1216,6 +1190,40 @@ export default function SeriesBuilderPhase({
                         <input value={customCrossText} onChange={e => setCustomCrossText(e.target.value)} placeholder="Describe a connection no benefit card covers..."
                           style={{ marginTop: 6, width: '100%', padding: '6px 10px', background: T.containerHigh, border: `1px dashed ${T.outlineVariant}30`, borderRadius: 4, color: T.onSurface, fontSize: 10, fontFamily: T.fontBody, boxSizing: 'border-box' as const }} />
                       )}
+                    </div>
+                  )}
+
+                  {/* ═══ ASSEMBLED PREVIEW (after all selections) ═══ */}
+                  {selectedOutcome && localInsightSaved && (
+                    <div style={{ marginTop: 12, background: T.surface, border: `1px solid ${T.outlineVariant}15`, borderRadius: 6, padding: 10 }}>
+                      <div style={{ fontSize: 9, color: T.onSurfaceVariant, textTransform: 'uppercase' as const, marginBottom: 4, letterSpacing: 0.5 }}>Your task:</div>
+                      <div style={{ fontFamily: T.fontBody, fontSize: 11, color: `${T.onSurface}CC`, lineHeight: '15px' }}>{autoDescription}</div>
+                      {localInsight.trim() && (
+                        <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.tertiary, fontStyle: 'italic', marginTop: 4 }}>Local insight: {localInsight.trim()}</div>
+                      )}
+                      {autoCrossPerspective && (
+                        <div style={{ fontFamily: T.fontBody, fontSize: 10, color: T.onSurfaceVariant, marginTop: 4 }}>Helps: {autoCrossPerspective}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Layer detection pills */}
+                  {selectedOutcome && localInsightSaved && (
+                    <div style={{ display: 'flex', gap: 4, marginTop: 8, marginBottom: 4 }}>
+                      {(['foundation', 'activation', 'sustainability'] as PlacemakingLayer[]).map(layer => {
+                        const active = formLayerDetection[layer];
+                        return (
+                          <div key={layer} style={{
+                            display: 'flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 10,
+                            background: active ? `${LAYER_COLORS[layer]}15` : 'transparent',
+                            opacity: active ? 1 : 0.25, transition: 'all 0.3s',
+                            border: `1px solid ${active ? LAYER_COLORS[layer] + '30' : 'transparent'}`,
+                          }}>
+                            <span style={{ fontSize: 9 }}>{LAYER_ICONS[layer]}</span>
+                            <span style={{ fontSize: 8, color: active ? LAYER_COLORS[layer] : T.onSurfaceVariant, fontWeight: 600 }}>{LAYER_LABELS[layer]}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
