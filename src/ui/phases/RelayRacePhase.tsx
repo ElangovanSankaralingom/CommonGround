@@ -16,7 +16,7 @@ import {
 import { getPlayerCapabilities, activateCapability, type Capability } from '../../core/engine/capabilityEngine';
 import { drawReactionCard, tickReactionEffects, type ReactionCard, type ReactionEffect } from '../../core/engine/reactionCards';
 import { sounds } from '../../utils/sounds';
-import { generateTaskCards, type TaskCard as GenTaskCard, type GeneratedCards } from '../../core/content/taskCardGenerator';
+import { generateTaskCards, getCrossPerspectiveBenefits, type TaskCard as GenTaskCard, type GeneratedCards } from '../../core/content/taskCardGenerator';
 
 // ─── Design Tokens ──────────────────────────────────────────────
 const T = {
@@ -132,6 +132,11 @@ export default function SeriesBuilderPhase({
   const [selectedMethods, setSelectedMethods] = useState<GenTaskCard[]>([]);
   const [selectedWho, setSelectedWho] = useState<GenTaskCard | null>(null);
   const [selectedOutcome, setSelectedOutcome] = useState<GenTaskCard | null>(null);
+  const [localInsight, setLocalInsight] = useState('');
+  const [localInsightSaved, setLocalInsightSaved] = useState(false);
+  const [selectedBenefits, setSelectedBenefits] = useState<{ role: string; text: string }[]>([]);
+  const [showCustomCross, setShowCustomCross] = useState(false);
+  const [customCrossText, setCustomCrossText] = useState('');
 
   // Round tracking + multi-series
   const [currentRound, setCurrentRound] = useState(1);
@@ -193,16 +198,48 @@ export default function SeriesBuilderPhase({
     if (selectedMethods.length > 0) parts.push(selectedMethods.map(m => m.text).join('. '));
     if (selectedWho) parts.push(selectedWho.text);
     if (selectedOutcome) parts.push('Outcome: ' + selectedOutcome.text);
+    if (localInsightSaved && localInsight.trim()) parts.push('Local insight: ' + localInsight.trim());
     return parts.join('. ');
-  }, [selectedActionCard, selectedMethods, selectedWho, selectedOutcome]);
+  }, [selectedActionCard, selectedMethods, selectedWho, selectedOutcome, localInsightSaved, localInsight]);
+
+  // Auto-generated cross-perspective from benefit selections
+  const autoCrossPerspective = useMemo(() => {
+    const parts = selectedBenefits.map(b => `${b.text} for the ${b.role}`);
+    if (customCrossText.trim()) parts.push(customCrossText.trim());
+    return parts.join('. ');
+  }, [selectedBenefits, customCrossText]);
 
   useEffect(() => {
     if (selectedActionCard) { setTaskTitle(selectedActionCard.text); setTaskDesc(autoDescription); }
   }, [selectedActionCard, autoDescription]);
 
   useEffect(() => {
+    if (autoCrossPerspective) setCrossPerspective(autoCrossPerspective);
+  }, [autoCrossPerspective]);
+
+  useEffect(() => {
     setSelectedActionCard(null); setSelectedMethods([]); setSelectedWho(null); setSelectedOutcome(null);
+    setLocalInsight(''); setLocalInsightSaved(false); setSelectedBenefits([]); setCustomCrossText(''); setShowCustomCross(false);
   }, [selectedType]);
+
+  // Specificity check for local insight
+  const insightSpecificity = useMemo(() => {
+    if (!localInsight.trim()) return { isSpecific: false, indicators: [] as string[] };
+    const text = localInsight;
+    const indicators: string[] = [];
+    if (/\d+/.test(text)) indicators.push('number');
+    const words = text.split(/\s+/);
+    for (let i = 1; i < words.length; i++) { if (words[i] && /^[A-Z]/.test(words[i]) && words[i].length > 1) { indicators.push('proper_noun'); break; } }
+    if (['house', 'street', 'road', 'gate', 'corner', 'near', 'opposite', 'behind', 'junction', 'block', 'ward', 'lane', 'nagar', 'colony'].some(w => text.toLowerCase().includes(w))) indicators.push('location');
+    if (['mr', 'mrs', 'ms', 'uncle', 'aunty', 'teacher', 'gardener', 'watchman', 'vendor', 'officer', 'engineer'].some(w => text.toLowerCase().includes(w))) indicators.push('person');
+    return { isSpecific: indicators.length >= 2, indicators };
+  }, [localInsight]);
+
+  // Cross-perspective benefits for other roles
+  const crossBenefits = useMemo(() => {
+    if (!currentPlayer) return {};
+    return getCrossPerspectiveBenefits(currentPlayer.roleId);
+  }, [currentPlayer]);
 
   // ─── Layer coverage for series ───
   const layerCoverage = useMemo(() => {
@@ -1046,12 +1083,77 @@ export default function SeriesBuilderPhase({
                     })}
                   </div>
 
-                  {/* Cross-perspective */}
-                  <div style={{ marginTop: 6, marginBottom: 8 }}>
-                    <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 3, textTransform: 'uppercase' as const }}>How does this help others?</div>
-                    <textarea value={crossPerspective} onChange={e => setCrossPerspective(e.target.value)} placeholder="Cross-role perspective..."
-                      style={{ width: '100%', padding: '6px 8px', background: T.containerHigh, border: `1px solid ${T.outlineVariant}`, borderRadius: 4, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, resize: 'none' as const, height: 36, boxSizing: 'border-box' as const }} />
-                  </div>
+                  {/* ═══ LOCAL INSIGHT SPEECH BUBBLE ═══ */}
+                  {selectedOutcome && !localInsightSaved && (
+                    <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <div style={{ width: 36, height: 36, borderRadius: '50%', background: ROLE_COLORS[currentPlayer?.roleId || ''] || '#666', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                        {currentPlayer?.name[0] || '?'}
+                      </div>
+                      <div style={{ flex: 1, background: T.containerHigh, borderRadius: 8, padding: 10, position: 'relative' }}>
+                        <div style={{ position: 'absolute', left: -6, top: 12, width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderRight: `6px solid ${T.containerHigh}` }} />
+                        <div style={{ fontSize: 11, color: T.tertiary, fontStyle: 'italic', marginBottom: 6 }}>You know something about this place that no card captures.</div>
+                        <div style={{ position: 'relative' }}>
+                          <textarea value={localInsight} onChange={e => setLocalInsight(e.target.value)}
+                            placeholder="A specific person, place, shortcut, or local knowledge that makes this plan better..."
+                            style={{ width: '100%', minHeight: 50, maxHeight: 80, padding: '8px 10px', background: T.containerHigh, border: `1px dashed ${T.tertiary}30`, borderRadius: 6, color: T.onSurface, fontSize: 11, fontFamily: T.fontBody, resize: 'vertical' as const, boxSizing: 'border-box' as const }} />
+                          {insightSpecificity.isSpecific && localInsight.trim() && (
+                            <span style={{ position: 'absolute', top: -8, right: 4, background: `${T.tertiary}15`, border: `1px solid ${T.tertiary}30`, borderRadius: 10, padding: '1px 7px', fontSize: 8, color: T.tertiary, fontWeight: 700 }}>LOCAL KNOWLEDGE {'\u2726'}</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                          <button onClick={() => { setLocalInsightSaved(true); setLocalInsight(''); }} style={{ background: 'transparent', border: 'none', color: T.onSurfaceVariant, fontSize: 10, cursor: 'pointer', fontFamily: T.fontBody, padding: '4px 8px' }}>Skip — no insight</button>
+                          <button onClick={() => { if (localInsight.trim()) setLocalInsightSaved(true); }} style={{ background: `${T.tertiary}15`, border: `1px solid ${T.tertiary}30`, color: T.tertiary, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: T.fontBody, padding: '4px 10px', borderRadius: 4 }}>Add Insight {'\u2713'}</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ═══ CROSS-PERSPECTIVE MATCHING GAME ═══ */}
+                  {(localInsightSaved || !selectedOutcome) ? null : null}
+                  {localInsightSaved && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 10, color: T.onSurfaceVariant, marginBottom: 8, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>How does this help others?</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 6 }}>
+                        {Object.entries(crossBenefits).map(([role, benefits]) => {
+                          const roleColor = (ROLE_COLORS as Record<string, string>)[role] || T.onSurfaceVariant;
+                          const selected = selectedBenefits.find(b => b.role === role);
+                          return (
+                            <div key={role} style={{ width: 'calc(50% - 3px)', background: '#1e1b14', border: `1px solid ${roleColor}20`, borderRadius: 8, padding: 10 }}>
+                              <div style={{ fontFamily: T.fontBody, fontSize: 10, fontWeight: 700, color: roleColor, marginBottom: 6, textTransform: 'capitalize' as const }}>{role}</div>
+                              {benefits.slice(0, 2).map((b, bi) => {
+                                const isSel = selected?.text === b;
+                                return (
+                                  <div key={bi} onClick={() => {
+                                    setSelectedBenefits(prev => {
+                                      const without = prev.filter(p => p.role !== role);
+                                      return isSel ? without : [...without, { role, text: b }];
+                                    });
+                                  }}
+                                    style={{
+                                      background: isSel ? `${roleColor}0D` : T.container, border: isSel ? `1px solid ${roleColor}` : `1px solid ${T.outlineVariant}15`,
+                                      borderRadius: 4, padding: '5px 8px', marginBottom: 3, cursor: 'pointer', position: 'relative',
+                                      fontSize: 10, color: isSel ? T.onSurface : T.onSurfaceVariant, transition: 'border-color 0.15s',
+                                    }}>
+                                    {b}
+                                    {isSel && <span style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: roleColor, fontSize: 10 }}>{'\u2713'}</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Custom connection */}
+                      {!showCustomCross ? (
+                        <div onClick={() => setShowCustomCross(true)} style={{ marginTop: 6, fontSize: 10, color: `${T.onSurfaceVariant}80`, cursor: 'pointer', fontFamily: T.fontBody }}>
+                          See a connection no card shows?
+                        </div>
+                      ) : (
+                        <input value={customCrossText} onChange={e => setCustomCrossText(e.target.value)} placeholder="Describe a connection no benefit card covers..."
+                          style={{ marginTop: 6, width: '100%', padding: '6px 10px', background: T.containerHigh, border: `1px dashed ${T.outlineVariant}30`, borderRadius: 4, color: T.onSurface, fontSize: 10, fontFamily: T.fontBody, boxSizing: 'border-box' as const }} />
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : selectedType === 'innovate' ? (
                 /* ═══ INNOVATE — free-text mode ═══ */
