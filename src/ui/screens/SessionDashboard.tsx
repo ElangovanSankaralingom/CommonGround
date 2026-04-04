@@ -4,7 +4,7 @@ export interface SessionStartConfig {
   sessionNumber: number;
   challengeSetId: string;
   playNumber: number;
-  players: { name: string; roleId: string }[];
+  players: { name: string }[];
 }
 
 interface Props {
@@ -47,14 +47,6 @@ const SESSIONS = [
   ]},
 ];
 
-const ROLES = [
-  { id: 'administrator', name: 'Administrator', hint: 'Budget authority, institutional decisions', color: '#e04838' },
-  { id: 'designer', name: 'Designer', hint: 'Technical knowledge, specifications', color: '#5d8ac4' },
-  { id: 'advocate', name: 'Advocate', hint: 'Legal leverage, institutional bridges', color: '#a088c4' },
-  { id: 'citizen', name: 'Citizen', hint: 'Community voice, local knowledge', color: '#aed456' },
-  { id: 'investor', name: 'Investor', hint: 'Market connections, revenue models', color: '#e9c349' },
-];
-
 const PLAY_COUNT_KEY = 'commonground_play_counts';
 function getPlayCounts(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(PLAY_COUNT_KEY) || '{}'); } catch { return {}; }
@@ -69,7 +61,6 @@ function diffDots(level: number, max = 5) {
 export default function SessionDashboard({ onStartSession }: Props) {
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [playerNames, setPlayerNames] = useState(['', '', '', '', '']);
-  const [playerRoles, setPlayerRoles] = useState(['administrator', 'designer', 'advocate', 'citizen', 'investor']);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const playCounts = useMemo(() => getPlayCounts(), []);
 
@@ -78,26 +69,10 @@ export default function SessionDashboard({ onStartSession }: Props) {
   const sessionNumber = selectedData ? SESSIONS.indexOf(selectedData) + 1 : 0;
   const currentPlayCount = selectedSession ? (playCounts[selectedSession] || 0) : 0;
 
-  const usedRoles = useMemo(() => {
-    const m = new Map<number, string>();
-    playerRoles.forEach((r, i) => m.set(i, r));
-    return m;
-  }, [playerRoles]);
-
-  const hasDuplicateRoles = useMemo(() => {
-    const seen = new Set<string>();
-    for (const r of playerRoles) { if (seen.has(r)) return true; seen.add(r); }
-    return false;
-  }, [playerRoles]);
-
-  const canStart = selectedSession && playerNames.every(n => n.trim() !== '') && !hasDuplicateRoles;
+  const canStart = selectedSession && playerNames.every(n => n.trim() !== '');
 
   const setName = useCallback((i: number, v: string) => {
     setPlayerNames(prev => { const n = [...prev]; n[i] = v; return n; });
-  }, []);
-
-  const setRole = useCallback((i: number, v: string) => {
-    setPlayerRoles(prev => { const n = [...prev]; n[i] = v; return n; });
   }, []);
 
   const handleStart = useCallback(() => {
@@ -106,11 +81,11 @@ export default function SessionDashboard({ onStartSession }: Props) {
       sessionNumber,
       challengeSetId: selectedData.setId,
       playNumber: currentPlayCount + 1,
-      players: playerNames.map((name, i) => ({ name: name.trim(), roleId: playerRoles[i] })),
+      players: playerNames.map(name => ({ name: name.trim() })),
     };
     console.log('[SessionDashboard] Starting session:', config);
     onStartSession(config);
-  }, [selectedData, canStart, sessionNumber, currentPlayCount, playerNames, playerRoles, onStartSession]);
+  }, [selectedData, canStart, sessionNumber, currentPlayCount, playerNames, onStartSession]);
 
   const progressPct = Math.min((totalPlays / 30) * 100, 100);
 
@@ -175,36 +150,16 @@ export default function SessionDashboard({ onStartSession }: Props) {
           <p style={{ margin: '0 0 20px', fontSize: 14, color: T.tertiary, fontFamily: T.fontNumber }}>
             Play #{currentPlayCount + 1}
           </p>
-          {playerNames.map((name, i) => {
-            const role = ROLES.find(r => r.id === playerRoles[i]);
-            const otherUsed = new Set(playerRoles.filter((_, j) => j !== i));
-            return (
-              <div key={i} style={{ marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontFamily: T.fontNumber, fontSize: 14, color: T.onSurfaceVariant, width: 28, flexShrink: 0 }}>P{i + 1}</span>
-                  <input value={name} onChange={e => setName(i, e.target.value)} placeholder="Player name"
-                    style={{
-                      width: 200, padding: '7px 10px', borderRadius: 6, border: `1px solid ${T.outlineVariant}`,
-                      background: T.container, color: T.onSurface, fontFamily: T.fontBody, fontSize: 14, outline: 'none',
-                    }} />
-                  <select value={playerRoles[i]} onChange={e => setRole(i, e.target.value)}
-                    style={{
-                      flex: 1, padding: '7px 10px', borderRadius: 6, border: `1px solid ${T.outlineVariant}`,
-                      background: T.container, color: T.onSurface, fontFamily: T.fontBody, fontSize: 14, outline: 'none',
-                    }}>
-                    {ROLES.map(r => (
-                      <option key={r.id} value={r.id} disabled={otherUsed.has(r.id)}>{r.name}</option>
-                    ))}
-                  </select>
-                </div>
-                {role && (
-                  <div style={{ marginLeft: 38, marginTop: 3, fontSize: 11, color: role.color, opacity: 0.8 }}>
-                    {role.hint}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {playerNames.map((name, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontFamily: T.fontNumber, fontSize: 14, color: T.onSurfaceVariant, width: 28, flexShrink: 0 }}>P{i + 1}</span>
+              <input value={name} onChange={e => setName(i, e.target.value)} placeholder="Player name"
+                style={{
+                  flex: 1, padding: '8px 12px', borderRadius: 6, border: `1px solid ${T.outlineVariant}`,
+                  background: T.container, color: T.onSurface, fontFamily: T.fontBody, fontSize: 14, outline: 'none',
+                }} />
+            </div>
+          ))}
           <button onClick={handleStart} disabled={!canStart}
             style={{
               marginTop: 10, width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', cursor: canStart ? 'pointer' : 'not-allowed',
