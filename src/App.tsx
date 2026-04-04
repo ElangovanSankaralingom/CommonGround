@@ -29,7 +29,7 @@ function App() {
   const returnToTitle = useGameStore((state) => state.returnToTitle);
 
   // Top-level app state: 'session_selector' → 'gameplay' → 'session_complete'
-  const [appScreen, setAppScreen] = useState<'session_selector' | 'gameplay' | 'session_complete'>('session_selector');
+  const [appScreen, setAppScreen] = useState<'session_selector' | 'gameplay' | 'session_complete'>('gameplay');
   const [sessionConfig, setSessionConfig] = useState<SessionStartConfig | null>(null);
 
   const handleSessionStart = useCallback((config: SessionStartConfig) => {
