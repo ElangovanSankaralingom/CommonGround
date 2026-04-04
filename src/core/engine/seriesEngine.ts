@@ -53,6 +53,9 @@ export interface TaskCard {
   isConditional: boolean;
   condition: { targetPlayerId: string; requiredResource: string; requiredAmount: number; deadline: number } | null;
   conditionMet: boolean;
+  // Telemetry: card selections and text metrics
+  cardSelections?: Record<string, any>;
+  textMetrics?: Record<string, any>;
 }
 
 export interface Series {

@@ -306,6 +306,66 @@ export default function SeriesBuilderPhase({
     if (extraContributions) contributions.push(...extraContributions);
     if (contributions.length === 0) { console.log('LOCK_VALIDATION_FAIL: no resources committed'); return; }
 
+    // Build card selections telemetry
+    const isInnovateTask = selectedType === 'innovate';
+    const descText = taskDesc.trim() + ' ' + (localInsightSaved && localInsight.trim() ? localInsight.trim() : '');
+    const fullText = descText + ' ' + crossPerspective.trim();
+
+    // Specificity scoring
+    const calcSpecificity = (text: string) => {
+      let s = 0;
+      if (/\d+/.test(text)) s += 1;
+      if ((text.match(/\d+/g) || []).length > 2) s += 1;
+      const ws = text.split(/\s+/);
+      let pn = 0; for (let i = 1; i < ws.length; i++) { if (ws[i] && /^[A-Z]/.test(ws[i]) && ws[i].length > 2) pn++; }
+      s += Math.min(pn, 3);
+      const tech = ['mm', 'mg/L', 'BOD', 'DO', 'RCC', 'HDPE', 'PVC', 'sqm', 'sqft', 'pH', 'PWD', 'TNPCB', 'RTI', 'MOU', 'SPV'];
+      s += Math.min(tech.filter(t => text.toUpperCase().includes(t.toUpperCase())).length, 3);
+      if (ws.length > 20) s += 1; if (ws.length > 40) s += 1;
+      return s;
+    };
+    const countTextLayers = (text: string) => {
+      const l = text.toLowerCase(); let n = 0;
+      if (['drainage', 'pipe', 'repair', 'infrastructure', 'safety', 'structural', 'construction', 'install'].some(w => l.includes(w))) n++;
+      if (['community', 'gathering', 'event', 'seating', 'activity', 'volunteer', 'activation', 'programme'].some(w => l.includes(w))) n++;
+      if (['maintenance', 'revenue', 'sustainable', 'monthly', 'annual', 'committee', 'monitoring', 'long-term'].some(w => l.includes(w))) n++;
+      return n;
+    };
+
+    const cardSelections = {
+      actionCardId: selectedActionCard?.id || null,
+      actionCardText: selectedActionCard?.text || null,
+      actionFeatureRef: selectedActionCard?.featureRef || null,
+      methodCardIds: selectedMethods.map(m => m.id),
+      methodCardTexts: selectedMethods.map(m => m.text),
+      clueConnected: selectedMethods.some(m => m.clueRef != null),
+      clueRef: selectedMethods.find(m => m.clueRef)?.clueRef || null,
+      whoCardId: selectedWho?.id || null,
+      whoCardText: selectedWho?.text || null,
+      outcomeCardId: selectedOutcome?.id || null,
+      outcomeCardText: selectedOutcome?.text || null,
+      localInsightProvided: localInsightSaved && !!localInsight.trim(),
+      localInsightText: localInsightSaved ? localInsight.trim() || null : null,
+      localInsightWordCount: localInsightSaved && localInsight.trim() ? localInsight.trim().split(/\s+/).length : 0,
+      localInsightSpecific: insightSpecificity.isSpecific,
+      localInsightIndicators: insightSpecificity.indicators,
+      crossPerspectiveConnections: selectedBenefits.map(b => ({ targetRole: b.role, benefit: b.text })),
+      crossPerspectiveCount: selectedBenefits.length,
+      customCrossProvided: !!customCrossText.trim(),
+      customCrossText: customCrossText.trim() || null,
+      isInnovate: isInnovateTask,
+      taskType: selectedType,
+      playerRole: currentPlayer.roleId,
+    };
+    const textMetrics = {
+      specificityScore: calcSpecificity(descText),
+      investigationConnectionScore: selectedMethods.some(m => m.clueRef) ? 1 : 0,
+      stakeholderAwarenessScore: selectedBenefits.length + (customCrossText.trim() ? 1 : 0),
+      layerIntegrationScore: countTextLayers(descText),
+      actionCompletenessScore: (selectedActionCard ? 1 : 0) + (selectedMethods.length > 0 ? 1 : 0) + (selectedWho ? 1 : 0) + (selectedOutcome ? 1 : 0),
+      totalWordCount: fullText.trim().split(/\s+/).filter(Boolean).length,
+    };
+
     const task: TaskCard = {
       id: `task_${Date.now()}`, seriesId: activeSeries.id, turnNumber: activeSeries.tasks.length + 1,
       taskType: selectedType, title: taskTitle.trim(), description: taskDesc.trim(),
@@ -318,7 +378,11 @@ export default function SeriesBuilderPhase({
       capabilityBonus: 0, crossPerspectiveBonus: 0, dependencyBonus: 0,
       chainContribution: null, baseTotal: 0, finalTotal: 0,
       locked: false, isConditional: false, condition: null, conditionMet: false,
+      cardSelections,
+      textMetrics,
     };
+
+    console.log('TASK_LOCKED_WITH_CARDS:', { taskType: task.taskType, title: task.title, cardSelections, textMetrics });
 
     const pools = { ...resourcePools };
     Object.keys(pools).forEach(k => { pools[k] = { ...pools[k] }; });
