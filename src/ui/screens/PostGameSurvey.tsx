@@ -292,7 +292,7 @@ export default function PostGameSurvey({ players, onComplete }: PostGameSurveyPr
                 whileTap={{ scale: 0.97 }}
                 onClick={handleSubmit}
               >
-                {currentPlayerIndex < players.length - 1 ? 'Submit & Next Player' : 'Submit All Responses'}
+                {currentPlayerIndex < players.length - 1 ? 'Submit & Next Player' : 'Submit & Finish Session'}
               </motion.button>
             </div>
           </motion.div>

@@ -129,9 +129,44 @@ function App() {
         <PostGameSurvey
           players={players}
           onComplete={(responses) => {
-            // Store survey responses in telemetry, then advance
             console.log('Post-game survey responses:', responses);
-            advancePhase();
+            // Auto-download session data as JSON
+            try {
+              const data = {
+                sessionId: 'CG_' + Date.now(),
+                timestamp: new Date().toISOString(),
+                sessionConfig,
+                surveyResponses: responses,
+                players: players.map(p => ({ id: p.id, name: p.name, roleId: p.roleId, finalUtility: p.finalUtility, level: p.level, totalCP: p.totalCP })),
+              };
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              const now = new Date();
+              a.href = url;
+              a.download = `CG_session_${now.toISOString().split('T')[0]}_${now.toTimeString().slice(0, 5).replace(':', '')}.json`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+              console.log('SESSION_DATA_EXPORTED:', a.download);
+            } catch (e) { console.error('EXPORT_ERROR:', e); }
+            // Increment play count for completed session
+            if (sessionConfig?.challengeSetId) {
+              try {
+                const key = 'commonground_play_counts';
+                const counts = JSON.parse(localStorage.getItem(key) || '{}');
+                const sid = sessionConfig.challengeSetId === 'pilot' ? 'pilot' : `session${sessionConfig.sessionNumber}`;
+                counts[sid] = (counts[sid] || 0) + 1;
+                localStorage.setItem(key, JSON.stringify(counts));
+                console.log('PLAY_COUNT_INCREMENTED:', sid);
+              } catch { /* ignore */ }
+            }
+            // Reset and return to home screen
+            returnToTitle();
+            setAppScreen('gameplay');
+            setSessionConfig(null);
+            console.log('SESSION_COMPLETE: returned to home screen');
           }}
         />
       );
