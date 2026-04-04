@@ -9,7 +9,8 @@
       "Bash(timeout 8 npx vite --host)",
       "Bash(wc:*)",
       "Bash(timeout 6 npx vite)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(node -e ':*)"
     ]
   }
 }
