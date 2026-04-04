@@ -5,6 +5,8 @@ export interface SessionStartConfig {
   challengeSetId: string;
   playNumber: number;
   players: { name: string }[];
+  isPilot?: boolean;
+  pilotZoneId?: string;
 }
 
 interface Props {
@@ -47,9 +49,23 @@ const SESSIONS = [
   ]},
 ];
 
+const ZONES = [
+  { id: 'z1', name: 'Z1 Main Entrance' }, { id: 'z2', name: 'Z2 Fountain Plaza' },
+  { id: 'z3', name: 'Z3 Boating Pond' }, { id: 'z4', name: 'Z4 Herbal Garden' },
+  { id: 'z5', name: 'Z5 Walking Track' }, { id: 'z6', name: 'Z6 Playground' },
+  { id: 'z7', name: 'Z7 Open Lawn' }, { id: 'z8', name: 'Z8 Nursery Area' },
+  { id: 'z9', name: 'Z9 Staff Quarters' }, { id: 'z10', name: 'Z10 Peripheral Walk' },
+  { id: 'z11', name: 'Z11 South Pond' }, { id: 'z12', name: 'Z12 Compost Area' },
+  { id: 'z13', name: 'Z13 PPP Zone' }, { id: 'z14', name: 'Z14 Water Tank & Pump House' },
+];
+
 const PLAY_COUNT_KEY = 'commonground_play_counts';
+const PILOT_COUNT_KEY = 'cg_pilot_count';
 function getPlayCounts(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(PLAY_COUNT_KEY) || '{}'); } catch { return {}; }
+}
+function getPilotCount(): number {
+  try { return parseInt(localStorage.getItem(PILOT_COUNT_KEY) || '0', 10); } catch { return 0; }
 }
 
 function diffDots(level: number, max = 5) {
@@ -62,7 +78,11 @@ export default function SessionDashboard({ onStartSession }: Props) {
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [playerNames, setPlayerNames] = useState(['', '', '', '', '']);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
+  const [showPilotSetup, setShowPilotSetup] = useState(false);
+  const [pilotZone, setPilotZone] = useState('z3');
+  const [pilotNames, setPilotNames] = useState(['', '', '', '', '']);
   const playCounts = useMemo(() => getPlayCounts(), []);
+  const pilotCount = useMemo(() => getPilotCount(), []);
 
   const totalPlays = useMemo(() => SESSIONS.reduce((s, ses) => s + (playCounts[ses.id] || 0), 0), [playCounts]);
   const selectedData = useMemo(() => SESSIONS.find(s => s.id === selectedSession), [selectedSession]);
@@ -86,6 +106,25 @@ export default function SessionDashboard({ onStartSession }: Props) {
     console.log('[SessionDashboard] Starting session:', config);
     onStartSession(config);
   }, [selectedData, canStart, sessionNumber, currentPlayCount, playerNames, onStartSession]);
+
+  const canStartPilot = pilotNames.every(n => n.trim() !== '') && pilotZone;
+  const handlePilotStart = useCallback(() => {
+    if (!canStartPilot) return;
+    const config: SessionStartConfig = {
+      sessionNumber: 0,
+      challengeSetId: 'pilot',
+      playNumber: pilotCount + 1,
+      players: pilotNames.map(name => ({ name: name.trim() })),
+      isPilot: true,
+      pilotZoneId: pilotZone,
+    };
+    console.log('[SessionDashboard] Starting pilot:', config);
+    onStartSession(config);
+  }, [canStartPilot, pilotNames, pilotZone, pilotCount, onStartSession]);
+
+  const setPilotName = useCallback((i: number, v: string) => {
+    setPilotNames(prev => { const n = [...prev]; n[i] = v; return n; });
+  }, []);
 
   const progressPct = Math.min((totalPlays / 30) * 100, 100);
 
@@ -131,18 +170,75 @@ export default function SessionDashboard({ onStartSession }: Props) {
         })}
       </div>
 
-      {/* Total Plays Bar */}
-      <div style={{ marginTop: 20, width: '100%', maxWidth: 500, textAlign: 'center' }}>
-        <div style={{ fontSize: 13, color: T.onSurfaceVariant, marginBottom: 6 }}>
-          Total sessions played: {totalPlays} / 30 target
+      {/* Bottom: Pilot Test + Formal Sessions side by side */}
+      <div style={{
+        marginTop: 24, width: '100%', maxWidth: 700, display: 'flex', gap: 16,
+        background: T.containerLow, borderRadius: 8, padding: '16px 24px',
+      }}>
+        {/* Left: Pilot Testing */}
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: T.fontBody, fontSize: 12, fontWeight: 700, color: T.onSurface, marginBottom: 8 }}>PILOT TESTING</div>
+          <button onClick={() => { setShowPilotSetup(!showPilotSetup); setSelectedSession(null); }}
+            style={{
+              padding: '8px 16px', borderRadius: 6, cursor: 'pointer',
+              background: `${T.tertiary}15`, border: `1px solid ${T.tertiary}40`,
+              color: T.tertiary, fontFamily: T.fontBody, fontSize: 12,
+            }}>
+            {showPilotSetup ? 'Hide Pilot Setup' : 'Start Pilot Test'}
+          </button>
+          <div style={{ marginTop: 6, fontSize: 11, color: T.onSurfaceVariant }}>Pilots: {pilotCount} completed</div>
+          <div style={{ fontSize: 10, color: T.outlineVariant }}>Target: 10-15 before formal collection</div>
         </div>
-        <div style={{ height: 8, borderRadius: 4, background: T.containerHigh, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${progressPct}%`, background: T.primary, borderRadius: 4, transition: 'width 0.3s' }} />
+        {/* Right: Formal Data Collection */}
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: T.fontBody, fontSize: 12, fontWeight: 700, color: T.onSurface, marginBottom: 8 }}>FORMAL DATA COLLECTION</div>
+          <div style={{ height: 6, borderRadius: 3, background: T.outlineVariant, overflow: 'hidden', marginBottom: 6 }}>
+            <div style={{ height: '100%', width: `${progressPct}%`, background: T.primary, borderRadius: 3, transition: 'width 0.3s' }} />
+          </div>
+          <div style={{ fontSize: 11, color: T.onSurfaceVariant }}>{totalPlays} of 30 target sessions completed</div>
         </div>
       </div>
 
-      {/* Player Setup */}
-      {selectedData && (
+      {/* Pilot Setup */}
+      {showPilotSetup && (
+        <div style={{ marginTop: 20, width: '100%', maxWidth: 600, background: T.containerLow, borderRadius: 12, padding: '24px 28px', border: `1px solid ${T.tertiary}30` }}>
+          <h2 style={{ fontFamily: T.fontHeadline, fontSize: 18, margin: '0 0 4px', color: T.tertiary }}>Pilot Test Setup</h2>
+          <p style={{ margin: '0 0 12px', fontSize: 12, color: T.onSurfaceVariant }}>Single zone, 1 round only — for testing and calibration</p>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: T.onSurfaceVariant, marginBottom: 4 }}>SELECT ZONE FOR PILOT:</div>
+            <select value={pilotZone} onChange={e => setPilotZone(e.target.value)}
+              style={{
+                width: '100%', padding: '8px 12px', borderRadius: 6, border: `1px solid ${T.outlineVariant}`,
+                background: T.container, color: T.onSurface, fontFamily: T.fontBody, fontSize: 14, outline: 'none',
+              }}>
+              {ZONES.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+            </select>
+          </div>
+          {pilotNames.map((name, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <span style={{ fontFamily: T.fontNumber, fontSize: 14, color: T.onSurfaceVariant, width: 28, flexShrink: 0 }}>P{i + 1}</span>
+              <input value={name} onChange={e => setPilotName(i, e.target.value)} placeholder="Player name"
+                style={{
+                  flex: 1, padding: '8px 12px', borderRadius: 6, border: `1px solid ${T.outlineVariant}`,
+                  background: T.container, color: T.onSurface, fontFamily: T.fontBody, fontSize: 14, outline: 'none',
+                }} />
+            </div>
+          ))}
+          <button onClick={handlePilotStart} disabled={!canStartPilot}
+            style={{
+              marginTop: 8, width: '100%', padding: '12px 0', borderRadius: 8, border: 'none',
+              cursor: canStartPilot ? 'pointer' : 'not-allowed',
+              background: canStartPilot ? T.tertiary : T.containerHigh,
+              color: canStartPilot ? T.surface : T.outlineVariant,
+              fontFamily: T.fontHeadline, fontSize: 15, fontWeight: 600, opacity: canStartPilot ? 1 : 0.5,
+            }}>
+            Start Pilot {'\u2192'}
+          </button>
+        </div>
+      )}
+
+      {/* Player Setup (formal session) */}
+      {selectedData && !showPilotSetup && (
         <div style={{ marginTop: 32, width: '100%', maxWidth: 600, background: T.containerLow, borderRadius: 12, padding: '24px 28px', border: `1px solid ${T.outlineVariant}` }}>
           <h2 style={{ fontFamily: T.fontHeadline, fontSize: 20, margin: '0 0 4px', color: T.onSurface }}>
             Session {sessionNumber} — Player Setup
