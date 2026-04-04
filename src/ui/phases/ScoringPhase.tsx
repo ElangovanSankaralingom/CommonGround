@@ -658,126 +658,94 @@ const Phase5g: React.FC<{
   const avg = utilEntries.reduce((s, [, v]) => s + v, 0) / utilEntries.length;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 text-lg font-black text-white">
-        <span className="text-2xl">&#127937;</span> The Park Guardian Speaks
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="flex items-center gap-2 font-black text-white" style={{ fontSize: 16 }}>
+        <span style={{ fontSize: 18 }}>&#127937;</span> The Park Guardian Speaks
       </div>
 
-      {/* Q1 */}
-      <FadeSlide delay={0}>
-        <div className="bg-gray-800/50 rounded p-3 space-y-1">
-          <h4 className="text-xs uppercase tracking-wide text-cyan-400 font-bold">
-            Q1 -- Is everyone sustained?
-          </h4>
-          <p className="text-[11px] text-gray-500 italic">Can each stakeholder continue their work?</p>
-          {utilEntries.map(([roleId, u]) => {
-            const t = SURVIVAL_THRESHOLDS[roleId];
-            const pass = u >= t;
-            return (
-              <div key={roleId} className="text-sm text-gray-300">
-                {roleName(roleId)}: u={u} {pass ? '\u2265' : '<'} T={t}{' '}
-                <span className={pass ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
-                  {pass ? '\u2713' : '\u2717'}
-                </span>
-              </div>
-            );
-          })}
-          <div className={`text-sm font-black pt-1 border-t border-gray-700 ${nash_q1.passed ? 'text-green-400' : 'text-red-400'}`}>
-            CALL: Q1 {nash_q1.passed ? 'PASSES \u2713' : `FAILS \u2717 -- ${nash_q1.failing_players.map(f => roleName(f.roleId)).join(', ')}`}
+      {/* Q1 + Q2 side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {/* Q1 */}
+        <FadeSlide delay={0}>
+          <div className="bg-gray-800/50 rounded" style={{ padding: '8px 12px' }}>
+            <h4 className="uppercase tracking-wide text-cyan-400 font-bold" style={{ fontSize: 10, marginBottom: 2 }}>Q1 — Everyone sustained?</h4>
+            {utilEntries.map(([roleId, u]) => {
+              const t = SURVIVAL_THRESHOLDS[roleId]; const pass = u >= t;
+              return (
+                <div key={roleId} className="text-gray-300" style={{ fontSize: 10, lineHeight: '14px' }}>
+                  {roleName(roleId)}: {u}{pass ? '\u2265' : '<'}{t}{' '}
+                  <span className={pass ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{pass ? '\u2713' : '\u2717'}</span>
+                </div>
+              );
+            })}
+            <span style={{ display: 'inline-block', marginTop: 4, padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+              background: nash_q1.passed ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
+              color: nash_q1.passed ? '#4ade80' : '#f87171' }}>
+              Q1 {nash_q1.passed ? 'PASS' : 'FAIL'}
+            </span>
           </div>
-        </div>
-      </FadeSlide>
+        </FadeSlide>
 
-      {/* Q2 */}
+        {/* Q2 */}
+        <FadeSlide delay={0.5}>
+          <div className="bg-gray-800/50 rounded" style={{ padding: '8px 12px' }}>
+            <h4 className="uppercase tracking-wide text-orange-400 font-bold" style={{ fontSize: 10, marginBottom: 2 }}>Q2 — Anyone selfish?</h4>
+            {envRoles.map(roleId => {
+              const actual = utilities[roleId] ?? 0; const bestSolo = getBestSoloUtility(roleId); const pass = actual >= bestSolo;
+              return (
+                <div key={roleId} className="text-gray-300" style={{ fontSize: 10, lineHeight: '14px' }}>
+                  {roleName(roleId)}: {actual} vs solo {bestSolo}{' '}
+                  <span className={pass ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{pass ? '\u2713' : '\u2717'}</span>
+                </div>
+              );
+            })}
+            <span style={{ display: 'inline-block', marginTop: 4, padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+              background: envRoles.every(r => (utilities[r] ?? 0) >= getBestSoloUtility(r)) ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
+              color: envRoles.every(r => (utilities[r] ?? 0) >= getBestSoloUtility(r)) ? '#4ade80' : '#f87171' }}>
+              Q2 {envRoles.every(r => (utilities[r] ?? 0) >= getBestSoloUtility(r)) ? 'PASS' : 'FAIL'}
+            </span>
+          </div>
+        </FadeSlide>
+      </div>
+
+      {/* Q3 full width */}
       <FadeSlide delay={1}>
-        <div className="bg-gray-800/50 rounded p-3 space-y-1">
-          <h4 className="text-xs uppercase tracking-wide text-orange-400 font-bold">
-            Q2 -- Did anyone choose selfishly?
-          </h4>
-          <div className="text-xs text-gray-500 italic mb-1">
-            Could any free stakeholder have done better alone? S-GUIDED players ({fixedRoles.map(r => roleName(r)).join(', ')}): not reviewed -- institutionally guided
-          </div>
-          {envRoles.map(roleId => {
-            const actual = utilities[roleId] ?? 0;
-            const bestSolo = getBestSoloUtility(roleId);
-            const pass = actual >= bestSolo;
-            return (
-              <div key={roleId} className="text-sm text-gray-300">
-                {roleName(roleId)}: actual={actual}, best solo={bestSolo}{' '}
-                <span className={pass ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
-                  {pass ? 'Chose collaboration over solo \u2713' : 'solo path exists \u2717'}
-                </span>
-              </div>
-            );
-          })}
-          <div className={`text-sm font-black pt-1 border-t border-gray-700 ${
-            envRoles.every(r => (utilities[r] ?? 0) >= getBestSoloUtility(r)) ? 'text-green-400' : 'text-red-400'
-          }`}>
-            CALL: Q2 {envRoles.every(r => (utilities[r] ?? 0) >= getBestSoloUtility(r)) ? 'PASSES \u2713' : 'FAILS \u2717'}
-          </div>
-        </div>
-      </FadeSlide>
-
-      {/* Q3 */}
-      <FadeSlide delay={2}>
-        <div className="bg-gray-800/50 rounded p-3 space-y-1">
-          <h4 className="text-xs uppercase tracking-wide text-pink-400 font-bold">
-            Q3 -- Is the vision shared fairly?
-          </h4>
-          <p className="text-[11px] text-gray-500 italic">Is the shared vision both equitable and sufficient?</p>
-          <div className="text-sm text-gray-300">
-            Variance: {fmt(nash_q3.variance)} &le; 4.00?{' '}
-            <span className={nash_q3.variance <= 4 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
-              {nash_q3.variance <= 4 ? 'YES' : 'NO'}
-            </span>
-          </div>
-          <div className="text-sm text-gray-300">
-            SVS: {fmt(cws.total)} &ge; 75?{' '}
-            <span className={nash_q3.cws_above_target ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
-              {nash_q3.cws_above_target ? 'YES' : 'NO'}
-            </span>
+        <div className="bg-gray-800/50 rounded" style={{ padding: '8px 12px' }}>
+          <h4 className="uppercase tracking-wide text-pink-400 font-bold" style={{ fontSize: 10, marginBottom: 2 }}>Q3 — Vision shared fairly?</h4>
+          <div className="text-gray-300" style={{ fontSize: 10, display: 'flex', gap: 12 }}>
+            <span>Variance: {fmt(nash_q3.variance)} {nash_q3.variance <= 4 ? '\u2264' : '>'} 4.00 <span className={nash_q3.variance <= 4 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{nash_q3.variance <= 4 ? '\u2713' : '\u2717'}</span></span>
+            <span>SVS: {fmt(cws.total)} {nash_q3.cws_above_target ? '\u2265' : '<'} 75 <span className={nash_q3.cws_above_target ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{nash_q3.cws_above_target ? '\u2713' : '\u2717'}</span></span>
           </div>
           {!nash_q3.passed && lowest && (
-            <div className="text-xs text-red-300 italic">
-              REASON: {roleName(lowest[0])} at {lowest[1]} is {fmt(avg - lowest[1])} below average
-            </div>
+            <div className="text-red-300 italic" style={{ fontSize: 9 }}>{roleName(lowest[0])} at {lowest[1]} is {fmt(avg - lowest[1])} below avg</div>
           )}
-          <div className={`text-sm font-black pt-1 border-t border-gray-700 ${nash_q3.passed ? 'text-green-400' : 'text-red-400'}`}>
-            CALL: Q3 {nash_q3.passed ? 'PASSES \u2713' : 'FAILS \u2717'}
-          </div>
+          <span style={{ display: 'inline-block', marginTop: 4, padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+            background: nash_q3.passed ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
+            color: nash_q3.passed ? '#4ade80' : '#f87171' }}>
+            Q3 {nash_q3.passed ? 'PASS' : 'FAIL'}
+          </span>
         </div>
       </FadeSlide>
 
-      {/* Shared Balance Verdict */}
-      <FadeSlide delay={3.5}>
+      {/* Verdict */}
+      <FadeSlide delay={2}>
         {allPass ? (
-          <div className="relative bg-gradient-to-r from-yellow-600/30 to-yellow-500/20 border-2 border-yellow-500 rounded-lg p-5 text-center overflow-hidden">
+          <div className="relative bg-gradient-to-r from-yellow-600/30 to-yellow-500/20 border-2 border-yellow-500 rounded-lg text-center overflow-hidden" style={{ padding: '12px 16px' }}>
             <Confetti />
-            <div className="text-2xl font-black text-yellow-400 mb-1">
-              &#127942; SHARED BALANCE POINT ACHIEVED!
-            </div>
-            <div className="text-sm text-yellow-200">
-              The park is restored. Every stakeholder found their balance.
-            </div>
+            <div className="font-black text-yellow-400" style={{ fontSize: 16, marginBottom: 2 }}>&#127942; SHARED BALANCE ACHIEVED!</div>
+            <div className="text-yellow-200" style={{ fontSize: 11 }}>Every stakeholder found their balance.</div>
           </div>
         ) : (
-          <div className="bg-gray-800/70 border border-gray-600 rounded-lg p-4 space-y-2">
-            <div className="text-lg font-black text-gray-300">Shared Balance Not Yet Achieved</div>
-            <div className="text-sm text-gray-400 space-y-1">
-              {!nash_q1.passed && (
-                <div>Q1 failed: {nash_q1.failing_players.map(f =>
-                  `${roleName(f.roleId)} needs +${f.deficit} utility`).join('; ')}</div>
-              )}
-              {!nash_q3.passed && nash_q3.variance > 4 && (
-                <div>Q3 failed: variance {fmt(nash_q3.variance)} exceeds equity band of 4.00</div>
-              )}
-              {!nash_q3.passed && !nash_q3.cws_above_target && (
-                <div>Q3 failed: SVS {fmt(cws.total)} below target of 75</div>
-              )}
+          <div className="bg-gray-800/70 border border-gray-600 rounded-lg" style={{ padding: '8px 12px' }}>
+            <div className="font-black text-gray-300" style={{ fontSize: 13 }}>Shared Balance Not Yet Achieved</div>
+            <div className="text-gray-400" style={{ fontSize: 10, marginTop: 2 }}>
+              {!nash_q1.passed && <div>Q1: {nash_q1.failing_players.map(f => `${roleName(f.roleId)} +${f.deficit}`).join('; ')}</div>}
+              {!nash_q3.passed && nash_q3.variance > 4 && <div>Q3: variance {fmt(nash_q3.variance)} &gt; 4.00</div>}
+              {!nash_q3.passed && !nash_q3.cws_above_target && <div>Q3: SVS {fmt(cws.total)} &lt; 75</div>}
             </div>
             {nashOutput.optimal_next_action.reasoning && (
-              <div className="text-sm text-cyan-300 font-medium pt-1 border-t border-gray-700">
-                ADVICE: {nashOutput.optimal_next_action.reasoning}
+              <div className="text-cyan-300 font-medium" style={{ fontSize: 10, marginTop: 4, paddingTop: 4, borderTop: '1px solid rgba(75,85,99,0.5)' }}>
+                {nashOutput.optimal_next_action.reasoning}
               </div>
             )}
           </div>
