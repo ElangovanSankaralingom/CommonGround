@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CommonGround — Play Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f0d08;--surface:#1a1710;--card:#221f16;
+  --gold:#c4a265;--green:#8ba84a;--cream:#e9e2d5;--muted:#9a9585;
+  --red:#d4534b;--blue:#5d8ac4;--purple:#9b7ec8;--yellow:#e2b63e;
+  --font-title:'Playfair Display',Georgia,serif;
+  --font-body:'DM Sans','Segoe UI',sans-serif;
+  --font-mono:'JetBrains Mono','Courier New',monospace;
+}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--cream);font-family:var(--font-body)}
+canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none}
+/* Letterbox */
+.letterbox-top,.letterbox-bottom{position:fixed;left:0;right:0;height:40px;background:#000;z-index:20}
+.letterbox-top{top:0}.letterbox-bottom{bottom:0}
+/* Vignette */
+.vignette{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.6) 100%)}
+/* Progress bar at top */
+.progress-bar{position:fixed;top:40px;left:0;right:0;height:3px;z-index:25;background:rgba(255,255,255,0.05)}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--green));transition:width 0.6s ease;border-radius:0 2px 2px 0}
+/* Timer */
+.timer{position:fixed;top:48px;right:20px;z-index:25;font-family:var(--font-mono);font-size:13px;color:var(--muted);letter-spacing:1px}
+/* Scene container */
+.scene-area{position:fixed;top:40px;bottom:40px;left:0;right:0;z-index:10;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.scene{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 40px;opacity:0;transform:translateY(30px) scale(0.97);transition:opacity 0.8s ease,transform 0.8s ease;pointer-events:none}
+.scene.active{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.scene.exit-left{opacity:0;transform:translateX(-120px) scale(0.95)}
+.scene.exit-right{opacity:0;transform:translateX(120px) scale(0.95)}
+/* Nav dots */
+.nav-dots{position:fixed;bottom:52px;left:50%;transform:translateX(-50%);z-index:25;display:flex;gap:8px;align-items:center}
+.nav-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);opacity:0.3;border:none;cursor:pointer;transition:all 0.3s ease;padding:0}
+.nav-dot.active{width:24px;border-radius:4px;opacity:1;background:var(--gold)}
+.nav-dot.visited{opacity:0.6}
+/* Controls */
+.controls{position:fixed;bottom:52px;z-index:25;display:flex;align-items:center;gap:12px}
+.controls.left{left:24px}.controls.right{right:24px}
+.ctrl-btn{background:rgba(196,162,101,0.1);border:1px solid rgba(196,162,101,0.2);color:var(--gold);border-radius:10px;padding:8px 18px;cursor:pointer;font-family:var(--font-body);font-size:13px;font-weight:600;transition:all 0.3s ease;letter-spacing:0.5px}
+.ctrl-btn:hover{background:rgba(196,162,101,0.2);border-color:var(--gold)}
+.ctrl-btn:disabled{opacity:0.2;cursor:default}
+.ctrl-btn:disabled:hover{background:rgba(196,162,101,0.1);border-color:rgba(196,162,101,0.2)}
+/* Keyboard hint */
+.kb-hint{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);z-index:24;font-size:10px;color:var(--muted);opacity:0.4;white-space:nowrap;pointer-events:none;font-family:var(--font-body)}
+
+/* ── Scene-specific styles ────────────────────── */
+.title-main{font-family:var(--font-title);font-size:clamp(42px,8vw,72px);font-weight:900;letter-spacing:6px;
+  background:linear-gradient(135deg,var(--gold),var(--yellow),var(--gold));background-size:200% auto;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:shimmer 4s linear infinite;line-height:1.1}
+@keyframes shimmer{0%{background-position:-200% center}100%{background-position:200% center}}
+.subtitle{font-family:var(--font-body);font-size:clamp(14px,2vw,18px);color:var(--muted);margin-top:12px;letter-spacing:2px;text-transform:uppercase}
+.quote{font-family:var(--font-title);font-style:italic;font-size:clamp(14px,2vw,17px);color:var(--gold);opacity:0.7;margin-top:28px;max-width:480px;text-align:center;line-height:1.6}
+.location{font-family:var(--font-mono);font-size:11px;color:var(--muted);opacity:0.5;margin-top:20px;letter-spacing:3px}
+
+/* Stagger fade-in */
+.fade-up{opacity:0;transform:translateY(20px);transition:opacity 0.6s ease,transform 0.6s ease}
+.scene.active .fade-up.show{opacity:1;transform:translateY(0)}
+
+/* Story lines */
+.story-line{font-family:var(--font-body);font-size:clamp(15px,2.2vw,19px);color:var(--cream);line-height:1.8;max-width:560px;text-align:center;opacity:0;transform:translateY(16px);transition:opacity 0.7s ease,transform 0.7s ease}
+.story-line.visible{opacity:1;transform:translateY(0)}
+.story-line .highlight{color:var(--gold);font-weight:600}
+
+/* Role pentagon */
+.role-pentagon{position:relative;width:320px;height:300px}
+.role-node{position:absolute;display:flex;flex-direction:column;align-items:center;gap:6px;
+  opacity:0;transform:scale(0.5);transition:opacity 0.5s ease,transform 0.5s ease}
+.role-node.show{opacity:1;transform:scale(1)}
+.role-circle{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;border:2px solid;animation:float-gentle 4s ease-in-out infinite}
+.role-label{font-family:var(--font-body);font-size:11px;font-weight:600;text-align:center;letter-spacing:0.5px}
+@keyframes float-gentle{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.role-lines{position:absolute;inset:0;z-index:-1}
+.role-line{stroke:var(--gold);stroke-width:1;opacity:0.3;stroke-dasharray:200;stroke-dashoffset:200;transition:stroke-dashoffset 1.5s ease}
+.role-line.drawn{stroke-dashoffset:0}
+
+/* Token display */
+.token-group{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 20px;border-radius:12px;background:var(--card);min-width:100px}
+.token-dots{display:flex;gap:4px;flex-wrap:wrap;justify-content:center;max-width:80px}
+.token-dot{width:10px;height:10px;border-radius:50%;opacity:0;transform:scale(0);transition:opacity 0.3s ease,transform 0.3s ease}
+.token-dot.pop{opacity:1;transform:scale(1)}
+.token-label{font-family:var(--font-body);font-size:11px;color:var(--muted);text-align:center}
+.token-comparison{display:flex;gap:24px;align-items:center;margin-top:24px;font-family:var(--font-mono);font-size:13px}
+.token-comparison .vs{color:var(--muted);font-size:11px}
+
+/* Phase flow */
+.phase-flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center}
+.phase-node{display:flex;flex-direction:column;align-items:center;gap:6px;opacity:0;transform:scale(0.6);transition:opacity 0.5s ease,transform 0.5s ease}
+.phase-node.show{opacity:1;transform:scale(1)}
+.phase-circle{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px;border:2px solid rgba(255,255,255,0.1);background:var(--card)}
+.phase-label{font-family:var(--font-body);font-size:11px;font-weight:600;color:var(--cream);text-align:center}
+.phase-arrow{font-size:20px;color:var(--gold);opacity:0;transition:opacity 0.4s ease;animation:pulse-arrow 2s ease-in-out infinite}
+.phase-arrow.show{opacity:0.6}
+@keyframes pulse-arrow{0%,100%{opacity:0.4}50%{opacity:0.8}}
+
+/* Investigation grid */
+.inv-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;max-width:400px}
+.inv-cell{width:80px;height:80px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:32px;background:var(--card);border:2px solid transparent;opacity:0;transform:scale(0.3);transition:all 0.5s ease}
+.inv-cell.show{opacity:1;transform:scale(1)}
+.inv-cell.clue{border-color:var(--green);box-shadow:0 0 16px rgba(139,168,74,0.25)}
+.inv-cell.root{border-color:var(--gold);animation:pulse-gold 2s ease-in-out infinite}
+.inv-cell.trap{border-color:var(--red);animation:shake-trap 0.4s ease-in-out}
+@keyframes pulse-gold{0%,100%{box-shadow:0 0 12px rgba(196,162,101,0.2)}50%{box-shadow:0 0 28px rgba(196,162,101,0.5)}}
+@keyframes shake-trap{0%,100%{transform:translateX(0) scale(1)}25%{transform:translateX(-4px) scale(1)}75%{transform:translateX(4px) scale(1)}}
+
+/* Card assembly */
+.task-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;border-radius:10px;font-family:var(--font-body);font-weight:600;font-size:14px;color:var(--cream);opacity:0;transform:translateX(-60px);transition:all 0.7s ease;min-width:280px}
+.task-bar.slide-in{opacity:1;transform:translateX(0)}
+.task-bar-type{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:0.7;min-width:70px}
+.insight-bubble{margin-top:20px;padding:16px 24px;border:2px dashed var(--gold);border-radius:16px;background:rgba(196,162,101,0.05);max-width:360px;text-align:center;opacity:0;transition:opacity 0.8s ease}
+.insight-bubble.show{opacity:1}
+.insight-text{font-family:var(--font-title);font-style:italic;font-size:14px;color:var(--gold);line-height:1.5}
+
+/* Multiplier */
+.mult-pentagon{position:relative;width:280px;height:260px}
+.mult-node{position:absolute;width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;border:2px solid var(--muted);background:var(--card);transition:all 0.6s ease;opacity:0.4}
+.mult-node.glow{opacity:1;border-color:var(--gold);box-shadow:0 0 20px rgba(196,162,101,0.4)}
+.mult-card{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:var(--font-mono);font-size:36px;font-weight:700;color:var(--gold);transition:all 0.5s ease;text-shadow:0 0 30px rgba(196,162,101,0.3)}
+.chain-badges{display:flex;gap:6px;align-items:center;margin-top:20px;flex-wrap:wrap;justify-content:center}
+.chain-badge{padding:6px 12px;border-radius:8px;font-family:var(--font-mono);font-size:11px;font-weight:600;background:var(--card);border:1px solid var(--muted);color:var(--cream);opacity:0;transform:scale(0.8);transition:all 0.4s ease}
+.chain-badge.show{opacity:1;transform:scale(1)}
+.chain-arrow{color:var(--gold);font-size:14px;opacity:0;transition:opacity 0.3s ease}
+.chain-arrow.show{opacity:0.6}
+.chain-bonus{font-family:var(--font-mono);font-size:10px;color:var(--green);margin-top:2px;text-align:center}
+
+/* Guardian */
+.guardian-card{display:flex;align-items:center;gap:14px;padding:16px 24px;border-radius:14px;background:var(--card);border:1px solid rgba(139,168,74,0.2);min-width:300px;opacity:0;transform:translateX(-40px);transition:all 0.6s ease}
+.guardian-card.slide-in{opacity:1;transform:translateX(0)}
+.guardian-check{width:36px;height:36px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:700;flex-shrink:0}
+.guardian-text{font-family:var(--font-body);font-size:14px;color:var(--cream)}
+.guardian-bar-wrap{margin-top:28px;width:320px;max-width:90%}
+.guardian-bar-label{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:12px;color:var(--muted);margin-bottom:6px}
+.guardian-bar-track{height:12px;border-radius:6px;background:var(--card);overflow:hidden;border:1px solid rgba(139,168,74,0.2)}
+.guardian-bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--green),var(--gold));width:0;transition:width 2s ease}
+
+/* Remember */
+.remember-item{display:flex;align-items:center;gap:16px;padding:14px 24px;border-radius:12px;background:var(--card);max-width:440px;width:100%;opacity:0;transform:translateY(16px);transition:all 0.6s ease}
+.remember-item.show{opacity:1;transform:translateY(0)}
+.remember-icon{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;border:2px solid}
+.remember-text{font-family:var(--font-body);font-size:15px;color:var(--cream);line-height:1.4}
+.remember-keyword{font-weight:700}
+.final-message{font-family:var(--font-title);font-size:clamp(16px,2.5vw,20px);color:var(--gold);opacity:0;transition:opacity 1s ease;margin-top:32px;text-align:center;font-style:italic}
+.final-message.show{opacity:0.8}
+</style>
+</head>
+<body>
+<canvas id="particles"></canvas>
+<div class="vignette"></div>
+<div class="letterbox-top"></div>
+<div class="letterbox-bottom"></div>
+
+<!-- Progress -->
+<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+<div class="timer" id="timer">0:00 / 3:00</div>
+
+<!-- Scenes -->
+<div class="scene-area" id="sceneArea">
+
+  <!-- Scene 0: Welcome -->
+  <div class="scene" id="scene0">
+    <div class="title-main fade-up" data-delay="0">COMMONGROUND</div>
+    <div class="subtitle fade-up" data-delay="200">A Collaborative Placemaking Game</div>
+    <div class="quote fade-up" data-delay="600">"The best public spaces are not designed for people — they are designed by people, together."</div>
+    <div class="location fade-up" data-delay="1000">CORPORATION ECO-PARK · MADURAI · TAMIL NADU</div>
+  </div>
+
+  <!-- Scene 1: The Story -->
+  <div class="scene" id="scene1">
+    <div style="font-family:var(--font-title);font-size:clamp(28px,5vw,40px);font-weight:900;color:var(--gold);margin-bottom:28px;letter-spacing:2px" class="fade-up" data-delay="0">The Park Needs You</div>
+    <div class="story-line" data-line="0">A 26-acre park in the heart of Madurai.</div>
+    <div class="story-line" data-line="1">Once a <span class="highlight">vibrant green lung</span> for the city.</div>
+    <div class="story-line" data-line="2">Now facing <span class="highlight">neglect</span>, <span class="highlight">encroachment</span>, and <span class="highlight">competing visions</span>.</div>
+    <div class="story-line" data-line="3">14 zones. 5 stakeholders. <span class="highlight">One shared future.</span></div>
+    <div class="story-line" data-line="4">Can you find <span class="highlight">common ground</span>?</div>
+  </div>
+
+  <!-- Scene 2: Five Roles -->
+  <div class="scene" id="scene2">
+    <div style="font-family:var(--font-title);font-size:28px;font-weight:700;color:var(--cream);margin-bottom:24px" class="fade-up" data-delay="0">Five Roles, One Park</div>
+    <div class="role-pentagon" id="rolePentagon">
+      <svg class="role-lines" viewBox="0 0 320 300">
+        <line class="role-line" x1="160" y1="20" x2="300" y2="110" />
+        <line class="role-line" x1="300" y1="110" x2="250" y2="270" />
+        <line class="role-line" x1="250" y1="270" x2="70" y2="270" />
+        <line class="role-line" x1="70" y1="270" x2="20" y2="110" />
+        <line class="role-line" x1="20" y1="110" x2="160" y2="20" />
+      </svg>
+      <!-- Nodes positioned in pentagon -->
+      <div class="role-node" style="left:130px;top:0" data-ridx="0">
+        <div class="role-circle" style="background:rgba(192,57,43,0.15);border-color:#C0392B;animation-delay:0s">🏛️</div>
+        <div class="role-label" style="color:#C0392B">Administrator</div>
+      </div>
+      <div class="role-node" style="left:268px;top:88px" data-ridx="1">
+        <div class="role-circle" style="background:rgba(46,134,171,0.15);border-color:#2E86AB;animation-delay:0.5s">📐</div>
+        <div class="role-label" style="color:#2E86AB">Designer</div>
+      </div>
+      <div class="role-node" style="left:218px;top:244px" data-ridx="2">
+        <div class="role-circle" style="background:rgba(39,174,96,0.15);border-color:#27AE60;animation-delay:1s">🏘️</div>
+        <div class="role-label" style="color:#27AE60">Citizen</div>
+      </div>
+      <div class="role-node" style="left:38px;top:244px" data-ridx="3">
+        <div class="role-circle" style="background:rgba(142,68,173,0.15);border-color:#8E44AD;animation-delay:1.5s">🌿</div>
+        <div class="role-label" style="color:#8E44AD">Advocate</div>
+      </div>
+      <div class="role-node" style="left:-12px;top:88px" data-ridx="4">
+        <div class="role-circle" style="background:rgba(230,126,34,0.15);border-color:#E67E22;animation-delay:2s">💼</div>
+        <div class="role-label" style="color:#E67E22">Investor</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scene 3: Resources -->
+  <div class="scene" id="scene3">
+    <div style="font-family:var(--font-title);font-size:28px;font-weight:700;color:var(--yellow);margin-bottom:8px" class="fade-up" data-delay="0">Resources & Tokens</div>
+    <div style="font-family:var(--font-body);font-size:14px;color:var(--muted);margin-bottom:28px;max-width:440px;text-align:center" class="fade-up" data-delay="200">Each role brings different tokens. Spending wisely is key to meeting the threshold.</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center" id="tokenGroups">
+      <div class="token-group" data-tg="0">
+        <div class="token-dots" id="tokenDots0"></div>
+        <div class="token-label">Fund<br><span style="font-family:var(--font-mono);color:var(--gold)">💰</span></div>
+      </div>
+      <div class="token-group" data-tg="1">
+        <div class="token-dots" id="tokenDots1"></div>
+        <div class="token-label">Knowledge<br><span style="font-family:var(--font-mono);color:var(--blue)">📘</span></div>
+      </div>
+      <div class="token-group" data-tg="2">
+        <div class="token-dots" id="tokenDots2"></div>
+        <div class="token-label">Labour<br><span style="font-family:var(--font-mono);color:var(--green)">🔨</span></div>
+      </div>
+      <div class="token-group" data-tg="3">
+        <div class="token-dots" id="tokenDots3"></div>
+        <div class="token-label">Influence<br><span style="font-family:var(--font-mono);color:var(--purple)">📢</span></div>
+      </div>
+      <div class="token-group" data-tg="4">
+        <div class="token-dots" id="tokenDots4"></div>
+        <div class="token-label">Material<br><span style="font-family:var(--font-mono);color:var(--cream)">🧱</span></div>
+      </div>
+    </div>
+    <div class="token-comparison fade-up" data-delay="1600">
+      <span style="color:var(--blue)">Designer 2 Knowledge = <strong>8.0 pts</strong></span>
+      <span class="vs">vs</span>
+      <span style="color:var(--green)">Citizen 2 Knowledge = <strong>4.0 pts</strong></span>
+    </div>
+  </div>
+
+  <!-- Scene 4: Five Phases -->
+  <div class="scene" id="scene4">
+    <div style="font-family:var(--font-title);font-size:28px;font-weight:700;color:var(--cream);margin-bottom:28px" class="fade-up" data-delay="0">Five Phases per Round</div>
+    <div class="phase-flow" id="phaseFlow">
+      <div class="phase-node" data-pidx="0"><div class="phase-circle" style="border-color:var(--gold)">🎴</div><div class="phase-label" style="color:var(--gold)">Challenge</div></div>
+      <div class="phase-arrow" data-aidx="0">→</div>
+      <div class="phase-node" data-pidx="1"><div class="phase-circle" style="border-color:var(--blue)">🔍</div><div class="phase-label" style="color:var(--blue)">Investigate</div></div>
+      <div class="phase-arrow" data-aidx="1">→</div>
+      <div class="phase-node" data-pidx="2"><div class="phase-circle" style="border-color:var(--yellow)">📋</div><div class="phase-label" style="color:var(--yellow)">Vision</div></div>
+      <div class="phase-arrow" data-aidx="2">→</div>
+      <div class="phase-node" data-pidx="3"><div class="phase-circle" style="border-color:var(--green)">🏗️</div><div class="phase-label" style="color:var(--green)">Build Plan</div></div>
+      <div class="phase-arrow" data-aidx="3">→</div>
+      <div class="phase-node" data-pidx="4"><div class="phase-circle" style="border-color:var(--gold)">🌳</div><div class="phase-label" style="color:var(--gold)">Guardian</div></div>
+    </div>
+    <div style="font-family:var(--font-body);font-size:13px;color:var(--muted);margin-top:24px;text-align:center" class="fade-up" data-delay="3000">3 rounds per session · Each round explores a different park zone</div>
+  </div>
+
+  <!-- Scene 5: Investigation -->
+  <div class="scene" id="scene5">
+    <div style="font-family:var(--font-title);font-size:28px;font-weight:700;color:var(--green);margin-bottom:8px" class="fade-up" data-delay="0">Investigation</div>
+    <div style="font-family:var(--font-body);font-size:14px;color:var(--muted);margin-bottom:24px;text-align:center;max-width:400px" class="fade-up" data-delay="200">Search the zone for clues. Find what matters — avoid the traps!</div>
+    <div class="inv-grid" id="invGrid">
+      <div class="inv-cell" data-iidx="0" data-itype="clue">🪵</div>
+      <div class="inv-cell" data-iidx="1" data-itype="clue">🚰</div>
+      <div class="inv-cell" data-iidx="2" data-itype="trap">🗑️</div>
+      <div class="inv-cell" data-iidx="3" data-itype="clue">🪑</div>
+      <div class="inv-cell" data-iidx="4" data-itype="root">💡</div>
+      <div class="inv-cell" data-iidx="5" data-itype="clue">🌳</div>
+      <div class="inv-cell" data-iidx="6" data-itype="trap">🧹</div>
+      <div class="inv-cell" data-iidx="7" data-itype="clue">🛝</div>
+    </div>
+    <div style="display:flex;gap:20px;margin-top:20px" class="fade-up" data-delay="3000">
+      <span style="font-size:12px;color:var(--green)">🟢 Clue</span>
+      <span style="font-size:12px;color:var(--gold)">🟡 Root cause</span>
+      <span style="font-size:12px;color:var(--red)">🔴 Trap</span>
+    </div>
+  </div>
+
+  <!-- Scene 6: Card Assembly -->
+  <div class="scene" id="scene6">
+    <div style="font-family:var(--font-title);font-size:28px;font-weight:700;color:var(--cream);margin-bottom:8px" class="fade-up" data-delay="0">Build Tasks from Cards</div>
+    <div style="font-family:var(--font-body);font-size:14px;color:var(--muted);margin-bottom:24px;text-align:center" class="fade-up" data-delay="200">Each task is assembled from 4 card types</div>
+    <div style="display:flex;flex-direction:column;gap:10px;align-items:center" id="taskBars">
+      <div class="task-bar" data-bidx="0" style="background:rgba(93,138,196,0.15);border-left:4px solid var(--blue)">
+        <span class="task-bar-type" style="color:var(--blue)">ACTION</span> Install · Plant · Design · Repair
+      </div>
+      <div class="task-bar" data-bidx="1" style="background:rgba(139,168,74,0.15);border-left:4px solid var(--green)">
+        <span class="task-bar-type" style="color:var(--green)">METHOD</span> Workshop · Survey · DIY · Partner
+      </div>
+      <div class="task-bar" data-bidx="2" style="background:rgba(226,182,62,0.15);border-left:4px solid var(--yellow)">
+        <span class="task-bar-type" style="color:var(--yellow)">WHO</span> Youth · Vendors · Elders · Artists
+      </div>
+      <div class="task-bar" data-bidx="3" style="background:rgba(155,126,200,0.15);border-left:4px solid var(--purple)">
+        <span class="task-bar-type" style="color:var(--purple)">OUTCOME</span> Safety · Access · Beauty · Revenue
+      </div>
+    </div>
+    <div class="insight-bubble" id="insightBubble">
+      <div class="insight-text">"The neem trees near Zone 3 provide natural shade that vendors already gather under."</div>
+      <div style="font-family:var(--font-body);font-size:11px;color:var(--muted);margin-top:8px">↑ Local Insight — grounds your task in reality</div>
+    </div>
+  </div>
+
+  <!-- Scene 7: Collaboration Multiplier -->
+  <div class="scene" id="scene7">
+    <div style="font-family:var(--font-title);font-size:28px;font-weight:700;color:var(--gold);margin-bottom:20px" class="fade-up" data-delay="0">Collaboration Multiplier</div>
+    <div class="mult-pentagon" id="multPentagon">
+      <div class="mult-node" style="left:116px;top:0" data-midx="0">🏛️</div>
+      <div class="mult-node" style="left:232px;top:76px" data-midx="1">📐</div>
+      <div class="mult-node" style="left:196px;top:208px" data-midx="2">🏘️</div>
+      <div class="mult-node" style="left:36px;top:208px" data-midx="3">🌿</div>
+      <div class="mult-node" style="left:0px;top:76px" data-midx="4">💼</div>
+      <div class="mult-card" id="multValue">×1.0</div>
+    </div>
+    <div class="chain-badges" id="chainBadges">
+      <div class="chain-badge" data-cidx="0">ASSESS</div>
+      <div class="chain-arrow" data-caidx="0">→</div>
+      <div class="chain-badge" data-cidx="1">PLAN</div>
+      <div class="chain-arrow" data-caidx="1">→</div>
+      <div class="chain-badge" data-cidx="2">DESIGN</div>
+      <div class="chain-arrow" data-caidx="2">→</div>
+      <div class="chain-badge" data-cidx="3">BUILD</div>
+      <div class="chain-arrow" data-caidx="3">→</div>
+      <div class="chain-badge" data-cidx="4">MAINT</div>
+    </div>
+    <div id="chainBonusText" style="font-family:var(--font-mono);font-size:12px;color:var(--green);margin-top:8px;opacity:0;transition:opacity 0.5s">Chain bonus: +3 → +7 → +12 → +18</div>
+  </div>
+
+  <!-- Scene 8: Park Guardian -->
+  <div class="scene" id="scene8">
+    <div style="font-family:var(--font-title);font-size:28px;font-weight:700;color:var(--green);margin-bottom:8px" class="fade-up" data-delay="0">Park Guardian Speaks</div>
+    <div style="font-family:var(--font-body);font-size:14px;color:var(--muted);margin-bottom:24px;text-align:center" class="fade-up" data-delay="200">At each round's end, the Guardian evaluates your plan</div>
+    <div style="display:flex;flex-direction:column;gap:12px;align-items:center" id="guardianCards">
+      <div class="guardian-card" data-gidx="0">
+        <div class="guardian-check">✓</div>
+        <div class="guardian-text">All three placemaking layers balanced</div>
+      </div>
+      <div class="guardian-card" data-gidx="1">
+        <div class="guardian-check">✓</div>
+        <div class="guardian-text">Difficulty factor considered for this zone</div>
+      </div>
+      <div class="guardian-card" data-gidx="2">
+        <div class="guardian-check">✓</div>
+        <div class="guardian-text">Collaboration lowers the threshold</div>
+      </div>
+    </div>
+    <div class="guardian-bar-wrap fade-up" data-delay="4000">
+      <div class="guardian-bar-label">
+        <span>Park Transformation</span>
+        <span id="guardianPct">0%</span>
+      </div>
+      <div class="guardian-bar-track">
+        <div class="guardian-bar-fill" id="guardianFill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scene 9: Remember -->
+  <div class="scene" id="scene9">
+    <div style="font-family:var(--font-title);font-size:32px;font-weight:900;color:var(--gold);margin-bottom:28px" class="fade-up" data-delay="0">Remember</div>
+    <div style="display:flex;flex-direction:column;gap:14px;align-items:center;max-width:480px;width:100%" id="rememberItems">
+      <div class="remember-item" data-rem="0">
+        <div class="remember-icon" style="background:rgba(93,138,196,0.15);border-color:var(--blue);color:var(--blue)">💬</div>
+        <div class="remember-text"><span class="remember-keyword" style="color:var(--blue)">DISCUSS</span> every decision — the game is the conversation</div>
+      </div>
+      <div class="remember-item" data-rem="1">
+        <div class="remember-icon" style="background:rgba(139,168,74,0.15);border-color:var(--green);color:var(--green)">🤝</div>
+        <div class="remember-text"><span class="remember-keyword" style="color:var(--green)">ALWAYS INVITE</span> every role to contribute — multipliers reward diversity</div>
+      </div>
+      <div class="remember-item" data-rem="2">
+        <div class="remember-icon" style="background:rgba(196,162,101,0.15);border-color:var(--gold);color:var(--gold)">📝</div>
+        <div class="remember-text"><span class="remember-keyword" style="color:var(--gold)">ADD SPECIFICS</span> — local insights score higher than generic plans</div>
+      </div>
+    </div>
+    <div class="final-message" id="finalMsg">Good luck. The park is counting on you.</div>
+  </div>
+</div>
+
+<!-- Nav dots -->
+<div class="nav-dots" id="navDots"></div>
+
+<!-- Controls -->
+<div class="controls left">
+  <button class="ctrl-btn" id="btnBack" disabled>← Back</button>
+</div>
+<div class="controls right">
+  <button class="ctrl-btn" id="btnPause">⏸ Pause</button>
+  <button class="ctrl-btn" id="btnNext">Next →</button>
+</div>
+
+<div class="kb-hint">← → arrow keys · Space to advance · P to pause · Esc to close</div>
+
+<script>
+(function(){
+  const SCENE_COUNT = 10;
+  const ADVANCE_MS = 18000;
+  let current = 0;
+  let paused = false;
+  let timer = null;
+  let elapsed = 0;
+  let elapsedTimer = null;
+  const totalTime = 180; // 3 minutes
+
+  // DOM
+  const scenes = [];
+  for(let i=0;i<SCENE_COUNT;i++) scenes.push(document.getElementById('scene'+i));
+  const progressFill = document.getElementById('progressFill');
+  const timerEl = document.getElementById('timer');
+  const navDotsEl = document.getElementById('navDots');
+  const btnBack = document.getElementById('btnBack');
+  const btnNext = document.getElementById('btnNext');
+  const btnPause = document.getElementById('btnPause');
+  const sceneArea = document.getElementById('sceneArea');
+
+  // Create nav dots
+  for(let i=0;i<SCENE_COUNT;i++){
+    const d = document.createElement('button');
+    d.className = 'nav-dot';
+    d.addEventListener('click',()=>goTo(i));
+    navDotsEl.appendChild(d);
+  }
+  const dots = navDotsEl.querySelectorAll('.nav-dot');
+
+  function updateProgress(){
+    progressFill.style.width = ((current+1)/SCENE_COUNT*100)+'%';
+    dots.forEach((d,i)=>{
+      d.classList.toggle('active',i===current);
+      d.classList.toggle('visited',i<current);
+    });
+    btnBack.disabled = current===0;
+    btnNext.textContent = current===SCENE_COUNT-1 ? 'Finish ✓' : 'Next →';
+  }
+
+  function formatTime(s){
+    return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  }
+
+  function startElapsedTimer(){
+    if(elapsedTimer) return;
+    elapsedTimer = setInterval(()=>{
+      if(!paused){
+        elapsed++;
+        timerEl.textContent = formatTime(elapsed)+' / '+formatTime(totalTime);
+      }
+    },1000);
+  }
+
+  // Scene animations
+  function animateScene(idx){
+    const s = scenes[idx];
+    if(!s) return;
+
+    // Fade-up elements
+    const fadeUps = s.querySelectorAll('.fade-up');
+    fadeUps.forEach(el=>{
+      el.classList.remove('show');
+      const delay = parseInt(el.dataset.delay||'0');
+      setTimeout(()=>el.classList.add('show'), delay+200);
+    });
+
+    // Scene-specific animations
+    if(idx===1) animateStory(s);
+    if(idx===2) animateRoles(s);
+    if(idx===3) animateTokens(s);
+    if(idx===4) animatePhases(s);
+    if(idx===5) animateInvestigation(s);
+    if(idx===6) animateCards(s);
+    if(idx===7) animateMultiplier(s);
+    if(idx===8) animateGuardian(s);
+    if(idx===9) animateRemember(s);
+  }
+
+  function animateStory(s){
+    const lines = s.querySelectorAll('.story-line');
+    lines.forEach(l=>l.classList.remove('visible'));
+    lines.forEach((l,i)=>{
+      setTimeout(()=>l.classList.add('visible'), 600+i*800);
+    });
+  }
+
+  function animateRoles(s){
+    const nodes = s.querySelectorAll('.role-node');
+    const lines = s.querySelectorAll('.role-line');
+    nodes.forEach(n=>n.classList.remove('show'));
+    lines.forEach(l=>l.classList.remove('drawn'));
+    nodes.forEach((n,i)=>{
+      setTimeout(()=>n.classList.add('show'), 400+i*400);
+    });
+    lines.forEach((l,i)=>{
+      setTimeout(()=>l.classList.add('drawn'), 800+i*350);
+    });
+  }
+
+  function animateTokens(s){
+    // Create and animate dots
+    const colors = ['var(--gold)','var(--blue)','var(--green)','var(--purple)','var(--cream)'];
+    const counts = [6,4,5,3,4];
+    for(let g=0;g<5;g++){
+      const container = document.getElementById('tokenDots'+g);
+      container.innerHTML = '';
+      for(let d=0;d<counts[g];d++){
+        const dot = document.createElement('div');
+        dot.className = 'token-dot';
+        dot.style.background = colors[g];
+        container.appendChild(dot);
+        setTimeout(()=>dot.classList.add('pop'), 400+g*200+d*80);
+      }
+    }
+  }
+
+  function animatePhases(s){
+    const nodes = s.querySelectorAll('.phase-node');
+    const arrows = s.querySelectorAll('.phase-arrow');
+    nodes.forEach(n=>n.classList.remove('show'));
+    arrows.forEach(a=>a.classList.remove('show'));
+    nodes.forEach((n,i)=>{
+      setTimeout(()=>{
+        n.classList.add('show');
+        if(i>0){
+          const prevArrow = arrows[i-1];
+          if(prevArrow) setTimeout(()=>prevArrow.classList.add('show'),200);
+        }
+      }, 400+i*500);
+    });
+  }
+
+  function animateInvestigation(s){
+    const cells = s.querySelectorAll('.inv-cell');
+    cells.forEach(c=>{c.classList.remove('show','clue','root','trap')});
+    cells.forEach((c,i)=>{
+      setTimeout(()=>{
+        c.classList.add('show');
+        setTimeout(()=>{
+          c.classList.add(c.dataset.itype);
+        },400);
+      }, 300+i*250);
+    });
+  }
+
+  function animateCards(s){
+    const bars = s.querySelectorAll('.task-bar');
+    const bubble = document.getElementById('insightBubble');
+    bars.forEach(b=>b.classList.remove('slide-in'));
+    bubble.classList.remove('show');
+    bars.forEach((b,i)=>{
+      setTimeout(()=>b.classList.add('slide-in'), 400+i*700);
+    });
+    setTimeout(()=>bubble.classList.add('show'), 400+bars.length*700+500);
+  }
+
+  function animateMultiplier(s){
+    const nodes = s.querySelectorAll('.mult-node');
+    const multVal = document.getElementById('multValue');
+    const badges = s.querySelectorAll('.chain-badge');
+    const arrows = s.querySelectorAll('.chain-arrow');
+    const bonusText = document.getElementById('chainBonusText');
+    const multValues = ['×1.0','×1.3','×1.6','×2.0','×2.5'];
+    const sizes = [36,40,46,54,64];
+
+    nodes.forEach(n=>n.classList.remove('glow'));
+    badges.forEach(b=>b.classList.remove('show'));
+    arrows.forEach(a=>a.classList.remove('show'));
+    bonusText.style.opacity = '0';
+    multVal.textContent = '×1.0';
+    multVal.style.fontSize = '36px';
+
+    nodes.forEach((n,i)=>{
+      setTimeout(()=>{
+        n.classList.add('glow');
+        multVal.textContent = multValues[i];
+        multVal.style.fontSize = sizes[i]+'px';
+      }, 800+i*1200);
+    });
+
+    // Chain badges after multiplier
+    const chainStart = 800+5*1200+400;
+    badges.forEach((b,i)=>{
+      setTimeout(()=>{
+        b.classList.add('show');
+        if(i>0){
+          const prevArrow = arrows[i-1];
+          if(prevArrow) prevArrow.classList.add('show');
+        }
+      }, chainStart+i*400);
+    });
+    setTimeout(()=>{bonusText.style.opacity='1'},chainStart+5*400+200);
+  }
+
+  function animateGuardian(s){
+    const cards = s.querySelectorAll('.guardian-card');
+    const fill = document.getElementById('guardianFill');
+    const pct = document.getElementById('guardianPct');
+    cards.forEach(c=>c.classList.remove('slide-in'));
+    fill.style.width = '0';
+    pct.textContent = '0%';
+
+    cards.forEach((c,i)=>{
+      setTimeout(()=>c.classList.add('slide-in'), 400+i*1200);
+    });
+
+    // Bar animation
+    const barStart = 400+3*1200+600;
+    setTimeout(()=>{
+      fill.style.width = '85%';
+      let count = 0;
+      const countUp = setInterval(()=>{
+        count+=1;
+        if(count>85){clearInterval(countUp);return}
+        pct.textContent = count+'%';
+      },24);
+    }, barStart);
+  }
+
+  function animateRemember(s){
+    const items = s.querySelectorAll('.remember-item');
+    const msg = document.getElementById('finalMsg');
+    items.forEach(it=>it.classList.remove('show'));
+    msg.classList.remove('show');
+    items.forEach((it,i)=>{
+      setTimeout(()=>it.classList.add('show'), 600+i*1000);
+    });
+    setTimeout(()=>msg.classList.add('show'), 600+3*1000+800);
+  }
+
+  // Navigation
+  function goTo(idx){
+    if(idx<0||idx>=SCENE_COUNT||idx===current) return;
+    const prev = scenes[current];
+    const dir = idx > current ? 'exit-left' : 'exit-right';
+    prev.classList.remove('active');
+    prev.classList.add(dir);
+    setTimeout(()=>prev.classList.remove(dir),800);
+
+    current = idx;
+    const next = scenes[current];
+    next.classList.add('active');
+    updateProgress();
+    animateScene(current);
+    resetAutoAdvance();
+  }
+
+  function goNext(){
+    if(current<SCENE_COUNT-1) goTo(current+1);
+    else if(window.parent !== window){
+      // inside iframe — try to notify parent
+      window.parent.postMessage({type:'tutorial-close'},'*');
+    }
+  }
+  function goBack(){ if(current>0) goTo(current-1); }
+
+  function resetAutoAdvance(){
+    if(timer) clearInterval(timer);
+    if(!paused){
+      timer = setInterval(()=>{
+        if(current<SCENE_COUNT-1) goNext();
+        else { clearInterval(timer); timer=null; }
+      }, ADVANCE_MS);
+    }
+  }
+
+  function togglePause(){
+    paused = !paused;
+    btnPause.textContent = paused ? '▶ Play' : '⏸ Pause';
+    if(paused){ if(timer){clearInterval(timer);timer=null;} }
+    else resetAutoAdvance();
+  }
+
+  // Events
+  btnBack.addEventListener('click', goBack);
+  btnNext.addEventListener('click', goNext);
+  btnPause.addEventListener('click', togglePause);
+
+  sceneArea.addEventListener('click', (e)=>{
+    // Don't advance if clicking inside interactive elements
+    if(e.target.closest('button')) return;
+    goNext();
+  });
+
+  document.addEventListener('keydown',(e)=>{
+    if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();goNext();}
+    else if(e.key==='ArrowLeft'){e.preventDefault();goBack();}
+    else if(e.key==='p'||e.key==='P') togglePause();
+    else if(e.key==='Escape'){
+      if(window.parent !== window) window.parent.postMessage({type:'tutorial-close'},'*');
+    }
+  });
+
+  // Particle system
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  let particles = [];
+  const PARTICLE_COUNT = 60;
+  const pColors = ['rgba(196,162,101,','rgba(139,168,74,','rgba(233,226,213,'];
+
+  function resizeCanvas(){
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  function createParticle(){
+    return {
+      x: Math.random()*canvas.width,
+      y: Math.random()*canvas.height,
+      vx: (Math.random()-0.5)*0.3,
+      vy: (Math.random()-0.5)*0.3 - 0.1,
+      size: 1+Math.random()*2.5,
+      alpha: 0.1+Math.random()*0.4,
+      color: pColors[Math.floor(Math.random()*3)],
+      pulseSpeed: 0.005+Math.random()*0.01,
+      pulsePhase: Math.random()*Math.PI*2
+    };
+  }
+
+  for(let i=0;i<PARTICLE_COUNT;i++) particles.push(createParticle());
+
+  let animFrame;
+  function drawParticles(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const t = Date.now()*0.001;
+    particles.forEach(p=>{
+      p.x += p.vx;
+      p.y += p.vy;
+      if(p.x<-10) p.x=canvas.width+10;
+      if(p.x>canvas.width+10) p.x=-10;
+      if(p.y<-10) p.y=canvas.height+10;
+      if(p.y>canvas.height+10) p.y=-10;
+      const pulse = 0.5+0.5*Math.sin(t*p.pulseSpeed*60+p.pulsePhase);
+      const a = p.alpha*pulse;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fillStyle = p.color+a.toFixed(2)+')';
+      ctx.fill();
+    });
+    animFrame = requestAnimationFrame(drawParticles);
+  }
+  drawParticles();
+
+  // Init
+  scenes[0].classList.add('active');
+  updateProgress();
+  animateScene(0);
+  resetAutoAdvance();
+  startElapsedTimer();
+})();
+</script>
+</body>
+</html>

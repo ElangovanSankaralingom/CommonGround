@@ -1,9 +1,7 @@
-import { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store';
 import type { GameConfig } from '../../core/models/types';
-
-const HowToPlay = lazy(() => import('./HowToPlay'));
 
 // ── Rotating taglines ──────────────────────────────────────────
 const TAGLINES = [
@@ -641,6 +639,23 @@ export default function TitleScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  // Close tutorial on Escape or iframe postMessage
+  useEffect(() => {
+    if (!showHowToPlay) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowHowToPlay(false);
+    };
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'tutorial-close') setShowHowToPlay(false);
+    };
+    window.addEventListener('keydown', handleKey);
+    window.addEventListener('message', handleMessage);
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [showHowToPlay]);
+
   const actuallyStartGame = useCallback(() => {
     setIsExiting(true);
     setTimeout(() => {
@@ -922,7 +937,8 @@ export default function TitleScreen() {
             whileTap={{ scale: 0.97 }}
             onClick={() => setShowHowToPlay(true)}
           >
-            How to Play
+            <span>How to Play</span>
+            <span style={{ display: 'block', fontSize: 10, opacity: 0.55, marginTop: 2, fontWeight: 400, letterSpacing: '0.5px' }}>3-minute animated guide</span>
           </motion.button>
         </motion.div>
       </div>
@@ -963,15 +979,57 @@ export default function TitleScreen() {
         {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       </AnimatePresence>
 
-      {/* How to Play overlay */}
+      {/* How to Play — cinematic HTML tutorial overlay */}
       {showHowToPlay && (
-        <Suspense fallback={
-          <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: '#F5E6D3' }}>
-            <div className="animate-pulse text-lg" style={{ color: '#8B6F47' }}>Loading...</div>
-          </div>
-        }>
-          <HowToPlay onClose={() => setShowHowToPlay(false)} />
-        </Suspense>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: '#000' }}>
+          {/* Close button */}
+          <button
+            onClick={() => setShowHowToPlay(false)}
+            style={{
+              position: 'fixed', top: 16, right: 16, zIndex: 10000,
+              width: 44, height: 44, borderRadius: '50%',
+              background: 'rgba(196,162,101,0.15)', border: '1px solid rgba(196,162,101,0.3)',
+              color: '#c4a265', fontSize: 20, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'sans-serif', transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(196,162,101,0.3)'; e.currentTarget.style.borderColor = '#c4a265'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(196,162,101,0.15)'; e.currentTarget.style.borderColor = 'rgba(196,162,101,0.3)'; }}
+          >
+            ✕
+          </button>
+          {/* Download button */}
+          <button
+            onClick={() => {
+              const link = document.createElement('a');
+              link.href = '/tutorial.html';
+              link.download = 'CommonGround_PlayGuide.html';
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }}
+            style={{
+              position: 'fixed', top: 16, right: 72, zIndex: 10000,
+              height: 44, borderRadius: 22,
+              background: 'rgba(139,168,74,0.15)', border: '1px solid rgba(139,168,74,0.3)',
+              color: '#8ba84a', fontSize: 12, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '0 16px', gap: 6,
+              fontFamily: "'Manrope', sans-serif", transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(139,168,74,0.3)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(139,168,74,0.15)'; }}
+          >
+            {'\u2B07'} Download Guide
+          </button>
+          {/* Tutorial iframe */}
+          <iframe
+            src="/tutorial.html"
+            style={{ width: '100%', height: '100%', border: 'none', background: '#000' }}
+            title="CommonGround Play Guide"
+            allow="autoplay"
+          />
+        </div>
       )}
     </motion.div>
   );
