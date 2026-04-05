@@ -133,28 +133,41 @@ function App() {
           players={players}
           onComplete={(responses) => {
             console.log('Post-game survey responses:', responses);
-            // Auto-download session data as JSON
-            try {
-              const data = {
-                sessionId: 'CG_' + Date.now(),
+            // Record debrief in telemetry
+            responses.forEach((resp: any) => {
+              useTelemetryStore.getState().recordDebrief({
+                playerId: resp.playerId || 'unknown',
+                roleId: resp.roleId || 'unknown',
+                responses: resp,
                 timestamp: new Date().toISOString(),
-                sessionConfig,
-                surveyResponses: responses,
-                players: players.map(p => ({ id: p.id, name: p.name, roleId: p.roleId, finalUtility: p.finalUtility, level: p.level, totalCP: p.totalCP })),
-              };
-              const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+              });
+            });
+            // Export full telemetry as JSON and auto-download
+            try {
+              const telemetryJson = useTelemetryStore.getState().exportSession();
+              const blob = new Blob([telemetryJson], { type: 'application/json' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
-              const now = new Date();
+              const meta = useTelemetryStore.getState().sessionMeta;
+              const dateStr = new Date().toISOString().split('T')[0];
+              const timeStr = new Date().toISOString().split('T')[1]?.split('.')[0]?.replace(/:/g, '') || '';
+              const prefix = meta?.isPilot ? 'CG_pilot' : `CG_session${meta?.sessionNumber || 0}`;
               a.href = url;
-              a.download = `CG_session_${now.toISOString().split('T')[0]}_${now.toTimeString().slice(0, 5).replace(':', '')}.json`;
+              a.download = `${prefix}_${dateStr}_${timeStr}.json`;
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
               URL.revokeObjectURL(url);
-              console.log('SESSION_DATA_EXPORTED:', a.download);
+              console.log('TELEMETRY_EXPORTED:', a.download);
             } catch (e) { console.error('EXPORT_ERROR:', e); }
-            // Increment play count for completed session
+            // Record played players for first-time tracking
+            try {
+              const key = 'cg_played_before';
+              const played: string[] = JSON.parse(localStorage.getItem(key) || '[]');
+              players.forEach(p => { const n = p.name.toLowerCase().trim(); if (n && !played.includes(n)) played.push(n); });
+              localStorage.setItem(key, JSON.stringify(played));
+            } catch { /* ignore */ }
+            // Increment play count
             if (sessionConfig?.challengeSetId) {
               try {
                 const key = 'commonground_play_counts';
@@ -162,14 +175,14 @@ function App() {
                 const sid = sessionConfig.challengeSetId === 'pilot' ? 'pilot' : `session${sessionConfig.sessionNumber}`;
                 counts[sid] = (counts[sid] || 0) + 1;
                 localStorage.setItem(key, JSON.stringify(counts));
-                console.log('PLAY_COUNT_INCREMENTED:', sid);
               } catch { /* ignore */ }
             }
-            // Reset and return to home screen
+            // Reset telemetry and return to home screen
+            useTelemetryStore.setState({ sessionMeta: null, playerProfiles: [], rounds: [], debrief: [], sessionAggregates: null });
+            console.log('TELEMETRY_RESET: Ready for new session');
             returnToTitle();
             setAppScreen('gameplay');
             setSessionConfig(null);
-            console.log('SESSION_COMPLETE: returned to home screen');
           }}
         />
       );

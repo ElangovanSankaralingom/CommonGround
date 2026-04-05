@@ -456,6 +456,9 @@ function GameModeSelector({ onBack, onStartGame }: { onBack: () => void; onStart
   const [showPilot, setShowPilot] = useState(false);
   const [pilotZone, setPilotZone] = useState<string | null>(null);
   const [pilotNames, setPilotNames] = useState(['', '', '', '', '']);
+  const [playerCategories, setPlayerCats] = useState(['Architecture Student (B.Arch)', 'Architecture Student (B.Arch)', 'Architecture Student (B.Arch)', 'Architecture Student (B.Arch)', 'Architecture Student (B.Arch)']);
+
+  const PARTICIPANT_CATEGORIES = ['Architecture Student (B.Arch)', 'Architecture Student (M.Arch)', 'Planning Student (M.Plan)', 'Faculty', 'Actual Stakeholder', 'Community Member', 'Government Official', 'NGO Worker', 'Other'];
 
   const playCounts: Record<string, number> = (() => {
     try { return JSON.parse(localStorage.getItem('commonground_play_counts') || '{}'); } catch { return {}; }
@@ -530,13 +533,30 @@ function GameModeSelector({ onBack, onStartGame }: { onBack: () => void; onStart
               Play #{(playCounts[selectedSession] || 0) + 1}
             </div>
             {playerNames.map((name, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontFamily: G.fontNumber, fontSize: 13, color: G.onSurfaceVariant, width: 24 }}>P{i + 1}</span>
-                <input value={name} onChange={e => { const n = [...playerNames]; n[i] = e.target.value; setNames(n); }} placeholder="Player name"
-                  style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: `1px solid ${G.outlineVariant}`, background: G.container, color: G.onSurface, fontFamily: G.fontBody, fontSize: 13, outline: 'none' }} />
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: G.fontNumber, fontSize: 13, color: G.onSurfaceVariant, width: 24 }}>P{i + 1}</span>
+                  <input value={name} onChange={e => { const n = [...playerNames]; n[i] = e.target.value; setNames(n); }} placeholder="Player name"
+                    style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: `1px solid ${G.outlineVariant}`, background: G.container, color: G.onSurface, fontFamily: G.fontBody, fontSize: 13, outline: 'none' }} />
+                </div>
+                <div style={{ marginLeft: 32, marginTop: 3 }}>
+                  <select value={playerCategories[i]} onChange={e => { const c = [...playerCategories]; c[i] = e.target.value; setPlayerCats(c); }}
+                    style={{ padding: '4px 8px', borderRadius: 4, border: `1px solid ${G.outlineVariant}`, background: G.container, color: G.onSurfaceVariant, fontFamily: G.fontBody, fontSize: 10, outline: 'none', width: '100%' }}>
+                    {PARTICIPANT_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                </div>
               </div>
             ))}
-            <button onClick={() => { console.log('SESSION_START:', selectedSession, playerNames); onStartGame(); }} disabled={!canStartFormal}
+            <button onClick={() => {
+              console.log('SESSION_START:', selectedSession, playerNames);
+              // Record player profiles with demographics in telemetry
+              try {
+                const { setPlayerProfiles } = (window as any).__telemetryStore || {};
+                // Use dynamic import to avoid circular deps — store demographics for later pickup
+                (window as any).__cgDemographics = playerNames.map((n, idx) => ({ name: n.trim(), category: playerCategories[idx] }));
+              } catch { /* ok */ }
+              onStartGame();
+            }} disabled={!canStartFormal}
               style={{ marginTop: 8, width: '100%', padding: '11px 0', borderRadius: 8, border: 'none', cursor: canStartFormal ? 'pointer' : 'not-allowed', background: canStartFormal ? G.primary : G.outlineVariant, color: canStartFormal ? G.surface : G.onSurfaceVariant, fontFamily: G.fontHeadline, fontSize: 15, fontWeight: 600, opacity: canStartFormal ? 1 : 0.4 }}>
               Start Session {'\u2192'}
             </button>
