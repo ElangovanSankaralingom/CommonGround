@@ -27,6 +27,7 @@ import {
 } from '../../core/engine/nashEngine';
 import { PhaseNavigation } from '../effects/PhaseNavigation';
 import { sounds } from '../../utils/sounds';
+import { useTelemetryStore } from '../../core/telemetry/telemetryStore';
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -801,6 +802,21 @@ export default function ScoringPhase({ session, players, roundCPAwards, onPhaseC
 
   const handleComplete = useCallback(() => {
     sounds.playButtonClick();
+    // Telemetry: record Phase 5 and finalize round
+    if (nashOutput) {
+      useTelemetryStore.getState().recordPhase5({
+        q1_passed: nashOutput.nash_q1?.passed || false,
+        q2_passed: true,
+        q3_passed: nashOutput.nash_q3?.passed || false,
+        sharedVisionScore: nashOutput.cws?.total || 0,
+        utilityPerPlayer: Object.entries(nashOutput.utilities || {}).map(([role, u]) => ({
+          playerId: role, role, utility: u as number,
+        })),
+        transformationPercent: 0,
+        overallPass: (nashOutput.nash_q1?.passed && nashOutput.nash_q3?.passed) || false,
+      });
+    }
+    useTelemetryStore.getState().finalizeRound();
     onPhaseComplete(nashOutput, endCondition);
   }, [onPhaseComplete, nashOutput, endCondition]);
 

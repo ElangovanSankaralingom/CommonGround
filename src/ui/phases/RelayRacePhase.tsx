@@ -17,6 +17,7 @@ import { getPlayerCapabilities, activateCapability, type Capability } from '../.
 import { drawReactionCard, tickReactionEffects, type ReactionCard, type ReactionEffect } from '../../core/engine/reactionCards';
 import { sounds } from '../../utils/sounds';
 import { generateTaskCards, getCrossPerspectiveBenefits, type TaskCard as GenTaskCard, type GeneratedCards } from '../../core/content/taskCardGenerator';
+import { useTelemetryStore } from '../../core/telemetry/telemetryStore';
 
 // ─── Design Tokens ──────────────────────────────────────────────
 const T = {
@@ -384,6 +385,17 @@ export default function SeriesBuilderPhase({
 
     console.log('TASK_LOCKED_WITH_CARDS:', { taskType: task.taskType, title: task.title, cardSelections, textMetrics });
 
+    // Telemetry: record Phase 4 task
+    useTelemetryStore.getState().recordPhase4Task(0, {
+      taskId: task.id, taskIndex: activeSeries.tasks.length, taskType: task.taskType,
+      placedBy: { playerId: task.placedBy.playerId, role: task.placedBy.role, name: task.placedBy.playerName },
+      contributions: task.contributions.map(c => ({ playerId: c.playerId, role: c.playerRole, tokens: c.tokensCommitted, effectiveness: c.effectiveness, basePoints: c.basePoints })),
+      combinationMultiplier: task.combinationMultiplier, roleCount: task.uniqueRoles,
+      baseTotal: task.baseTotal, taskTotal: task.finalTotal, runningTotal: activeSeries.runningTotal,
+      title: task.title, description: task.description, crossPerspective: crossPerspective,
+      layer: '', cardSelections: task.cardSelections, textMetrics: task.textMetrics,
+    });
+
     const pools = { ...resourcePools };
     Object.keys(pools).forEach(k => { pools[k] = { ...pools[k] }; });
     const result = placeTask(activeSeries, task, hiddenThreshold, pools);
@@ -464,6 +476,12 @@ export default function SeriesBuilderPhase({
     const outcome = sv >= thr * 2 ? 'full_success' : sv >= thr * 1.5 ? 'partial_success' : sv >= thr ? 'narrow_success' : 'failure';
     const tfLevel = sv >= thr * 2 ? 'full' as const : sv >= thr * 1.5 ? 'good' as const : 'partial' as const;
     console.log('SERIES_COMPLETE: sv=', sv, 'thr=', thr, 'outcome=', outcome, 'tf=', tfLevel);
+    // Telemetry: finalize Phase 4
+    useTelemetryStore.getState().finalizePhase4({
+      totalTimeSeconds: 0,
+      threshold: { baseCost: 0, placemakingMultiplier: 0, difficultyModifier: 0, finalThreshold: thr },
+      optimumSeriesId: activeSeries.id,
+    });
     onPhaseComplete({
       seriesValue: sv, threshold: thr, outcome,
       tasks: activeSeries.tasks.map(t => ({

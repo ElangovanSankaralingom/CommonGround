@@ -30,6 +30,7 @@ import { DeckDisplay } from '../effects/ResourceAnimation';
 import type { NashEngineOutput } from '../../core/engine/nashEngine';
 import GameEnvironment, { SoundControl } from '../components/GameEnvironment';
 import PaymentDay from '../components/PaymentDay';
+import { useTelemetryStore } from '../../core/telemetry/telemetryStore';
 import { getVisionTilesForZoneAndSet, toFeatureTile, generateLayeredVision, type FeatureTile } from '../../core/content/featureTiles';
 import { calculateThreshold } from '../../core/engine/visionBoardEngine';
 
@@ -791,6 +792,10 @@ export default function GameScreen() {
     // Only auto-activate event_roll — everything else is driven by the onPhaseComplete chain
     if (phase === 'event_roll') {
       console.log('PHASE AUTO-ACTIVATE: event_roll (initial activation)');
+      // Telemetry: init round when gameplay phase starts
+      useTelemetryStore.getState().initRound(
+        session.currentRound, 'z3', 'Boating Pond', 3, 'ecological'
+      );
       setGamifiedPhase('event_roll');
     } else if (phase === 'round_end' || phase === 'game_end') {
       console.log('PHASE AUTO-ACTIVATE: round_transition');
