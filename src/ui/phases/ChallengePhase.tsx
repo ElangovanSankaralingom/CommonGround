@@ -5,6 +5,7 @@ import { ROLE_COLORS } from '../../core/models/constants';
 import { getZoneConfig, getZoneIdFromEngineId, ZoneObject, ZoneConfig } from '../../core/content/zoneScenes';
 import { getRealisticChallenge } from '../../core/content/challengeCards';
 import { sounds } from '../../utils/sounds';
+import { useTelemetryStore } from '../../core/telemetry/telemetryStore';
 
 // ─── Types ──────────────────────────────────────────────────────
 export interface InvestigationResult {
@@ -226,6 +227,7 @@ function DiffDots({ n, max = 5 }: { n: number; max?: number }) {
 // ═══════════════════════════════════════════════════════════════
 export function ChallengePhase({ session, challenge, players, onPhaseComplete }: ChallengePhaseProps) {
   console.log('CHALLENGE_PHASE: Mounted → direct to card (no intro)');
+  const phase1StartRef = useRef(Date.now());
   const [stage, setStage] = useState<Stage>('card');
   const [timer, setTimer] = useState(TURN_SEC);
   const [score, setScore] = useState(0);
@@ -361,7 +363,15 @@ export function ChallengePhase({ session, challenge, players, onPhaseComplete }:
                   Source: {realistic.realWorldSource}
                 </p>
               )}
-              <button onClick={() => { console.log('ENTER_ZONE → skip to HOG (InvestigationPhase)'); sounds.playButtonClick(); setStage('continue'); }}
+              <button onClick={() => {
+                console.log('ENTER_ZONE → skip to HOG (InvestigationPhase)');
+                useTelemetryStore.getState().recordPhase1({
+                  challengeCardId: engineZoneId + '_challenge',
+                  challengeTitle: realistic?.name || challenge.name,
+                  readDurationSeconds: Math.round((Date.now() - phase1StartRef.current) / 1000),
+                });
+                sounds.playButtonClick(); setStage('continue');
+              }}
                 style={{ background: 'linear-gradient(135deg,#2ecc71,#27ae60)', color: '#0a2818', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'Georgia,serif' }}>
                 Enter Zone {'\u2192'}
               </button>

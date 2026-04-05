@@ -10,6 +10,7 @@ import {
   ExportScreen,
 } from './ui/screens';
 import SessionDashboard, { type SessionStartConfig } from './ui/screens/SessionDashboard';
+import { useTelemetryStore } from './core/telemetry/telemetryStore';
 
 // localStorage play count tracking
 const PLAY_COUNT_KEY = 'cg_play_counts';
@@ -35,6 +36,8 @@ function App() {
   const handleSessionStart = useCallback((config: SessionStartConfig) => {
     setSessionConfig(config);
     incrementPlayCount(config.challengeSetId);
+    // Telemetry: init session
+    useTelemetryStore.getState().initSession(config.sessionNumber, config.challengeSetId, config.isPilot || false, config.pilotZoneId);
     console.log('SESSION_START:', 'Session', config.sessionNumber, 'Play #', config.playNumber, 'Set:', config.challengeSetId);
     setAppScreen('gameplay');
   }, []);

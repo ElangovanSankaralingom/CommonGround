@@ -17,6 +17,7 @@ import {
 } from '../../core/engine/visionBoardEngine';
 import { BUCHI_OBJECTIVES } from '../../core/models/constants';
 import { sounds } from '../../utils/sounds';
+import { useTelemetryStore } from '../../core/telemetry/telemetryStore';
 
 /* ── Design Tokens ─────────────────────────────────────────── */
 const T = {
@@ -255,6 +256,14 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
       [...visionTiles].sort((a, b) => (starVotes[b.id] || 0) - (starVotes[a.id] || 0)).map(t => t.id),
       sorted, difficultyDots);
     console.log('VISION_COMPLETE threshold=', thr.threshold);
+    // Telemetry: finalize Phase 3
+    useTelemetryStore.getState().finalizePhase3({
+      confirmedFeatures: visionTiles.map(t => t.id),
+      collaborativeScore: collabScore ? { total: collabScore.score, objectiveDiversity: collabScore.breakdown.featureDiversity, stakeholderBalance: collabScore.breakdown.buchiCoverage, layerBalance: 0, rootCauseAlignment: false } : undefined,
+      goalResult: goalResult?.result || 'skipped',
+      hintUsed: hintRevealed,
+      overrideUsed: overrideApplied,
+    });
     onPhaseComplete({
       tiles: visionTiles.map(t => toFeatureTile(t)),
       objectivesCovered: Object.entries(vision.objectiveScores).filter(([, v]) => v >= 30).map(([k]) => k),
@@ -262,7 +271,7 @@ export default function VisionBoardPhase({ session, players, challenge, onPhaseC
       visionStatement: final.visionStatement,
       consensusLevel: final.consensusLevel,
     });
-  }, [visionTiles, commitments, starVotes, sorted, difficultyDots, onPhaseComplete]);
+  }, [visionTiles, commitments, starVotes, sorted, difficultyDots, onPhaseComplete, collabScore, goalResult, hintRevealed, overrideApplied]);
 
   /* ── Auto-calculate commitments based on player effectiveness ── */
   useEffect(() => {

@@ -17,6 +17,7 @@ import {
   type InvestigationQuality,
 } from '../../core/engine/investigationEngine';
 import { sounds } from '../../utils/sounds';
+import { useTelemetryStore } from '../../core/telemetry/telemetryStore';
 
 // ─── Types ──────────────────────────────────────────────────────
 export interface InvestigationPhaseResult {
@@ -322,6 +323,7 @@ export default function InvestigationPhase({
 }: InvestigationPhaseProps) {
   // State — starts directly in 'playing' (no intro screen)
   console.log('INVESTIGATION_PHASE: Mounted → direct to playing (no intro)');
+  const phase2StartRef = useRef(Date.now());
   const [screenState, setScreenState] = useState<ScreenState>('playing');
   const [timer, setTimer] = useState(TURN_SECONDS);
   const [score, setScore] = useState(0);
@@ -485,9 +487,22 @@ export default function InvestigationPhase({
       score: summary.finalScore,
       cpAwarded: Object.fromEntries(sortedPlayers.map(p => [p.id, Math.floor(discoveries.length * 0.5)])),
     };
+    // Telemetry: finalize Phase 2
+    useTelemetryStore.getState().finalizePhase2({
+      totalTimeSeconds: Math.round((Date.now() - phase2StartRef.current) / 1000),
+      coverageMap: {
+        totalObjects: zone.objects.length,
+        objectsClicked: foundObjects.size,
+        relevantFound: discoveries.length,
+        trapsClicked: mistakes.length,
+        rootCauseFound: false, // could be enhanced to track root cause
+        coveragePercent: Math.round((discoveries.length / Math.max(zone.objects.filter(o => o.relevant).length, 1)) * 100),
+      },
+      discoveredClueIds: discoveries.map(d => d.id),
+    });
     console.log('INVESTIGATION_COMPLETE:', results);
     onPhaseComplete(results);
-  }, [discoveries, mistakes, summary, sortedPlayers, onPhaseComplete]);
+  }, [discoveries, mistakes, summary, sortedPlayers, onPhaseComplete, zone, foundObjects]);
 
   // Inventory slots
   const inventorySlots = useMemo(() => {
