@@ -159,6 +159,22 @@ function App() {
               document.body.removeChild(a);
               URL.revokeObjectURL(url);
               console.log('TELEMETRY_EXPORTED:', a.download);
+              // Also download CSV with delay
+              setTimeout(() => {
+                try {
+                  const csv = useTelemetryStore.getState().exportSessionCSV();
+                  const csvBlob = new Blob([csv], { type: 'text/csv' });
+                  const csvUrl = URL.createObjectURL(csvBlob);
+                  const csvLink = document.createElement('a');
+                  csvLink.href = csvUrl;
+                  csvLink.download = `${prefix}_${dateStr}_${timeStr}.csv`;
+                  document.body.appendChild(csvLink);
+                  csvLink.click();
+                  document.body.removeChild(csvLink);
+                  URL.revokeObjectURL(csvUrl);
+                  console.log('TELEMETRY_CSV_EXPORTED:', csvLink.download);
+                } catch (ce) { console.error('CSV_EXPORT_ERROR:', ce); }
+              }, 1000);
             } catch (e) { console.error('EXPORT_ERROR:', e); }
             // Record played players for first-time tracking
             try {

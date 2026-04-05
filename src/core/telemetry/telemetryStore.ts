@@ -188,6 +188,7 @@ interface TelemetryState {
   recordDebrief: (response: DebriefResponse) => void;
   calculateAggregates: () => void;
   exportSession: () => string;
+  exportSessionCSV: () => string;
 }
 
 // ─── Store ───────────────────────────────────────────────────
@@ -462,5 +463,85 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
     const json = JSON.stringify(data, null, 2);
     console.log('TELEMETRY_EXPORT:', json.length, 'bytes', state.rounds.length, 'rounds');
     return json;
+  },
+
+  exportSessionCSV: () => {
+    get().calculateAggregates();
+    const state = get();
+    const meta = state.sessionMeta;
+    const profiles = state.playerProfiles;
+    const rounds = state.rounds;
+    const agg = state.sessionAggregates;
+    const esc = (s: string) => {
+      if (!s) return '';
+      const clean = s.replace(/\n/g, ' ').replace(/\r/g, '');
+      return clean.includes(',') || clean.includes('"') ? '"' + clean.replace(/"/g, '""') + '"' : clean;
+    };
+
+    const header = [
+      'session_id', 'session_number', 'challenge_set', 'is_pilot',
+      'round', 'zone_id', 'zone_name', 'difficulty',
+      'player_id', 'player_name', 'player_role', 'participant_category',
+      'task_index', 'task_type', 'task_title', 'task_description',
+      'proposer_role', 'role_count', 'combination_multiplier',
+      'chain_bonus', 'task_total', 'running_total',
+      'action_card_text', 'method_cards_text', 'who_card_text', 'outcome_card_text',
+      'local_insight_provided', 'local_insight_text', 'local_insight_word_count', 'local_insight_specific',
+      'cross_perspective_count', 'custom_cross_text',
+      'clue_connected', 'is_innovate',
+      'specificity_score', 'investigation_connection', 'stakeholder_awareness',
+      'layer_integration', 'action_completeness', 'total_word_count',
+      'phase2_clues_found', 'phase2_root_cause_found', 'phase2_coverage_percent',
+      'phase3_feature_count', 'phase3_collaborative_score', 'phase3_goal_result',
+      'phase5_q1_passed', 'phase5_q3_passed', 'phase5_overall_pass',
+      'phase5_transformation_percent', 'phase5_utility',
+      'collaborative_total', 'solo_sum', 'surplus',
+    ];
+
+    const rows: string[] = [header.join(',')];
+
+    for (const round of rounds) {
+      const tasks = round.phase4?.series?.[0]?.tasks || [];
+      const roundAgg = agg?.perRound?.find(r => r.roundNumber === round.roundNumber);
+
+      const makeRow = (task: any, profile: any) => {
+        const cs = task?.cardSelections || {};
+        const tm = task?.textMetrics || {};
+        const p5u = round.phase5?.utilityPerPlayer?.find((u: any) => u.role === (profile?.roleId || profile?.role));
+        return [
+          meta?.sessionId || '', String(meta?.sessionNumber || ''), meta?.challengeSetId || '', String(meta?.isPilot || false),
+          String(round.roundNumber), round.zoneId, round.zoneName, String(round.difficulty),
+          profile?.playerId || '', esc(profile?.name || ''), profile?.roleId || profile?.role || '', '',
+          String(task?.taskIndex || ''), task?.taskType || '', esc(task?.title || ''), esc(task?.description || ''),
+          task?.placedBy?.role || '', String(task?.roleCount || ''), String(task?.combinationMultiplier || ''),
+          String(task?.chainBonus || ''), String(task?.taskTotal || ''), String(task?.runningTotal || ''),
+          esc(cs.actionCardText || ''), esc((cs.methodCardTexts || []).join('; ')), esc(cs.whoCardText || ''), esc(cs.outcomeCardText || ''),
+          String(cs.localInsightProvided || false), esc(cs.localInsightText || ''), String(cs.localInsightWordCount || 0), String(cs.localInsightSpecific || false),
+          String(cs.crossPerspectiveCount || 0), esc(cs.customCrossText || ''),
+          String(cs.clueConnected || false), String(cs.isInnovate || false),
+          String(tm.specificityScore || 0), String(tm.investigationConnectionScore || 0), String(tm.stakeholderAwarenessScore || 0),
+          String(tm.layerIntegrationScore || 0), String(tm.actionCompletenessScore || 0), String(tm.totalWordCount || 0),
+          String(round.phase2?.coverageMap?.relevantFound || 0), String(round.phase2?.coverageMap?.rootCauseFound || false), String(round.phase2?.coverageMap?.coveragePercent || 0),
+          String(round.phase3?.confirmedFeatures?.length || 0), String(round.phase3?.collaborativeScore?.total || 0), round.phase3?.goalResult || '',
+          String(round.phase5?.q1_passed || false), String(round.phase5?.q3_passed || false), String(round.phase5?.overallPass || false),
+          String(round.phase5?.transformationPercent || 0), String(p5u?.utility || 0),
+          String(roundAgg?.collaborativeTotal || 0), String(roundAgg?.soloMax || 0), String(roundAgg?.surplus || 0),
+        ].join(',');
+      };
+
+      if (tasks.length > 0) {
+        for (const task of tasks) {
+          const profile = profiles.find(p => p.playerId === task.placedBy?.playerId) || profiles[0];
+          rows.push(makeRow(task, profile));
+        }
+      } else {
+        for (const profile of profiles) {
+          rows.push(makeRow(null, profile));
+        }
+      }
+    }
+
+    console.log('TELEMETRY_CSV_EXPORT:', rows.length - 1, 'data rows');
+    return rows.join('\n');
   },
 }));
