@@ -961,6 +961,17 @@ export default function TitleScreen() {
           />
         </div>
       )}
+
+      {/* DEV buttons */}
+      {import.meta.env.DEV && (
+        <div style={{ position: 'fixed', bottom: 8, right: 8, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+          <span style={{ fontSize: 9, color: '#666', fontFamily: 'monospace' }}>DEV</span>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlay()).catch(() => console.warn('autoPlay not ready')); }}
+            style={{ background: '#e9c349', color: '#16130c', border: 'none', padding: '3px 8px', borderRadius: 3, fontSize: 9, cursor: 'pointer', fontFamily: 'monospace' }}>
+            1 Test Session
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 }

@@ -33,6 +33,9 @@ import PaymentDay from '../components/PaymentDay';
 import { useTelemetryStore } from '../../core/telemetry/telemetryStore';
 import { getVisionTilesForZoneAndSet, toFeatureTile, generateLayeredVision, type FeatureTile } from '../../core/content/featureTiles';
 import { calculateThreshold } from '../../core/engine/visionBoardEngine';
+import { getChallengeSet } from '../../core/content/challengeSets';
+import { getChallengeCardForZone } from '../../core/content/challengeCardData';
+import { getZoneConfig } from '../../core/content/zoneScenes';
 
 // ── Role metadata ────────────────────────────────────────────────
 
@@ -792,9 +795,15 @@ export default function GameScreen() {
     // Only auto-activate event_roll — everything else is driven by the onPhaseComplete chain
     if (phase === 'event_roll') {
       console.log('PHASE AUTO-ACTIVATE: event_roll (initial activation)');
-      // Telemetry: init round when gameplay phase starts
+      // Telemetry: init round with correct zone from challenge set
+      const meta = useTelemetryStore.getState().sessionMeta;
+      const cSet = meta?.challengeSetId ? getChallengeSet(meta.challengeSetId) : undefined;
+      const roundDef = cSet?.rounds.find(r => r.roundNumber === session.currentRound);
+      const rZoneId = roundDef?.zoneId || 'z3';
+      const rZoneConfig = getZoneConfig(rZoneId);
+      const rCardInfo = getChallengeCardForZone(rZoneId);
       useTelemetryStore.getState().initRound(
-        session.currentRound, 'z3', 'Boating Pond', 3, 'ecological'
+        session.currentRound, rZoneId, rZoneConfig.title, rCardInfo?.difficulty ?? 3, rCardInfo?.challengeType ?? 'ecological'
       );
       setGamifiedPhase('event_roll');
     } else if (phase === 'round_end' || phase === 'game_end') {
@@ -827,9 +836,38 @@ export default function GameScreen() {
     : 2;
   const players = Object.values(session.players);
   const zones = Object.values(session.board.zones);
-  const activeChallenge = getActiveChallenge();
+  const rawChallenge = getActiveChallenge();
   const isActionPhase = currentPhase === 'individual_action' || currentPhase === 'action_resolution';
   const isDelibPhase = currentPhase === 'deliberation';
+
+  // ── Zone-aware challenge card: use challenge set to determine correct zone per round ──
+  const activeChallenge = useMemo(() => {
+    const meta = useTelemetryStore.getState().sessionMeta;
+    if (!meta?.challengeSetId || !session) return rawChallenge;
+    const challengeSet = getChallengeSet(meta.challengeSetId);
+    if (!challengeSet) return rawChallenge;
+    const roundDef = challengeSet.rounds.find(r => r.roundNumber === session.currentRound);
+    if (!roundDef) return rawChallenge;
+    const zoneId = roundDef.zoneId; // e.g. 'z5'
+    const zoneConfig = getZoneConfig(zoneId);
+    const engineZoneId = zoneConfig.engineZoneId; // e.g. 'walking_track'
+    const cardInfo = getChallengeCardForZone(zoneId);
+    // Build a ChallengeCard with the correct zone
+    const base = rawChallenge || {} as any;
+    return {
+      ...base,
+      id: cardInfo?.id || base.id || zoneId,
+      name: cardInfo?.title || base.name || zoneConfig.title,
+      description: cardInfo?.story || base.description || '',
+      affectedZoneIds: [engineZoneId],
+      difficulty: roundDef.difficultyOverride ?? cardInfo?.difficulty ?? base.difficulty ?? 3,
+      category: (cardInfo?.challengeType as any) || base.category || 'crisis',
+      publicFace: {
+        ...(base.publicFace || {}),
+        difficultyRating: roundDef.difficultyOverride ?? cardInfo?.difficulty ?? 3,
+      },
+    };
+  }, [rawChallenge, session?.currentRound]);
 
   // Build standee map for HexGrid
   const playerStandees = useMemo(() => {
