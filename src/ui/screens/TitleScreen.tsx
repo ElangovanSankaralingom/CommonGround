@@ -434,15 +434,6 @@ const MODE_SESSIONS = [
   { id: 'session5', label: 'Session 5', rounds: [{ zone: 'Compost Area', diff: 2 }, { zone: 'Water Tank', diff: 3 }, { zone: 'Walking Track', diff: 3 }] },
 ];
 
-const PILOT_ZONES = [
-  { id: 'z1', name: 'Main Entrance', diff: 4 }, { id: 'z2', name: 'Fountain Plaza', diff: 3 },
-  { id: 'z3', name: 'Boating Pond', diff: 3 }, { id: 'z4', name: 'Herbal Garden', diff: 2 },
-  { id: 'z5', name: 'Walking Track', diff: 2 }, { id: 'z6', name: 'Playground', diff: 3 },
-  { id: 'z7', name: 'Open Lawn', diff: 2 }, { id: 'z8', name: 'Nursery Area', diff: 3 },
-  { id: 'z9', name: 'Staff Quarters', diff: 2 }, { id: 'z10', name: 'Peripheral Walk', diff: 3 },
-  { id: 'z11', name: 'South Pond', diff: 3 }, { id: 'z12', name: 'Compost Area', diff: 2 },
-  { id: 'z13', name: 'PPP Zone', diff: 4 }, { id: 'z14', name: 'Water Tank', diff: 3 },
-];
 
 function dots(n: number) {
   return Array.from({ length: 5 }, (_, i) => i < n ? '\u25CF' : '\u25CB').join('');
@@ -451,9 +442,6 @@ function dots(n: number) {
 function GameModeSelector({ onBack, onStartGame }: { onBack: () => void; onStartGame: () => void }) {
   const [selectedSession, setSelSession] = useState<string | null>(null);
   const [playerNames, setNames] = useState(['', '', '', '', '']);
-  const [showPilot, setShowPilot] = useState(false);
-  const [pilotZone, setPilotZone] = useState<string | null>(null);
-  const [pilotNames, setPilotNames] = useState(['', '', '', '', '']);
   const [playerCategories, setPlayerCats] = useState(['Architecture Student (B.Arch)', 'Architecture Student (B.Arch)', 'Architecture Student (B.Arch)', 'Architecture Student (B.Arch)', 'Architecture Student (B.Arch)']);
 
   const PARTICIPANT_CATEGORIES = ['Architecture Student (B.Arch)', 'Architecture Student (M.Arch)', 'Planning Student (M.Plan)', 'Faculty', 'Actual Stakeholder', 'Community Member', 'Government Official', 'NGO Worker', 'Other'];
@@ -461,13 +449,9 @@ function GameModeSelector({ onBack, onStartGame }: { onBack: () => void; onStart
   const playCounts: Record<string, number> = (() => {
     try { return JSON.parse(localStorage.getItem('commonground_play_counts') || '{}'); } catch { return {}; }
   })();
-  const pilotCount = (() => {
-    try { return parseInt(localStorage.getItem('cg_pilot_count') || '0', 10); } catch { return 0; }
-  })();
   const totalFormal = MODE_SESSIONS.reduce((s, ses) => s + (playCounts[ses.id] || 0), 0);
 
   const canStartFormal = selectedSession && playerNames.every(n => n.trim() !== '');
-  const canStartPilot = pilotZone && pilotNames.every(n => n.trim() !== '');
 
   return (
     <div style={{ minHeight: '100vh', background: G.surface, color: G.onSurface, fontFamily: G.fontBody, overflowY: 'auto', padding: '20px' }}>
@@ -489,7 +473,7 @@ function GameModeSelector({ onBack, onStartGame }: { onBack: () => void; onStart
             const count = playCounts[ses.id] || 0;
             const isSel = selectedSession === ses.id;
             return (
-              <div key={ses.id} onClick={() => { setSelSession(ses.id); setShowPilot(false); }}
+              <div key={ses.id} onClick={() => { setSelSession(ses.id); }}
                 style={{
                   width: 175, padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
                   background: isSel ? `${G.primary}08` : G.container,
@@ -562,60 +546,6 @@ function GameModeSelector({ onBack, onStartGame }: { onBack: () => void; onStart
         )}
       </div>
 
-      {/* ═══ DIVIDER ═══ */}
-      <div style={{ maxWidth: 700, margin: '24px auto', borderTop: `1px solid ${G.outlineVariant}20` }} />
-
-      {/* ═══ SECTION 2: PILOT TEST ═══ */}
-      <div style={{ maxWidth: 700, margin: '0 auto' }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: G.tertiary, textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 4 }}>PILOT TEST</div>
-        <div style={{ fontSize: 11, color: G.onSurfaceVariant, marginBottom: 8 }}>Quick single-round test for calibration (max 3)</div>
-        <div style={{ fontSize: 11, color: G.tertiary, marginBottom: 12 }}>
-          Pilot tests: {pilotCount} / 3 completed {pilotCount >= 3 && <span style={{ color: G.primary }}>{'\u2713'} All pilots done</span>}
-        </div>
-
-        <button onClick={() => { setShowPilot(!showPilot); setSelSession(null); }}
-          style={{ padding: '9px 20px', borderRadius: 6, cursor: 'pointer', background: `${G.tertiary}15`, border: `1px solid ${G.tertiary}40`, color: G.tertiary, fontFamily: G.fontBody, fontSize: 12, marginBottom: 12 }}>
-          {showPilot ? 'Hide Pilot Setup' : 'Start Pilot Test'}
-        </button>
-
-        {showPilot && (
-          <div style={{ background: G.containerLow, borderRadius: 10, padding: '20px 24px', border: `1px solid ${G.tertiary}30` }}>
-            <div style={{ fontSize: 11, color: G.onSurfaceVariant, marginBottom: 8 }}>SELECT ZONE:</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 14 }}>
-              {PILOT_ZONES.map(z => (
-                <div key={z.id} onClick={() => setPilotZone(z.id)}
-                  style={{
-                    padding: '6px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 10,
-                    background: pilotZone === z.id ? `${G.tertiary}15` : G.container,
-                    border: pilotZone === z.id ? `1px solid ${G.tertiary}` : `1px solid ${G.outlineVariant}30`,
-                    color: pilotZone === z.id ? G.tertiary : G.onSurfaceVariant,
-                  }}>
-                  <div style={{ fontWeight: 600 }}>{z.name}</div>
-                  <div style={{ letterSpacing: 1, marginTop: 2 }}>
-                    {dots(z.diff).split('').map((c, ci) => <span key={ci} style={{ color: c === '\u25CF' ? G.tertiary : G.outlineVariant, fontSize: 7 }}>{c}</span>)}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {pilotNames.map((name, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{ fontFamily: G.fontNumber, fontSize: 13, color: G.onSurfaceVariant, width: 24 }}>P{i + 1}</span>
-                <input value={name} onChange={e => { const n = [...pilotNames]; n[i] = e.target.value; setPilotNames(n); }} placeholder="Player name"
-                  style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: `1px solid ${G.outlineVariant}`, background: G.container, color: G.onSurface, fontFamily: G.fontBody, fontSize: 13, outline: 'none' }} />
-              </div>
-            ))}
-            <button onClick={() => { console.log('PILOT_START:', pilotZone, pilotNames); onStartGame(); }} disabled={!canStartPilot}
-              style={{ marginTop: 8, width: '100%', padding: '11px 0', borderRadius: 8, border: 'none', cursor: canStartPilot ? 'pointer' : 'not-allowed', background: canStartPilot ? G.tertiary : G.outlineVariant, color: canStartPilot ? G.surface : G.onSurfaceVariant, fontFamily: G.fontHeadline, fontSize: 15, fontWeight: 600, opacity: canStartPilot ? 1 : 0.4 }}>
-              Start Pilot {'\u2192'}
-            </button>
-            {pilotCount >= 3 && (
-              <div style={{ marginTop: 8, fontSize: 10, color: G.onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }}>
-                Pilot target reached. Consider starting formal sessions.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

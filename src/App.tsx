@@ -37,7 +37,7 @@ function App() {
     setSessionConfig(config);
     incrementPlayCount(config.challengeSetId);
     // Telemetry: init session
-    useTelemetryStore.getState().initSession(config.sessionNumber, config.challengeSetId, config.isPilot || false, config.pilotZoneId);
+    useTelemetryStore.getState().initSession(config.sessionNumber, config.challengeSetId, false);
     console.log('SESSION_START:', 'Session', config.sessionNumber, 'Play #', config.playNumber, 'Set:', config.challengeSetId);
     setAppScreen('gameplay');
   }, []);
@@ -151,7 +151,7 @@ function App() {
               const meta = useTelemetryStore.getState().sessionMeta;
               const dateStr = new Date().toISOString().split('T')[0];
               const timeStr = new Date().toISOString().split('T')[1]?.split('.')[0]?.replace(/:/g, '') || '';
-              const prefix = meta?.isPilot ? 'CG_pilot' : `CG_session${meta?.sessionNumber || 0}`;
+              const prefix = `CG_session${meta?.sessionNumber || 0}`;
               a.href = url;
               a.download = `${prefix}_${dateStr}_${timeStr}.json`;
               document.body.appendChild(a);
@@ -188,7 +188,7 @@ function App() {
               try {
                 const key = 'commonground_play_counts';
                 const counts = JSON.parse(localStorage.getItem(key) || '{}');
-                const sid = sessionConfig.challengeSetId === 'pilot' ? 'pilot' : `session${sessionConfig.sessionNumber}`;
+                const sid = `session${sessionConfig.sessionNumber}`;
                 counts[sid] = (counts[sid] || 0) + 1;
                 localStorage.setItem(key, JSON.stringify(counts));
               } catch { /* ignore */ }
