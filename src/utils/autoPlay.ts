@@ -35,6 +35,15 @@ const ZONE_DIFFICULTIES: Record<string, number> = {
 };
 
 const ROLES = ['administrator', 'designer', 'citizen', 'advocate', 'investor'];
+const ROLE_NAMES = ['City Administrator', 'Urban Designer', 'Community Organizer', 'Environmental Advocate', 'Private Investor'];
+
+const TOKENS: Record<string, Record<string, number>> = {
+  administrator: { budget: 4, knowledge: 2, volunteer: 1, material: 2, influence: 3 },
+  designer: { budget: 1, knowledge: 4, volunteer: 2, material: 3, influence: 2 },
+  citizen: { budget: 1, knowledge: 2, volunteer: 4, material: 2, influence: 3 },
+  advocate: { budget: 2, knowledge: 2, volunteer: 2, material: 1, influence: 5 },
+  investor: { budget: 3, knowledge: 1, volunteer: 1, material: 4, influence: 3 },
+};
 
 const EFFECTIVENESS: Record<string, Record<string, number>> = {
   administrator: { budget: 0.70, knowledge: 0.40, volunteer: 0.20, material: 0.35, influence: 0.60 },
@@ -107,11 +116,25 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
     effectiveness: EFFECTIVENESS[ROLES[i]],
   }));
 
-  store.setPlayerProfiles(players.map(p => ({
+  store.setPlayerProfiles(players.map((p, i) => ({
     playerId: p.playerId,
     name: p.name,
     roleId: p.role,
     effectiveness: p.effectiveness,
+    roleName: ROLE_NAMES[i],
+    abilityScore: 50 + Math.floor(Math.random() * 35),
+    archetype: ['specialist', 'leader', 'mediator', 'specialist', 'mediator'][i],
+    tokenAllocation: TOKENS[p.role],
+    objectiveWeights: { environmentalHealth: 0.2, communityWellbeing: 0.2, economicViability: 0.2, institutionalStrength: 0.2, infrastructureQuality: 0.2 },
+    demographics: {
+      age: participantCategories[i] === 'architecture_student' ? 19 + Math.floor(Math.random() * 5) : 30 + Math.floor(Math.random() * 20),
+      gender: ['male', 'female'][Math.floor(Math.random() * 2)],
+      programme: participantCategories[i] === 'architecture_student' ? 'barch_' + (Math.floor(Math.random() * 5) + 1) : 'other',
+      participantCategory: participantCategories[i],
+      priorPlanningExperience: participantCategories[i] !== 'architecture_student',
+      priorCommunityEngagement: participantCategories[i] !== 'architecture_student',
+      isFirstTimePlayer: true,
+    },
   })));
   console.log('  Players:', players.map((p, i) => p.name + '(' + p.role + '/' + participantCategories[i].replace('architecture_', '').replace('actual_', '') + ')').join(', '));
   await wait(delay);
@@ -283,7 +306,8 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
       });
 
       const isChain = taskType === TASK_TYPES[ti];
-      const chainBonus = isChain ? CHAIN_BONUSES[ti] : 0;
+      // Random bots never get chain bonuses (even by accident)
+      const chainBonus = (isChain && botType !== 'random') ? CHAIN_BONUSES[ti] : 0;
       const multipliedTotal = Math.round(baseTotal * mult * 100) / 100;
       const taskTotal = Math.round((multipliedTotal + chainBonus) * 100) / 100;
       runningTotal = Math.round((runningTotal + taskTotal) * 100) / 100;
@@ -309,11 +333,12 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
         insightSpecific = false;
       }
 
-      // Specificity score — calculated from actual text content
-      const specificityScore = insightText ? calculateSpecificityScore(insightText) : (botType === 'random' ? Math.floor(Math.random() * 2) : 0);
-      const wordCount = insightText ? insightText.split(/\s+/).length : (botType === 'random' ? 5 + Math.floor(Math.random() * 8) : 0);
-      // Add action text word count
-      const totalWordCount = wordCount + actionText.split(/\s+/).length;
+      // Specificity score — calculated from ALL text content (title + description + insight)
+      const fullDescription = actionText + '. ' + METHOD_TEXTS[ti % METHOD_TEXTS.length] + '. ' + WHO_TEXTS[ti % WHO_TEXTS.length] + '. Outcome: ' + OUTCOME_TEXTS[ti];
+      const allTexts = [actionText, fullDescription, insightText].filter(Boolean).join(' ');
+      const specificityScore = calculateSpecificityScore(allTexts);
+      const wordCount = insightText ? insightText.split(/\s+/).length : 0;
+      const totalWordCount = wordCount + fullDescription.split(/\s+/).length;
 
       // Cross-perspective
       let crossCount: number;
@@ -341,7 +366,7 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
         runningTotal,
         chainPosition: String(ti + 1),
         title: actionText,
-        description: actionText + '. ' + METHOD_TEXTS[ti % METHOD_TEXTS.length] + '. ' + WHO_TEXTS[ti % WHO_TEXTS.length] + '. Outcome: ' + OUTCOME_TEXTS[ti],
+        description: fullDescription,
         crossPerspective: crossRoles.map((r, ci) => benefitTexts[ci % benefitTexts.length] + ' for ' + r).join('. '),
         layer: confirmedFeatures[ti % confirmedFeatures.length]?.layer || ['foundation', 'activation', 'sustainability'][ti % 3],
         cardSelections: {
@@ -378,6 +403,17 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
     const thresholdValue = 35 + difficulty * 5 + Math.floor(Math.random() * 10);
     const thresholdCrossed = runningTotal >= thresholdValue;
     const transformPct = thresholdCrossed ? Math.min(Math.round((runningTotal / thresholdValue) * 50), 100) : Math.round((runningTotal / thresholdValue) * 25);
+
+    // Update series-level thresholdCrossed and transformationPercent
+    const currentRounds = useTelemetryStore.getState().rounds;
+    const currentRound = currentRounds[currentRounds.length - 1];
+    if (currentRound?.phase4?.series[0]) {
+      currentRound.phase4.series[0].thresholdCrossed = thresholdCrossed;
+      currentRound.phase4.series[0].transformationPercent = transformPct;
+      currentRound.phase4.series[0].chainBonusTotal = currentRound.phase4.series[0].tasks.reduce(
+        (s, t) => s + (t.taskType === TASK_TYPES[t.taskIndex] ? CHAIN_BONUSES[t.taskIndex] : 0), 0
+      );
+    }
 
     store.finalizePhase4({
       totalTimeSeconds: 180 + Math.floor(Math.random() * 240),

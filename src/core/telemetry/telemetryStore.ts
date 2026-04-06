@@ -18,6 +18,12 @@ interface PlayerProfile {
   name: string;
   roleId: string;
   effectiveness: Record<string, number>;
+  roleName?: string;
+  abilityScore?: number;
+  archetype?: string;
+  tokenAllocation?: Record<string, number>;
+  objectiveWeights?: Record<string, number>;
+  demographics?: Record<string, any>;
 }
 
 interface Phase1Data {
@@ -372,8 +378,9 @@ export const useTelemetryStore = create<TelemetryState>((set, get) => ({
         r.phase4?.series[0]
       );
       const soloMax = playerProfiles.reduce((s, p) => {
-        const bestEff = Math.max(...Object.values(p.effectiveness));
-        return s + (bestEff / 100) * 5 * 2;
+        const bestEff = Math.max(...Object.values(p.effectiveness), 0);
+        // bestEff is 0.0-1.0, solo contribution = maxTokens(~4) × bestEff × pointsPerToken(5) × soloMultiplier(1.0)
+        return s + bestEff * 4 * 5;
       }, 0);
       return {
         roundNumber: r.roundNumber,
