@@ -964,12 +964,27 @@ export default function TitleScreen() {
 
       {/* DEV buttons */}
       {import.meta.env.DEV && (
-        <div style={{ position: 'fixed', bottom: 8, right: 8, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
-          <span style={{ fontSize: 9, color: '#666', fontFamily: 'monospace' }}>DEV</span>
-          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlay()).catch(() => console.warn('autoPlay not ready')); }}
-            style={{ background: '#e9c349', color: '#16130c', border: 'none', padding: '3px 8px', borderRadius: 3, fontSize: 9, cursor: 'pointer', fontFamily: 'monospace' }}>
-            1 Test Session
-          </button>
+        <div style={{ position: 'fixed', bottom: 8, right: 8, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-end' }}>
+          <span style={{ fontSize: 8, color: '#666', fontFamily: 'monospace' }}>DEV BOTS</span>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlay()); }}
+            style={{ background: '#5d8ac4', color: '#fff', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 9, cursor: 'pointer', fontFamily: 'monospace' }}>1 Realistic</button>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlayRandom()); }}
+            style={{ background: '#e04838', color: '#fff', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 9, cursor: 'pointer', fontFamily: 'monospace' }}>1 Random</button>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlayStrategic()); }}
+            style={{ background: '#8ba84a', color: '#16130c', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 9, cursor: 'pointer', fontFamily: 'monospace' }}>1 Optimal</button>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlayRealisticMixed()); }}
+            style={{ background: '#e9c349', color: '#16130c', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 9, cursor: 'pointer', fontFamily: 'monospace' }}>1 Mixed</button>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlayRealisticStakeholders()); }}
+            style={{ background: '#a088c4', color: '#fff', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 9, cursor: 'pointer', fontFamily: 'monospace' }}>1 Stakeholders</button>
+          <div style={{ height: 2, width: '100%', background: '#333', margin: '2px 0' }} />
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlayBatch(30, 'random', 100)); }}
+            style={{ background: '#e04838', color: '#fff', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 8, cursor: 'pointer', fontFamily: 'monospace', opacity: 0.8 }}>30 Random</button>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlayBatch(30, 'realistic', 200, 'all_students')); }}
+            style={{ background: '#5d8ac4', color: '#fff', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 8, cursor: 'pointer', fontFamily: 'monospace', opacity: 0.8 }}>30 Realistic (Students)</button>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlayBatch(30, 'realistic', 300, 'mixed')); }}
+            style={{ background: '#e9c349', color: '#16130c', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 8, cursor: 'pointer', fontFamily: 'monospace', opacity: 0.8 }}>30 Mixed</button>
+          <button onClick={() => { import('../../utils/autoPlay').then(m => m.autoPlayBatch(30, 'strategic', 400)); }}
+            style={{ background: '#8ba84a', color: '#16130c', border: 'none', padding: '2px 8px', borderRadius: 3, fontSize: 8, cursor: 'pointer', fontFamily: 'monospace', opacity: 0.8 }}>30 Optimal</button>
         </div>
       )}
     </motion.div>
