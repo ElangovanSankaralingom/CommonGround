@@ -1,9 +1,17 @@
 /**
  * autoPlay.ts — Automated play simulation system.
  * Fills the telemetry store directly with simulated data, then exports JSON.
+ * Uses REAL zone-specific content from the game's content files.
  * Does NOT interact with the game UI.
  */
 import { useTelemetryStore } from '../core/telemetry/telemetryStore';
+import { getChallengeCardForZone } from '../core/content/challengeCardData';
+import { getZoneInvestigationData } from '../core/content/investigationSceneData';
+import { getVisionTilesForZone } from '../core/content/featureTiles';
+import {
+  ZONE_STAKEHOLDER_INSIGHTS, ZONE_STUDENT_INSIGHTS,
+  ZONE_TASK_ACTIONS, calculateSpecificityScore,
+} from './autoPlayData';
 
 // ─── Game Data Constants ───────────────────────────────────────
 
@@ -27,7 +35,6 @@ const ZONE_DIFFICULTIES: Record<string, number> = {
 };
 
 const ROLES = ['administrator', 'designer', 'citizen', 'advocate', 'investor'];
-const ROLE_NAMES = ['City Administrator', 'Urban Designer', 'Community Organizer', 'Environmental Advocate', 'Private Investor'];
 
 const EFFECTIVENESS: Record<string, Record<string, number>> = {
   administrator: { budget: 0.70, knowledge: 0.40, volunteer: 0.20, material: 0.35, influence: 0.60 },
@@ -41,33 +48,9 @@ const MULTIPLIER_TABLE: Record<number, number> = { 1: 1.0, 2: 1.3, 3: 1.6, 4: 2.
 const CHAIN_BONUSES = [0, 3, 7, 12, 18];
 const TASK_TYPES = ['assess', 'plan', 'design', 'build', 'maintain'];
 
-const STUDENT_INSIGHTS = [
-  'The community would benefit from better facilities in this area',
-  'More seating and shade would help visitors',
-  'Regular maintenance should be scheduled monthly',
-  'Local residents have complained about this issue',
-  'The area needs better lighting for evening visitors',
-];
-
-const STAKEHOLDER_INSIGHTS = [
-  'Mrs. Padma at house 42 has maintained this area alone for 3 years — she can train 10 volunteers from her self-help group',
-  'The tea stall owner Murugan near the south gate has the PWD manhole key since 2019 — just ask him',
-  'Soil here is black cotton clay — standard RCC foundations will crack in first monsoon, needs 600mm gravel pad minimum',
-  'TNPCB assistant director Mr. Raman uses the walking track every Saturday morning at 6am — approach him informally before filing RTI',
-  'Evening idli vendor Lakshmi would pay Rs 100/month rent for a proper stall — 6 vendors = Rs 7200/year recurring maintenance fund',
-  'Ward 42 councillor office has a Rs 2.5 lakh discretionary fund — submit before March 15 or it lapses',
-  'The PWD junior engineer Mr. Selvam approves pipe repairs under Rs 50000 without tendering — direct approach works',
-  'Three retired PWD engineers live on 4th Street — they volunteer for quality inspection if asked through the temple committee',
-  'Boating pond depth is only 2.1m at center after silting — original design was 3.5m — dredging costs Rs 4.2 lakh per 1000 sqm',
-  'The Corporation nursery behind Zone 8 has 3000 native saplings ready — they are FREE for park projects if you submit Form 17B',
-];
-
-const ACTION_TEXTS = ['Survey and document current conditions', 'Create implementation timeline and budget allocation', 'Design technical specifications and layout drawings', 'Execute construction and installation works', 'Establish ongoing monitoring and maintenance system'];
 const METHOD_TEXTS = ['Systematic inspection with photographic documentation', 'Reference investigation findings and PWD records', 'Community volunteer ground verification drive', 'Joint committee walkthrough assessment', 'GIS mapping and condition survey'];
 const WHO_TEXTS = ['PWD junior engineer + ward sanitary inspector', 'Community volunteers + SHG coordinators', 'Corporation parks superintendent', 'TSEDA student interns + faculty advisor', 'Local NGO field workers + residents association'];
 const OUTCOME_TEXTS = ['Detailed condition report with measurements and GPS coordinates', 'Approved implementation plan with confirmed budget line', 'Technical design validated by structural consultant', 'Physical construction completed to CPWD standards', 'Monitoring dashboard operational with monthly reporting'];
-
-const FEATURE_POOL = ['Drainage System Repair', 'Community Seating Area', 'Native Plant Restoration', 'Solar Path Lighting', 'Waste Collection System', 'Community Governance Committee', 'Walking Path Restoration', 'Rainwater Harvesting', 'Public Art Installations'];
 
 // ─── Participant Categories ────────────────────────────────────
 
@@ -117,7 +100,6 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
   await wait(delay);
 
   // ========== 2. PLAYER PROFILES ==========
-  // PlayerProfile: { playerId, name, roleId, effectiveness }
   const players: SimPlayer[] = config.playerNames.map((name, i) => ({
     playerId: botType + '_' + config.participantMix + '_p' + i + '_s' + config.sessionNumber,
     name,
@@ -140,34 +122,54 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
     const zoneName = ZONE_NAMES[zoneId] || 'Unknown';
     const difficulty = ZONE_DIFFICULTIES[zoneId] || 3;
 
-    console.log('  Round', roundNum, ':', zoneName, '(difficulty', difficulty + ')');
+    // Load REAL zone content
+    const challengeCard = getChallengeCardForZone(zoneId);
+    const zoneInvestigation = getZoneInvestigationData(zoneId);
+    const zoneFeatures = getVisionTilesForZone(zoneId);
+    const zoneTaskActions = ZONE_TASK_ACTIONS[zoneId] || {};
+    const zoneStakeholderInsights = ZONE_STAKEHOLDER_INSIGHTS[zoneId] || [];
+    const zoneStudentInsights = ZONE_STUDENT_INSIGHTS[zoneId] || [];
 
-    store.initRound(roundNum, zoneId, zoneName, difficulty, 'mixed');
+    console.log('  Round', roundNum, ':', zoneName, '(difficulty', difficulty + ')',
+      '| clues:', zoneInvestigation?.objects.length || 0,
+      '| features:', zoneFeatures.length,
+      '| challenge:', challengeCard?.title || 'N/A');
+
+    store.initRound(roundNum, zoneId, zoneName, difficulty, challengeCard?.challengeType || 'mixed');
     await wait(delay);
 
-    // --- Phase 1 ---
+    // --- Phase 1: REAL challenge card data ---
     store.recordPhase1({
-      challengeCardId: zoneId + '_challenge',
-      challengeTitle: zoneName + ' Restoration Challenge',
+      challengeCardId: challengeCard?.id || zoneId + '_challenge',
+      challengeTitle: challengeCard?.title || zoneName + ' Challenge',
       readDurationSeconds: 3 + Math.floor(Math.random() * 12),
     });
     await wait(delay);
 
-    // --- Phase 2 ---
-    const objects = [
-      { id: zoneId + '_c1', name: 'Technical Report', isRelevant: true, isRootCause: true, category: 'infrastructure' },
-      { id: zoneId + '_c2', name: 'Community Survey', isRelevant: true, isRootCause: false, category: 'community' },
-      { id: zoneId + '_c3', name: 'Budget Document', isRelevant: true, isRootCause: false, category: 'institutional' },
-      { id: zoneId + '_c4', name: 'Environmental Data', isRelevant: true, isRootCause: false, category: 'ecological' },
-      { id: zoneId + '_c5', name: 'Maintenance Log', isRelevant: true, isRootCause: false, category: 'infrastructure' },
-      { id: zoneId + '_t1', name: 'Old Photograph', isRelevant: false, isRootCause: false, category: 'historical' },
-      { id: zoneId + '_t2', name: 'Decorative Item', isRelevant: false, isRootCause: false, category: 'decorative' },
-      { id: zoneId + '_t3', name: 'Outdated Brochure', isRelevant: false, isRootCause: false, category: 'promotional' },
-    ];
+    // --- Phase 2: REAL investigation objects ---
+    const invObjects = zoneInvestigation?.objects || [];
+    const objects = invObjects.length > 0
+      ? invObjects.map(obj => ({
+          id: obj.id,
+          name: obj.name,
+          isRelevant: obj.isRelevant,
+          isRootCause: obj.isRootCause,
+          category: obj.category,
+        }))
+      : [
+          { id: zoneId + '_c1', name: 'Technical Report', isRelevant: true, isRootCause: true, category: 'infrastructure' },
+          { id: zoneId + '_c2', name: 'Community Survey', isRelevant: true, isRootCause: false, category: 'community' },
+          { id: zoneId + '_c3', name: 'Budget Document', isRelevant: true, isRootCause: false, category: 'institutional' },
+          { id: zoneId + '_c4', name: 'Environmental Data', isRelevant: true, isRootCause: false, category: 'ecological' },
+          { id: zoneId + '_c5', name: 'Maintenance Log', isRelevant: true, isRootCause: false, category: 'infrastructure' },
+          { id: zoneId + '_t1', name: 'Old Photograph', isRelevant: false, isRootCause: false, category: 'historical' },
+          { id: zoneId + '_t2', name: 'Decorative Item', isRelevant: false, isRootCause: false, category: 'decorative' },
+          { id: zoneId + '_t3', name: 'Outdated Brochure', isRelevant: false, isRootCause: false, category: 'promotional' },
+        ];
 
-    const clickCount = botType === 'random' ? 3 + Math.floor(Math.random() * 4) : botType === 'strategic' ? 8 : 5 + Math.floor(Math.random() * 2);
+    const clickCount = botType === 'random' ? 3 + Math.floor(Math.random() * 4) : botType === 'strategic' ? objects.length : 5 + Math.floor(Math.random() * 2);
     const shuffled = [...objects].sort(() => Math.random() - 0.5);
-    const clicked = shuffled.slice(0, Math.min(clickCount, 8));
+    const clicked = shuffled.slice(0, Math.min(clickCount, objects.length));
 
     for (const obj of clicked) {
       store.recordPhase2Click({
@@ -179,33 +181,38 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
 
     const relevant = clicked.filter(o => o.isRelevant);
     const traps = clicked.filter(o => !o.isRelevant);
+    const totalRelevant = objects.filter(o => o.isRelevant).length;
 
     store.finalizePhase2({
       totalTimeSeconds: 25 + Math.floor(Math.random() * 45),
       coverageMap: {
-        totalObjects: 8, objectsClicked: clicked.length, relevantFound: relevant.length,
+        totalObjects: objects.length, objectsClicked: clicked.length, relevantFound: relevant.length,
         trapsClicked: traps.length, rootCauseFound: relevant.some(o => o.isRootCause),
-        coveragePercent: Math.round((relevant.length / 5) * 100),
+        coveragePercent: totalRelevant > 0 ? Math.round((relevant.length / totalRelevant) * 100) : 0,
       },
       discoveredClueIds: relevant.map(o => o.id),
     });
     await wait(delay);
 
-    // --- Phase 3: Individual Picks ---
+    // --- Phase 3: REAL zone-compatible features ---
+    const featurePool = zoneFeatures.length > 0
+      ? zoneFeatures.map(f => ({ id: f.id, name: f.name, layer: f.layer, resourceCost: f.resourceCost }))
+      : [{ id: 'generic_f1', name: 'Community Improvement', layer: 'activation' as const, resourceCost: { budget: 2, knowledge: 2, volunteer: 2, material: 2, influence: 1 } }];
+
     for (const player of players) {
-      const picks = [...FEATURE_POOL].sort(() => Math.random() - 0.5).slice(0, 3);
-      // recordPhase3IndividualPick takes Phase3IndividualPick object
+      const shuffledFeatures = [...featurePool].sort(() => Math.random() - 0.5);
+      const picks = shuffledFeatures.slice(0, Math.min(3, shuffledFeatures.length));
       store.recordPhase3IndividualPick({
         playerId: player.playerId,
         role: player.role,
-        pickedFeatureIds: picks.map((_, i) => zoneId + '_f' + i),
-        pickedFeatureNames: picks,
+        pickedFeatureIds: picks.map(f => f.id),
+        pickedFeatureNames: picks.map(f => f.name),
       });
     }
 
-    const confirmedCount = botType === 'random' ? 2 : botType === 'strategic' ? 4 : 3 + Math.floor(Math.random() * 2);
-    const confirmedNames = FEATURE_POOL.slice(0, confirmedCount);
-    const confirmedIds = confirmedNames.map((_, i) => zoneId + '_f' + i);
+    const confirmedCount = botType === 'random' ? 2 : botType === 'strategic' ? Math.min(4, featurePool.length) : Math.min(3 + Math.floor(Math.random() * 2), featurePool.length);
+    const confirmedFeatures = [...featurePool].sort(() => Math.random() - 0.5).slice(0, confirmedCount);
+    const confirmedIds = confirmedFeatures.map(f => f.id);
 
     const collabScore = botType === 'random' ? 20 + Math.floor(Math.random() * 20) : botType === 'strategic' ? 80 + Math.floor(Math.random() * 15) : 50 + Math.floor(Math.random() * 30);
 
@@ -224,7 +231,7 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
     });
     await wait(delay);
 
-    // --- Phase 4: Series Building ---
+    // --- Phase 4: Series Building with REAL zone content ---
     let runningTotal = 0;
 
     for (let ti = 0; ti < 5; ti++) {
@@ -242,7 +249,10 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
         taskType = Math.random() < chainProb ? TASK_TYPES[ti] : TASK_TYPES[Math.floor(Math.random() * 5)];
       }
 
-      // Collaboration — who joins
+      // Zone-specific action text
+      const actionText = (zoneTaskActions as Record<string, string>)[taskType] || TASK_TYPES[ti] + ' for ' + zoneName;
+
+      // Collaboration
       let joinerCount: number;
       if (botType === 'random') {
         joinerCount = Math.random() > 0.5 ? 1 : 0;
@@ -261,7 +271,7 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
       const roleCount = allContrib.length;
       const mult = MULTIPLIER_TABLE[roleCount] || 1.0;
 
-      // Resource allocation — contributions use { tokens: number } not array
+      // Resource allocation
       let baseTotal = 0;
       const contributions = allContrib.map(p => {
         const eff = Object.entries(p.effectiveness);
@@ -278,7 +288,7 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
       const taskTotal = Math.round((multipliedTotal + chainBonus) * 100) / 100;
       runningTotal = Math.round((runningTotal + taskTotal) * 100) / 100;
 
-      // Local insight
+      // Local insight — zone-specific
       let insightProvided: boolean;
       let insightText: string | null;
       let insightSpecific: boolean;
@@ -286,18 +296,24 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
         insightProvided = false; insightText = null; insightSpecific = false;
       } else if (botType === 'strategic') {
         insightProvided = true;
-        insightText = STAKEHOLDER_INSIGHTS[ti % STAKEHOLDER_INSIGHTS.length];
+        insightText = zoneStakeholderInsights[ti % zoneStakeholderInsights.length] || 'Zone-specific stakeholder insight';
         insightSpecific = true;
       } else if (isProposerStakeholder) {
         insightProvided = true;
-        insightText = STAKEHOLDER_INSIGHTS[(ti + roundNum) % STAKEHOLDER_INSIGHTS.length];
+        insightText = zoneStakeholderInsights[(ti + roundNum) % zoneStakeholderInsights.length] || 'Stakeholder insight';
         insightSpecific = true;
       } else {
         const insightProb = 0.3 + (roundNum - 1) * 0.15;
         insightProvided = Math.random() < insightProb;
-        insightText = insightProvided ? STUDENT_INSIGHTS[ti % STUDENT_INSIGHTS.length] : null;
+        insightText = insightProvided ? (zoneStudentInsights[ti % zoneStudentInsights.length] || 'Student insight') : null;
         insightSpecific = false;
       }
+
+      // Specificity score — calculated from actual text content
+      const specificityScore = insightText ? calculateSpecificityScore(insightText) : (botType === 'random' ? Math.floor(Math.random() * 2) : 0);
+      const wordCount = insightText ? insightText.split(/\s+/).length : (botType === 'random' ? 5 + Math.floor(Math.random() * 8) : 0);
+      // Add action text word count
+      const totalWordCount = wordCount + actionText.split(/\s+/).length;
 
       // Cross-perspective
       let crossCount: number;
@@ -308,26 +324,10 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
         if (isProposerStakeholder) crossCount = Math.min(crossCount + 1, 4);
       }
 
-      // Text metrics
-      let specificityScore: number, wordCount: number;
-      if (botType === 'random') {
-        specificityScore = Math.floor(Math.random() * 2);
-        wordCount = 5 + Math.floor(Math.random() * 8);
-      } else if (botType === 'strategic') {
-        specificityScore = 7 + Math.floor(Math.random() * 3);
-        wordCount = 35 + Math.floor(Math.random() * 20);
-      } else if (isProposerStakeholder) {
-        specificityScore = 5 + Math.floor(Math.random() * 3) + Math.floor((roundNum - 1) * 0.5);
-        wordCount = 25 + Math.floor(Math.random() * 15) + (roundNum - 1) * 3;
-      } else {
-        specificityScore = 2 + Math.floor(Math.random() * 3) + (roundNum - 1);
-        wordCount = 12 + Math.floor(Math.random() * 12) + (roundNum - 1) * 5;
-      }
-
       const crossRoles = allContrib.filter(p => p.playerId !== proposer.playerId).map(p => p.role).slice(0, crossCount);
       const benefitTexts = ['Provides budget justification', 'Delivers technical baseline', 'Addresses community priority', 'Provides compliance evidence', 'Validates revenue potential'];
+      const featureRef = confirmedFeatures[0]?.name || null;
 
-      // recordPhase4Task takes (seriesIdx, task)
       store.recordPhase4Task(0, {
         taskId: botType + '_' + config.participantMix + '_r' + roundNum + '_t' + ti + '_s' + config.sessionNumber,
         taskIndex: ti,
@@ -340,15 +340,15 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
         taskTotal,
         runningTotal,
         chainPosition: String(ti + 1),
-        title: ACTION_TEXTS[ti],
-        description: ACTION_TEXTS[ti] + '. ' + METHOD_TEXTS[ti % METHOD_TEXTS.length] + '. ' + WHO_TEXTS[ti % WHO_TEXTS.length] + '. Outcome: ' + OUTCOME_TEXTS[ti],
+        title: actionText,
+        description: actionText + '. ' + METHOD_TEXTS[ti % METHOD_TEXTS.length] + '. ' + WHO_TEXTS[ti % WHO_TEXTS.length] + '. Outcome: ' + OUTCOME_TEXTS[ti],
         crossPerspective: crossRoles.map((r, ci) => benefitTexts[ci % benefitTexts.length] + ' for ' + r).join('. '),
-        layer: ['foundation', 'activation', 'sustainability', 'foundation', 'sustainability'][ti],
+        layer: confirmedFeatures[ti % confirmedFeatures.length]?.layer || ['foundation', 'activation', 'sustainability'][ti % 3],
         cardSelections: {
-          actionCardId: 'a' + ti, actionCardText: ACTION_TEXTS[ti], actionFeatureRef: confirmedNames[0] || null,
+          actionCardId: 'a' + ti, actionCardText: actionText, actionFeatureRef: featureRef,
           methodCardIds: ['m' + ti], methodCardTexts: [METHOD_TEXTS[ti % METHOD_TEXTS.length]],
           clueConnected: botType === 'random' ? false : botType === 'strategic' ? true : Math.random() > 0.4,
-          clueRef: relevant.length > 0 ? relevant[0].id : null,
+          clueRef: relevant.length > 0 ? relevant[ti % relevant.length]?.id || null : null,
           whoCardId: 'w' + ti, whoCardText: WHO_TEXTS[ti % WHO_TEXTS.length],
           outcomeCardId: 'o' + ti, outcomeCardText: OUTCOME_TEXTS[ti],
           localInsightProvided: insightProvided, localInsightText: insightText,
@@ -365,7 +365,7 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
           stakeholderAwarenessScore: crossCount,
           layerIntegrationScore: botType === 'random' ? Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 2),
           actionCompletenessScore: botType === 'random' ? 1 + Math.floor(Math.random() * 2) : 3 + Math.floor(Math.random() * 2),
-          totalWordCount: wordCount,
+          totalWordCount,
         },
         taskStartTime: new Date(Date.now() - 60000).toISOString(),
         taskEndTime: new Date().toISOString(),
@@ -396,7 +396,6 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
     const q3Rate = botType === 'random' ? 0.25 : botType === 'strategic' ? 0.95 : 0.7;
     const q1 = Math.random() < q1Rate, q2 = Math.random() < q2Rate, q3 = Math.random() < q3Rate;
 
-    // Phase5Data: { q1_passed, q2_passed, q3_passed, sharedVisionScore, utilityPerPlayer, transformationPercent, overallPass }
     store.recordPhase5({
       q1_passed: q1,
       q2_passed: q2,
@@ -418,7 +417,6 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
   }
 
   // ========== 4. DEBRIEF ==========
-  // recordDebrief takes a single DebriefResponse per call
   const likertBase = botType === 'random' ? 2 : botType === 'strategic' ? 6 : 4;
   for (const player of players) {
     store.recordDebrief({
@@ -457,7 +455,8 @@ async function simulateSession(config: SimConfig, botType: BotType): Promise<voi
     const tasks = r.phase4?.series?.[0]?.tasks || [];
     const insights = tasks.filter((t: any) => t.cardSelections?.localInsightProvided).length;
     const specificInsights = tasks.filter((t: any) => t.cardSelections?.localInsightSpecific).length;
-    console.log('  R' + (i + 1) + ': tasks:', tasks.length, '| insights:', insights + '/5', '| specific:', specificInsights + '/5', '| P5:', r.phase5?.overallPass ? 'PASS' : 'FAIL');
+    const avgSpec = tasks.length ? Math.round(tasks.reduce((s: number, t: any) => s + (t.textMetrics?.specificityScore || 0), 0) / tasks.length * 10) / 10 : 0;
+    console.log('  R' + (i + 1) + ':', r.zoneId, r.zoneName, '| tasks:', tasks.length, '| insights:', insights + '/5', '| specific:', specificInsights + '/5', '| avgSpec:', avgSpec, '| P5:', r.phase5?.overallPass ? 'PASS' : 'FAIL');
   });
 }
 
